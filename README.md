@@ -8,12 +8,14 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 [Android 版](#android-版)。App 本身**不托管任何内容**，所有数据都由你的设备直接向各个公开站点请求。
 
 **下载**：到 [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) 获取 iOS 未签名 IPA 和 Android APK
-（[Android 1.5.8](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.8-android)、
-[iOS 1.5 build 8](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b8)）。
+（[Android 1.5.8 红果修复版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.8-hgfix-android)、
+[iOS 1.5 build 8 红果修复版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b8-hgfix)）。
+
+红果修复版直接发布已验证的构建产物，包内版本号不变。Android 请手动下载 APK 覆盖安装（与原 1.5.8 签名一致，版本号相同不会自动提示更新）；iOS IPA 需自行重签侧载。
 
 ### 2026-11-16 更新
 
-- 红果取流与筛选源码同步至 gateway `0613b49`：当前 Medusa 播放签名、同身份端点回退与有界换设备；筛选请求独立使用 551，按真人剧 / 漫剧 / AI 剧加载对应面板。此项为 1.5.8 / 1.5b8 发布后的源码更新，旧安装包不包含该修复。
+- 红果取流与筛选同步至 gateway `0613b49`：当前 Medusa 播放签名、同身份端点回退与有界换设备；筛选请求独立使用 551，按真人剧 / 漫剧 / AI 剧加载对应面板。已包含在上方带 `hgfix` 的红果修复版中；原始 1.5.8 / 1.5b8 下载不包含修复。
 
 - 修复 Actions：Android 使用 Maven Central 镜像、Gradle 缓存和有界重试；iOS 保留完整编译日志并作为 artifact 上传。
 - 苹果 CMS：首页按分类独立分页、刷新完整分类列表、显示上游错误与空分类提示。部分接口的“电影”等父分类本身无资源，请选择“动作片”等子分类。
@@ -136,7 +138,7 @@ Android 固定签名使用仓库 Secrets `ANDROID_KEYSTORE_BASE64`、`ANDROID_KE
 
 离线测试：`cd android && ./gradlew :core:test`。联网测试需显式 `-Plive=1`；离线通过不代表所有上游站点始终可用。
 
-**红果取流（当前源码）**：两端使用独立匿名注册身份和当前播放器 Medusa 签名，健康身份会复用；单集空包时先用同一身份尝试两个批量端点，全部空包才更换身份，最多 3 次并带冷却。筛选接口独立使用 551 签名。仓库不附带设备 ID 或 SDK token；也可以在“我的”填入自己的设备覆盖。已发布的 1.5.8 / 1.5b8 尚未包含这次签名修复。
+**红果取流**：两端使用独立匿名注册身份和当前播放器 Medusa 签名，健康身份会复用；单集空包时先用同一身份尝试两个批量端点，全部空包才更换身份，最多 3 次并带冷却。筛选接口独立使用 551 签名。仓库不附带设备 ID 或 SDK token；也可以在“我的”填入自己的设备覆盖。请下载带 `hgfix` 的修复版。
 
 ## Telegram（TDLib）登录
 
