@@ -128,6 +128,8 @@ Releases 中的 APK 使用固定分发签名（未上架任何商店），首次
 
 在 GitHub **Actions → package → Run workflow** 运行双端构建。Android 先运行 `:core:test`，再生成 APK；iOS 默认生成未签名 IPA。勾选 `verify_simulator` 会额外生成本机架构的模拟器 app zip，并运行小说、CMS、CENC 定向测试（TDLib 编译较慢）。构建失败时查看 `ios-build-logs` 和 `android-test-reports` artifacts。
 
+iOS 发布可运行 **Actions → publish iOS**，传入成功的 `main` 分支 package run ID 和新标签（如 `v1.5b8`）。发布任务检查来源、IPA 完整性、包名、平台和版本后上传，并生成 `SHA256SUMS.txt`；不会覆盖已有 Release。
+
 Android 固定签名使用仓库 Secrets `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`，别名 `iduanju`；私钥不在仓库中。维护者应保留离线备份，避免更换签名导致覆盖安装失效。
 
 离线测试：`cd android && ./gradlew :core:test`。联网测试需显式 `-Plive=1`；离线通过不代表所有上游站点始终可用。
