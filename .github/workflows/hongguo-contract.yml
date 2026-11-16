@@ -1,6 +1,8 @@
 name: hongguo contracts
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/hongguo-current-player]
 permissions:
   contents: read
 jobs:
