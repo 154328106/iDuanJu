@@ -342,7 +342,8 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (Stri
             }
         }
         if (tab == HomeTab.ActorRank) {
-            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { Text("剧星榜 Android 版待移植", color = c.secondary) }
+            val go = app.iduanju.ui.LocalNavigate.current
+            Box(Modifier.fillMaxWidth().padding(40.dp).clickable { go("actorRank") }, contentAlignment = Alignment.Center) { Text("查看剧星榜 →", color = c.accent) }
             return@Column
         }
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {

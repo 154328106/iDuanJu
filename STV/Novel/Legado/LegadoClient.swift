@@ -47,6 +47,49 @@ enum LegadoContent {
 
 /// Book-source operations (synchronous; call from a worker via the async wrappers).
 enum LegadoClient {
+    struct ExploreCategory: Hashable, Identifiable {
+        var title: String
+        var url: String
+        var id: String { url }
+    }
+
+    static func exploreCategories(_ s: LegadoSource) throws -> [ExploreCategory] {
+        guard var raw = s.exploreUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
+        if raw.hasPrefix("@js:") || raw.hasPrefix("<js>") {
+            let code = raw.hasPrefix("@js:") ? String(raw.dropFirst(4)) : raw.replacingOccurrences(of: "<js>", with: "").replacingOccurrences(of: "</js>", with: "")
+            let value = try LegadoContext(source: s).evalJS(code, result: nil, baseURL: s.bookSourceUrl)
+            if let array = value as? [[String: Any]] {
+                raw = String(decoding: try JSONSerialization.data(withJSONObject: array), as: UTF8.self)
+            } else { raw = LegadoAnalyzer.textOf(value) }
+        }
+        var entries: [ExploreCategory] = []
+        if let data = raw.data(using: .utf8), let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            entries = array.compactMap { item in
+                guard let url = item["url"] as? String, !url.isEmpty else { return nil }
+                return ExploreCategory(title: (item["title"] as? String) ?? "推荐", url: url)
+            }
+        } else {
+            entries = raw.components(separatedBy: "&&").flatMap { $0.components(separatedBy: "\n") }.compactMap { item in
+                let text = item.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                if let range = text.range(of: "::") {
+                    let url = String(text[range.upperBound...])
+                    return url.isEmpty ? nil : ExploreCategory(title: String(text[..<range.lowerBound]), url: url)
+                }
+                return ExploreCategory(title: "推荐", url: text)
+            }
+        }
+        var seen = Set<String>()
+        return entries.filter { seen.insert($0.url).inserted }
+    }
+
+    static func explore(_ s: LegadoSource, category: ExploreCategory, page: Int = 1) throws -> [LegadoSearchItem] {
+        var source = s
+        source.searchUrl = category.url
+        source.ruleSearch = s.ruleExplore ?? s.ruleSearch
+        return try search(source, key: "", page: page)
+    }
+
     static func search(_ s: LegadoSource, key: String, page: Int = 1) throws -> [LegadoSearchItem] {
         let ctx = LegadoContext(source: s)
         ctx.key = key

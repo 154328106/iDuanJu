@@ -68,7 +68,11 @@ object EpisodeCache {
         }
         if (enc.isEmpty()) throw Exception("媒体空包")
         val dec = CENCDecryptor.decryptCopy(enc, s.key)
-        val tmp = File(dir(), f.name + ".part"); tmp.writeBytes(dec); tmp.renameTo(f)
+        val tmp = File.createTempFile(f.name, ".part", dir())
+        try {
+            tmp.writeBytes(dec)
+            if (!tmp.renameTo(f)) throw java.io.IOException("无法保存播放缓存")
+        } finally { tmp.delete() }
         trim()
         return Playable(f.absolutePath, s.quality, s.codec, true)
     }
@@ -77,6 +81,7 @@ object EpisodeCache {
     private fun trim() {
         val files = dir().listFiles()?.sortedBy { it.lastModified() } ?: return
         var total = files.sumOf { it.length() }
-        for (f in files) { if (total < 600L shl 20) break; total -= f.length(); f.delete() }
+        val budget = IdjApp.instance.settings.playbackCacheMB.toLong() shl 20
+        for (f in files) { if (total < budget) break; total -= f.length(); f.delete() }
     }
 }

@@ -92,7 +92,9 @@ object MacCMS {
                 String(bytes, Charsets.UTF_8)
             }
         }
-        return try { JSONObject(body) } catch (_: Exception) { throw ProviderException.upstream("采集站没有返回 JSON（可能只支持 XML 或需要 ?ac=detail）") }
+        val result = try { JSONObject(body) } catch (_: Exception) { throw ProviderException.upstream("采集站没有返回 JSON（可能只支持 XML 或需要 ?ac=detail）") }
+        if (result.has("code") && s(result.opt("code")) != "1") throw ProviderException.upstream("采集站：" + result.optString("msg", "请求失败"))
+        return result
     }
 
     fun parseCategories(o: JSONObject): List<CMSCategory> {

@@ -3,6 +3,18 @@ import XCTest
 
 /// 「阅读」书源引擎: rule syntaxes, URL rules, and the search → 详情 → 目录 → 正文 flow against fake sites.
 final class LegadoTests: XCTestCase {
+    func testExploreCategoriesAndRules() throws {
+        var source = htmlSource
+        source.exploreUrl = "热门::/search?q={{key}}&p={{page}}&&最新::/new?page={{page}}&&热门::/search?q={{key}}&p={{page}}"
+        let categories = try LegadoClient.exploreCategories(source)
+        XCTAssertEqual(categories.map(\.title), ["热门", "最新"])
+        source.exploreUrl = #"[{"title":"榜单","url":"/rank?page={{page}}"}]"#
+        XCTAssertEqual(try LegadoClient.exploreCategories(source).first?.url, "/rank?page={{page}}")
+        source.ruleExplore = ["bookList": "class.result-list@class.item", "name": "class.title@text", "bookUrl": "class.title@href"]
+        let encoded = try JSONEncoder().encode(source)
+        XCTAssertEqual(try JSONDecoder().decode(LegadoSource.self, from: encoded).ruleExplore, source.ruleExplore)
+    }
+
     private var requests: [URLRequest] = []
 
     override func setUp() {

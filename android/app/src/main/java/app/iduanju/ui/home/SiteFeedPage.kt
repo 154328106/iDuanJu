@@ -26,6 +26,8 @@ import app.iduanju.core.cms.MacCMS
 import app.iduanju.core.hongguo.HGSeries
 import app.iduanju.ui.theme.IdjThemeColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** iOS HomeFeedPage for `.site(cms)`. */
@@ -56,6 +58,7 @@ fun PluginFeedPage(p: app.iduanju.plugin.PluginStore.Installed, onOpen: (String)
 @Composable
 fun FeedGrid(key: String, cats: List<Pair<String, String>>, load: (String, Int) -> app.iduanju.core.hongguo.HGPage, onOpen: (String) -> Unit) {
     val c = IdjThemeColors
+    val scope = rememberCoroutineScope()
     var sel by remember(key) { mutableIntStateOf(0) }
     val items = remember(key, sel) { mutableStateListOf<HGSeries>() }
     var page by remember(key, sel) { mutableIntStateOf(1) }
@@ -73,7 +76,8 @@ fun FeedGrid(key: String, cats: List<Pair<String, String>>, load: (String, Int) 
             val seen = items.map { it.seriesId }.toHashSet()
             items.addAll(p.items.filter { seen.add(it.seriesId) })
             hasMore = p.hasMore; page += 1; error = null
-        } catch (e: Exception) { error = e.message ?: "加载失败"; hasMore = false }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.message ?: "加载失败" }
         finally { loading = false }
     }
     LaunchedEffect(key, sel) { more() }
@@ -99,8 +103,8 @@ fun FeedGrid(key: String, cats: List<Pair<String, String>>, load: (String, Int) 
             Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
                 when {
                     loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                    error != null -> Text(error!!, color = c.secondary, fontSize = 13.sp)
-                    items.isEmpty() -> Text("暂无内容", color = c.secondary, fontSize = 13.sp)
+                    error != null -> Text(error!! + " · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { scope.launch { more() } })
+                    items.isEmpty() -> Text("该分类暂无内容，请尝试具体子分类", color = c.secondary, fontSize = 13.sp)
                 }
             }
         }

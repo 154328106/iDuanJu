@@ -148,7 +148,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             player.prepare(); player.play()
             // precache next episode (iOS preloads the next stream while this one plays)
             // spaced ≥6 s from the current resolve: fresh one-shot registrations back-to-back get soft-rejected (probe 2026-11-11)
-            d.episodes.getOrNull(epIndex + 1)?.let { delay(6_000); EpisodeCache.preload(it) }
+            if (IdjApp.instance.settings.prefetchEnabled) d.episodes.getOrNull(epIndex + 1)?.let { delay(6_000); EpisodeCache.preload(it) }
         } catch (e: Exception) {
             status = ""; error = e.message ?: "播放失败"
         }

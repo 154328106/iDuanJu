@@ -52,11 +52,11 @@ private object HotCache { var hot: List<HGSeries> = emptyList() }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SearchScreen(onOpenDetail: (String) -> Unit) {
+fun SearchScreen(onOpenDetail: (String) -> Unit, initialQuery: String = "") {
     val c = IdjThemeColors
     val lib = IdjApp.instance.library
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(initialQuery) }
     var submitted by remember { mutableStateOf("") }
     var hot by remember { mutableStateOf(HotCache.hot) }
     var hotErr by remember { mutableStateOf<String?>(null) }
@@ -113,6 +113,7 @@ fun SearchScreen(onOpenDetail: (String) -> Unit) {
         val q = q0.trim(); if (q.isEmpty()) return
         query = q; lib.addSearch(q); submitted = q; cursor = null; items.clear(); loadMore(true)
     }
+    LaunchedEffect(initialQuery) { if (initialQuery.isNotBlank()) submit(initialQuery) }
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         // SearchField: elevated capsule 38 high + 取消/搜索

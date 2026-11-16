@@ -27,6 +27,8 @@ fun SourcesScreen(onBack: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var confirmAdult by remember { mutableStateOf(false) }
     var adStrip by remember { mutableStateOf(app.iduanju.core.hls.HLSAdFilter.enabled) }
+    var prefetch by remember { mutableStateOf(ia.settings.prefetchEnabled) }
+    var cacheMB by remember { mutableIntStateOf(ia.settings.playbackCacheMB) }
     var message by remember { mutableStateOf<String?>(null) }
     val adult = ia.cms.adultUnlocked
 
@@ -45,8 +47,14 @@ fun SourcesScreen(onBack: () -> Unit) {
         Group("播放") {
             SwitchRow("去广告", ProfileIcons.adblock, "去掉 HLS 片源里插播的广告片段（adjump、异域名短片段、重复片段）", adStrip) {
                 adStrip = it; app.iduanju.core.hls.HLSAdFilter.enabled = it
-                ctx.getSharedPreferences("idj", android.content.Context.MODE_PRIVATE).edit().putBoolean("stv.hls.adstrip", it).apply()
+                ia.settings.adStripEnabled = it
             }
+            SwitchRow("预加载下一集", ProfileIcons.download, "播放时提前缓存下一集，可减少切集等待", prefetch) {
+                prefetch = it; ia.settings.prefetchEnabled = it
+            }
+            Text("播放缓存上限：${cacheMB} MB", color = c.text, modifier = Modifier.padding(14.dp))
+            androidx.compose.material3.Slider(value = cacheMB.toFloat(), onValueChange = { cacheMB = (it / 100).toInt() * 100 },
+                onValueChangeFinished = { ia.settings.playbackCacheMB = cacheMB }, valueRange = 100f..2000f, steps = 18, modifier = Modifier.padding(horizontal = 14.dp))
         }
         DeviceOverrideGroup()
         Note(message)

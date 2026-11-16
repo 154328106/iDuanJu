@@ -17,6 +17,7 @@ struct LegadoSource: Codable, Hashable, Identifiable {
     var loginUi: String?
     var jsLib: String?
     var ruleSearch: [String: String]?
+    var ruleExplore: [String: String]?
     var ruleBookInfo: [String: String]?
     var ruleToc: [String: String]?
     var ruleContent: [String: String]?
@@ -29,7 +30,7 @@ struct LegadoSource: Codable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookSourceComment, enabled, header, searchUrl,
-        exploreUrl, loginUrl, loginUi, jsLib, ruleSearch, ruleBookInfo, ruleToc, ruleContent, customOrder
+        exploreUrl, loginUrl, loginUi, jsLib, ruleSearch, ruleExplore, ruleBookInfo, ruleToc, ruleContent, customOrder
     }
 
     init(bookSourceUrl: String, bookSourceName: String, searchUrl: String?, ruleSearch: [String: String]? = nil,
@@ -60,6 +61,7 @@ struct LegadoSource: Codable, Hashable, Identifiable {
         loginUi = Self.str(c, .loginUi)
         jsLib = Self.str(c, .jsLib)
         ruleSearch = Self.rules(c, .ruleSearch)
+        ruleExplore = Self.rules(c, .ruleExplore)
         ruleBookInfo = Self.rules(c, .ruleBookInfo)
         ruleToc = Self.rules(c, .ruleToc)
         ruleContent = Self.rules(c, .ruleContent)

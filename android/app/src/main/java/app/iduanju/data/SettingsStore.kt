@@ -23,8 +23,16 @@ class SettingsStore(ctx: Context) {
         set(v) { sp.edit().putBoolean("dev.playerSystemProxy", v).apply(); app.iduanju.core.hongguo.HGNet.playerUsesSystemProxy = v }
 
     var adStripEnabled: Boolean
-        get() = sp.getBoolean("adStrip", true)
-        set(v) { sp.edit().putBoolean("adStrip", v).apply() }
+        get() = sp.getBoolean("stv.hls.adstrip", sp.getBoolean("adStrip", true))
+        set(v) { sp.edit().putBoolean("stv.hls.adstrip", v).apply() }
+
+    var prefetchEnabled: Boolean
+        get() = sp.getBoolean("prefetchEnabled", true)
+        set(v) { sp.edit().putBoolean("prefetchEnabled", v).apply() }
+
+    var playbackCacheMB: Int
+        get() = sp.getInt("playbackCacheMB", 600).coerceIn(100, 2000)
+        set(v) { sp.edit().putInt("playbackCacheMB", v.coerceIn(100, 2000)).apply() }
 
     var danmakuArea: Float
         get() = sp.getFloat("danmakuArea", 1f / 3f)

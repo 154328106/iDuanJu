@@ -13,7 +13,7 @@ import javax.crypto.spec.SecretKeySpec
 object CENCDecryptor {
     class Failure(msg: String) : Exception(msg)
 
-    data class SampleJob(val iv: ByteArray, val ranges: List<Pair<Int, Int>>)
+    data class SampleJob(val iv: ByteArray, val ranges: List<Pair<Int, Int>>, val whole: Boolean = false)
     data class TrackInfo(
         val id: UInt, val ivSize: Int, val constIV: ByteArray, val isEncrypted: Boolean,
         val originalFormat: String, val defaultSampleSize: UInt,
@@ -64,13 +64,8 @@ object CENCDecryptor {
         val block = 16
         val skipBlocks = skip / block
         val skipRem = skip % block
-        if (skipBlocks > 0) {
-            // treat last 8 bytes as big-endian counter (cenc default: IV is 8-byte + 8-byte counter=0)
-            var counter = 0L
-            for (i in 8 until 16) counter = (counter shl 8) or (iv.u(i).toLong())
-            counter += skipBlocks
-            for (i in 15 downTo 8) { iv[i] = (counter and 0xff).toByte(); counter = counter shr 8 }
-        }
+        var carry = skipBlocks.toLong()
+        for (i in 15 downTo 0) { val sum = iv.u(i) + carry; iv[i] = sum.toByte(); carry = sum ushr 8 }
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
         if (skipRem > 0) cipher.update(ByteArray(skipRem))
         val plain = cipher.update(buf, off, len) ?: ByteArray(0)
@@ -142,11 +137,12 @@ object CENCDecryptor {
         for (t in tracks.values) if (t.isEncrypted && t.sencJobs.isNotEmpty()) {
             // Expand sample offsets from stsc/stsz/stco
             val sampleOffsets = expandSampleOffsets(t)
+            if (sampleOffsets.size != t.sencJobs.size) throw Failure("样本数量不一致")
             t.sencJobs.forEachIndexed { i, job ->
                 if (i < sampleOffsets.size) {
                     val (off, size) = sampleOffsets[i]
                     // If job already has ranges from subsample, remap; else whole sample
-                    if (job.ranges.isEmpty()) jobs.add(SampleJob(job.iv, listOf(off to size)))
+                    if (job.whole) jobs.add(SampleJob(job.iv, listOf(off to size)))
                     else jobs.add(SampleJob(job.iv, job.ranges.map { (o, l) -> (off + o) to l }))
                 }
             }
@@ -160,6 +156,7 @@ object CENCDecryptor {
         }
 
         // Also rewrite encv/enca → original format for clear playback
+        if (jobs.isEmpty()) throw Failure("没有可解密的样本")
         return jobs to patches
     }
 
@@ -206,27 +203,33 @@ object CENCDecryptor {
         if (isEnc) {
             encvOff = entry.start + 4
             // sinf/frma
-            val sinf = findDeep(b, entry, "sinf")
-            val frma = sinf?.let { findDeep(b, it, "frma") }
+            val childStart = entry.body + if (entry.type == "encv") 78 else 28
+            val sinf = boxes(b, childStart, entry.end).firstOrNull { it.type == "sinf" } ?: throw Failure("缺少 sinf")
+            val scheme = child(b, sinf, listOf("schm")) ?: throw Failure("缺少 schm")
+            if (fourcc(b, scheme.body + 4) != "cenc") throw Failure("仅支持 cenc AES-CTR")
+            val frma = findDeep(b, sinf, "frma") ?: throw Failure("缺少 frma")
             if (frma != null && frma.body + 4 <= frma.end) {
                 original = fourcc(b, frma.body)
                 formatPatch = original.toByteArray(Charsets.ISO_8859_1)
                 patches.add(encvOff to formatPatch)
             }
-            val tenc = sinf?.let { findDeep(b, it, "tenc") }
+            val tenc = findDeep(b, sinf, "tenc") ?: throw Failure("缺少 tenc")
             if (tenc != null) {
                 // version, flags, reserved, default_isProtected, default_Per_Sample_IV_Size, KID(16), optional const IV
-                val per = b.u(tenc.body + 5) // after version(1)+flags(3)+byte_reserved(1) → default_Per_Sample_IV_Size at +5? 
                 // ISO: unsigned int(8) reserved=0; unsigned int(8) default_isProtected; unsigned int(8) default_Per_Sample_IV_Size; unsigned int(8)[16] default_KID
                 // layout: ver(1) flags(3) reserved(1) isProtected(1) ivSize(1) kid(16) [const_iv]
-                ivSize = b.u(tenc.body + 6)
+                if (tenc.body + 24 > tenc.end) throw Failure("tenc 截断")
+                ivSize = b.u(tenc.body + 7)
+                if (ivSize !in listOf(0, 8, 16)) throw Failure("IV 长度异常")
                 if (ivSize == 0) {
-                    // constant IV follows KID
-                    val kidEnd = tenc.body + 7 + 16
-                    constIV = b.copyOfRange(kidEnd, kidEnd + 16)
+                    val kidEnd = tenc.body + 24
+                    if (kidEnd >= tenc.end) throw Failure("缺少常量 IV")
+                    val n = b.u(kidEnd)
+                    if (n !in listOf(8, 16) || kidEnd + 1 + n > tenc.end) throw Failure("常量 IV 无效")
+                    constIV = b.copyOfRange(kidEnd + 1, kidEnd + 1 + n)
                 }
             }
-            // also free sinf? leave as-is; format rewrite is enough for many players
+            patches.add(sinf.start + 4 to "free".toByteArray())
         }
         val stsz = child(b, stbl, listOf("stsz"))
         var defaultSize = 0u; val sampleSizes = ArrayList<UInt>()
@@ -257,8 +260,13 @@ object CENCDecryptor {
             }
         }
         val senc = findDeep(b, stbl, "senc")
-        val sencJobs = if (senc != null) parseSenc(b, senc, ivSize, constIV) else emptyList()
-        // saiz/saio path: if no senc, try to rebuild from saiz+saio (simplified: skip if absent)
+        val sencJobs = if (senc != null) {
+            patches.add(senc.start + 4 to "free".toByteArray())
+            parseSenc(b, senc, ivSize, constIV)
+        } else if (isEnc) parseAux(b, stbl, ivSize, constIV, 0, chunkOffsets.indices.map { ci ->
+            samplesPerChunk.lastOrNull { it.first <= (ci + 1).toUInt() }?.second?.toInt() ?: 0
+        }, patches) else emptyList()
+        if (isEnc && chunkOffsets.isNotEmpty() && sencJobs.isEmpty()) throw Failure("缺少样本加密信息")
         return TrackInfo(trackId, ivSize, constIV, isEnc, original, defaultSize, sampleSizes, chunkOffsets, samplesPerChunk, sencJobs, encvOff, formatPatch)
     }
 
@@ -285,7 +293,7 @@ object CENCDecryptor {
                     clearOff += encLen
                 }
             }
-            out.add(SampleJob(iv, ranges))
+            out.add(SampleJob(iv, ranges, whole = !useSub))
         }
         return out
     }
@@ -303,36 +311,86 @@ object CENCDecryptor {
         var baseOffset = 0L
         if (flags and 0x1 != 0) { baseOffset = u64(b, p).toLong(); p += 8 }
         if (flags and 0x2 != 0) p += 4 // sample_description_index
-        var defaultSize = if (flags and 0x8 != 0) { val s = u32(b, p); p += 4; s } else trexSizes[trackId] ?: track.defaultSampleSize
-        if (flags and 0x10 != 0) p += 4 // default_sample_duration
+        if (flags and 0x8 != 0) p += 4 // default_sample_duration
+        val defaultSize = if (flags and 0x10 != 0) { val s = u32(b, p); p += 4; s } else trexSizes[trackId] ?: track.defaultSampleSize
         if (flags and 0x20 != 0) p += 4 // default_sample_flags
 
-        val tfdt = child(b, traf, listOf("tfdt"))
-        val trun = child(b, traf, listOf("trun")) ?: return
+        val offsets = arrayListOf<Long>()
+        val sizes = arrayListOf<Int>()
+        val base = if (flags and 1 != 0) baseOffset else moof.start.toLong()
+        var nextData = base
+        for (trun in boxes(b, traf.body, traf.end).filter { it.type == "trun" }) {
         val tFlags = (b.u(trun.body + 1) shl 16) or (b.u(trun.body + 2) shl 8) or b.u(trun.body + 3)
         val sampleCount = u32(b, trun.body + 4).toInt()
         var tp = trun.body + 8
         var dataOffset = 0
         if (tFlags and 0x1 != 0) { dataOffset = u32(b, tp).toInt(); tp += 4 } // signed actually but ok
         if (tFlags and 0x4 != 0) tp += 4
-        val sizes = ArrayList<Int>()
+        var current = if (tFlags and 1 != 0) base + dataOffset else nextData
         for (i in 0 until sampleCount) {
             if (tFlags and 0x100 != 0) tp += 4 // duration
             val sz = if (tFlags and 0x200 != 0) { val s = u32(b, tp).toInt(); tp += 4; s } else defaultSize.toInt()
             sizes.add(sz)
+            offsets.add(current); current += sz
             if (tFlags and 0x400 != 0) tp += 4
             if (tFlags and 0x800 != 0) tp += 4
         }
-        val senc = findDeep(b, traf, "senc") ?: return
-        val sencJobs = parseSenc(b, senc, track.ivSize, track.constIV)
-        var off = (moof.start + dataOffset).toLong()
-        if (baseOffset != 0L && dataOffset == 0) off = baseOffset
-        sencJobs.forEachIndexed { i, job ->
-            if (i >= sizes.size) return@forEachIndexed
-            val size = sizes[i]
-            if (job.ranges.isEmpty()) jobs.add(SampleJob(job.iv, listOf(off.toInt() to size)))
-            else jobs.add(SampleJob(job.iv, job.ranges.map { (o, l) -> (off.toInt() + o) to l }))
-            off += size.toLong()
+        nextData = current
         }
+        val senc = findDeep(b, traf, "senc")
+        val sencJobs = if (senc != null) parseSenc(b, senc, track.ivSize, track.constIV)
+            else parseAux(b, traf, track.ivSize, track.constIV, moof.start, listOf(sizes.size), arrayListOf())
+        if (sencJobs.size != sizes.size) throw Failure("分片加密信息数量不一致")
+        sencJobs.forEachIndexed { i, job ->
+            val off = offsets[i]
+            val size = sizes[i]
+            if (job.whole) jobs.add(SampleJob(job.iv, listOf(off.toInt() to size)))
+            else jobs.add(SampleJob(job.iv, job.ranges.map { (o, l) -> (off.toInt() + o) to l }))
+        }
+    }
+
+    private fun parseAux(b: ByteArray, parent: Box, ivSize: Int, constIV: ByteArray, base: Int,
+        perChunk: List<Int>, patches: ArrayList<Pair<Int, ByteArray>>): List<SampleJob> {
+        val saiz = child(b, parent, listOf("saiz")) ?: return emptyList()
+        val saio = child(b, parent, listOf("saio")) ?: throw Failure("缺少 saio")
+        var p = saiz.body + 4
+        if (b.u(saiz.body + 3) and 1 != 0) p += 8
+        val fixed = b.u(p); val count = u32(b, p + 1).toInt(); p += 5
+        val sizes = List(count) { if (fixed != 0) fixed else b.u(p + it) }
+        var q = saio.body + 4
+        if (b.u(saio.body + 3) and 1 != 0) q += 8
+        val n = u32(b, q).toInt(); q += 4
+        val wide = b.u(saio.body) == 1
+        val starts = List(n) { i -> base.toLong() + if (wide) u64(b, q + i * 8).toLong() else u32(b, q + i * 4).toLong() }
+        if (n != 1 && n != perChunk.size) throw Failure("saio 偏移数量无效")
+        val out = arrayListOf<SampleJob>()
+        for ((i, start) in starts.withIndex()) {
+            var at = start
+            repeat(if (n == 1) count else perChunk[i]) {
+                if (out.size >= count) throw Failure("saiz 样本数量不一致")
+                val len = sizes[out.size]
+                if (at < 0 || at + len > b.size || len < ivSize) throw Failure("辅助信息越界")
+                val raw = b.copyOfRange(at.toInt(), at.toInt() + len)
+                val iv = if (ivSize > 0) raw.copyOfRange(0, ivSize) else constIV
+                var r = ivSize
+                val ranges = arrayListOf<Pair<Int, Int>>()
+                if (len > ivSize) {
+                    if (r + 2 > raw.size) throw Failure("辅助信息截断")
+                    val subs = u16(raw, r); r += 2
+                    var off = 0
+                    repeat(subs) {
+                        if (r + 6 > raw.size) throw Failure("子样本截断")
+                        off += u16(raw, r); val enc = u32(raw, r + 2).toInt(); r += 6
+                        if (enc < 0) throw Failure("子样本长度无效")
+                        ranges.add(off to enc); off += enc
+                    }
+                }
+                out.add(SampleJob(iv, ranges, whole = len == ivSize))
+                at += len
+            }
+        }
+        if (out.size != count) throw Failure("辅助信息样本数量不一致")
+        patches.add(saiz.start + 4 to "free".toByteArray()); patches.add(saio.start + 4 to "free".toByteArray())
+        return out
     }
 }

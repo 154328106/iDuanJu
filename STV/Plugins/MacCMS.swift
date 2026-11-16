@@ -127,6 +127,9 @@ struct MacCMSProvider: SiteProvider {
         guard data.count < 8 << 20, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             throw ProviderError.upstream("采集站没有返回 JSON（可能只支持 XML 或需要 ?ac=detail）")
         }
+        if let code = o["code"], PluginOut.s(code) != "1" {
+            throw ProviderError.upstream("采集站：" + PluginOut.s(o["msg"]).nonEmptyOr("请求失败"))
+        }
         return o
     }
 

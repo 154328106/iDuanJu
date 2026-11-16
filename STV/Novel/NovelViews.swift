@@ -42,6 +42,7 @@ struct NovelHomeView: View {
     @State private var deleting: NovelBook?
     @State private var searching = false
     @State private var managing = false
+    @State private var exploring = false
 
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 14), count: 3)
 
@@ -68,6 +69,11 @@ struct NovelHomeView: View {
                     .buttonStyle(.plain).foregroundStyle(STVTheme.accent)
                     .accessibilityIdentifier("novel.import")
                 }
+                Button { exploring = true } label: {
+                    Label("发现好书 · 书源推荐与排行榜", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        .background(STVTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).foregroundStyle(STVTheme.accent)
                 if store.books.isEmpty {
                     ContentUnavailableView {
                         Label("书架是空的", systemImage: "books.vertical")
@@ -111,6 +117,12 @@ struct NovelHomeView: View {
             }
         }
         .sheet(isPresented: $managing) { NovelSourcesView() }
+        .sheet(isPresented: $exploring) {
+            NovelExploreView { b in
+                exploring = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
+            }
+        }
         .task { seedFixtureIfNeeded() }
     }
 

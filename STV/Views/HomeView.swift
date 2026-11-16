@@ -409,6 +409,8 @@ private struct DynamicSiteFeed: View {
                     ErrorStateView(error: e) { reload(selected) }
                 } else if pager.items.isEmpty && pager.isLoading {
                     cardsSkeleton.padding(.horizontal, 16)
+                } else if pager.items.isEmpty {
+                    ContentUnavailableView("该分类暂无内容", systemImage: "rectangle.stack", description: Text("部分采集站的父分类不直接提供资源，请选择动作片、国产剧等具体分类。"))
                 } else {
                     NumberedGrid(items: pager.items, numbered: false, hasMore: pager.hasMore, loading: pager.isLoading) { pager.loadMore() }
                 }
@@ -478,7 +480,11 @@ private struct DynamicSiteFeed: View {
 
     private static func loadCategories(_ source: DramaSource) async -> [SiteCategory] {
         if let key = source.cmsKey {
-            let stored = CMSStore.site(key)?.categories ?? []
+            var stored = CMSStore.site(key)?.categories ?? []
+            if let site = CMSStore.site(key), let fresh = try? await MacCMSProvider.fetchCategories(api: site.api), !fresh.isEmpty {
+                stored = fresh
+                await MainActor.run { CMSStore.shared.cacheCategories(key, fresh) }
+            }
             let latest = SiteCategory(id: "", title: "最新", path: "")
             return [latest] + stored.map { SiteCategory(id: $0.id, title: $0.name, path: $0.id) }
         }
