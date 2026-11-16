@@ -64,4 +64,20 @@ class CENCDecryptorTest {
     @Test fun badKeyRejected() {
         assertThrows(CENCDecryptor.Failure::class.java) { CENCDecryptor.decryptCopy(fixture(false, false).first, "aa") }
     }
+
+    @Test fun fragmentedDefaultSizeAndMultipleRuns() {
+        val iv1 = ByteArray(8) { (it + 1).toByte() }; val iv2 = ByteArray(8) { (it + 20).toByte() }
+        val a = ByteArray(32) { (it * 3).toByte() }; val c = ByteArray(32) { (it * 5).toByte() }
+        val tenc = full("tenc", byteArrayOf(0, 0, 1, 8) + ByteArray(16))
+        val sinf = box("sinf", box("frma", "avc1".toByteArray()) + full("schm", "cenc".toByteArray() + be(65536)) + box("schi", tenc))
+        val stsd = full("stsd", be(1) + box("encv", ByteArray(78) + sinf))
+        val trak = box("trak", full("tkhd", ByteArray(8) + be(1) + ByteArray(68)) + box("mdia", box("minf", box("stbl", stsd))))
+        val head = box("ftyp", "isom".toByteArray() + be(1)) + box("moov", trak)
+        fun fragment(offset: Int): ByteArray = box("moof", box("traf",
+            full("tfhd", be(1) + be(1000) + be(32), 0x20018) +
+            full("trun", be(1) + be(offset), 1) + full("trun", be(1)) + full("senc", be(2) + iv1 + iv2)))
+        val moof = fragment(fragment(0).size + 8)
+        val encrypted = head + moof + box("mdat", crypt(a, iv1) + crypt(c, iv2))
+        assertArrayEquals(a + c, CENCDecryptor.decryptCopy(encrypted, hex).takeLast(64).toByteArray())
+    }
 }

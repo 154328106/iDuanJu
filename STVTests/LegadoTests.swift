@@ -13,6 +13,9 @@ final class LegadoTests: XCTestCase {
         source.ruleExplore = ["bookList": "class.result-list@class.item", "name": "class.title@text", "bookUrl": "class.title@href"]
         let encoded = try JSONEncoder().encode(source)
         XCTAssertEqual(try JSONDecoder().decode(LegadoSource.self, from: encoded).ruleExplore, source.ruleExplore)
+        let arraySource = Data(#"{"bookSourceUrl":"https://book.test","bookSourceName":"test","exploreUrl":[{"title":"榜单","url":"/rank"}],"ruleExplore":{"bookList":"tag.li"}}"#.utf8)
+        let imported = try JSONDecoder().decode(LegadoSource.self, from: arraySource)
+        XCTAssertEqual(try LegadoClient.exploreCategories(imported).first?.url, "/rank")
     }
 
     private var requests: [URLRequest] = []

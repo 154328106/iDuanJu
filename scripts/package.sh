@@ -16,12 +16,21 @@ common=(-project STV.xcodeproj -scheme STV -configuration Release CODE_SIGNING_A
 
 xcodebuild "${common[@]}" -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/ios.log"
 xcodebuild "${common[@]}" -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/simulator.log"
+if [[ "${STV_RUN_TESTS:-0}" == "1" ]]; then
+  SIM_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))')
+  xcodebuild -project STV.xcodeproj -scheme STV -configuration Debug \
+    -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath DerivedDataRelease \
+    CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO \
+    -only-testing:STVTests/LegadoTests -only-testing:STVTests/PluginTests/testCMSCategoryRequestsKeepFullCategoryList \
+    -only-testing:STVTests/PluginTests/testMacCMSParsing -only-testing:STVTests/CENCStreamTests \
+    test 2>&1 | tee "$LOG_DIR/tests.log"
+fi
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/Payload"
 cp -R DerivedDataRelease/Build/Products/Release-iphoneos/STV.app "$STAGE/Payload/"
-NAME="${STV_PKG_NAME:-$VER}"
+NAME="${STV_PKG_NAME:-${VER}b${BUILD}}"
 IPA="$OUT/STV-$NAME-unsigned.ipa"
 rm -f "$IPA"; (cd "$STAGE" && zip -qry "$IPA" Payload)
 SIMZIP="$OUT/STV-$NAME-simulator.app.zip"

@@ -56,7 +56,10 @@ struct LegadoSource: Codable, Hashable, Identifiable {
         enabled = (try? c.decode(Bool.self, forKey: .enabled))
         header = Self.str(c, .header)
         searchUrl = Self.str(c, .searchUrl)
-        exploreUrl = Self.str(c, .exploreUrl)
+        if let entries = try? c.decode([[String: LegadoAny]].self, forKey: .exploreUrl) {
+            let objects = entries.map { $0.compactMapValues(\.text) }
+            exploreUrl = (try? JSONSerialization.data(withJSONObject: objects)).map { String(decoding: $0, as: UTF8.self) }
+        } else { exploreUrl = Self.str(c, .exploreUrl) }
         loginUrl = Self.str(c, .loginUrl)
         loginUi = Self.str(c, .loginUi)
         jsLib = Self.str(c, .jsLib)
