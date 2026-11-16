@@ -1,0 +1,33 @@
+name: novel source validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/novel-rank-downloads]
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: macos-15
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual Legado rule engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/novel-check"
+          python3 scripts/novel-validation/prepare.py "$D"
+          swift build --package-path Packages/QuickJS -c debug
+          BIN=$(swift build --package-path Packages/QuickJS -c debug --show-bin-path)
+          swiftc -swift-version 5 -I "$BIN/CQuickJS.build" -Xcc -I/usr/include/libxml2 \
+            -I "$(xcrun --show-sdk-path)/usr/include/libxml2" -lxml2 \
+            "$D"/*.swift scripts/novel-validation/Runner.swift "$BIN"/CQuickJS.build/*.o \
+            -o "$RUNNER_TEMP/novel-runner"
+      - name: Test requested collection with production engine
+        run: python3 scripts/novel-validation/run.py "$RUNNER_TEMP/novel-runner" "$RUNNER_TEMP/novel-results"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: novel-source-report
+          path: ${{ runner.temp }}/novel-results/report.json
+          if-no-files-found: ignore

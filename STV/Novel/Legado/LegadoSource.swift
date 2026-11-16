@@ -26,7 +26,7 @@ struct LegadoSource: Codable, Hashable, Identifiable {
     var id: String { bookSourceUrl }
     var isOn: Bool { enabled ?? true }
     var hasLogin: Bool { !(loginUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var supported: Bool { (bookSourceType ?? 0) == 0 && !(searchUrl ?? "").isEmpty }
+    var supported: Bool { (bookSourceType ?? 0) == 0 && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty) }
 
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookSourceComment, enabled, header, searchUrl,

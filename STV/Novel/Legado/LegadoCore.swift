@@ -317,6 +317,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     src.getLoginJs = () => '';
     return src;
   };
+  globalThis.java.refreshExplore = () => true;
   globalThis.cache = {
     get: (k) => call('cacheGet', { k: str(k) }),
     put: (k, v, sec) => { call('cachePut', { k: str(k), v: v == null ? null : str(v), sec: Number(sec || 0) }); return v; },

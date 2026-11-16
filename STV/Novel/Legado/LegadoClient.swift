@@ -50,7 +50,9 @@ enum LegadoClient {
     struct ExploreCategory: Hashable, Identifiable {
         var title: String
         var url: String
-        var id: String { url }
+        var group: String = "推荐"
+        var action: String? = nil
+        var id: String { group + "|" + title + "|" + url + "|" + (action ?? "") }
     }
 
     static func exploreCategories(_ s: LegadoSource) throws -> [ExploreCategory] {
@@ -60,37 +62,60 @@ enum LegadoClient {
             let value = try LegadoContext(source: s).evalJS(code, result: nil, baseURL: s.bookSourceUrl)
             if let array = value as? [[String: Any]] {
                 raw = String(decoding: try JSONSerialization.data(withJSONObject: array), as: UTF8.self)
+            } else if let array = value as? [Any], JSONSerialization.isValidJSONObject(array) {
+                raw = String(decoding: try JSONSerialization.data(withJSONObject: array), as: UTF8.self)
             } else { raw = LegadoAnalyzer.textOf(value) }
         }
+        return try parseExploreCategories(raw)
+    }
+
+    static func parseExploreCategories(_ raw: String) throws -> [ExploreCategory] {
         var entries: [ExploreCategory] = []
+        var group = "推荐"
+        func add(_ title: String, _ url: String, _ action: String? = nil) {
+            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return }
+            if let action, !action.isEmpty { entries.append(ExploreCategory(title: title, url: "", group: group, action: action)) }
+            else if url.isEmpty { group = title }
+            else { entries.append(ExploreCategory(title: title, url: url, group: group)) }
+        }
         if let data = raw.data(using: .utf8), let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            entries = array.compactMap { item in
-                guard let url = item["url"] as? String, !url.isEmpty else { return nil }
-                return ExploreCategory(title: (item["title"] as? String) ?? "推荐", url: url)
+            for item in array {
+                let type = item["type"] as? String
+                add((item["title"] as? String) ?? "", (item["url"] as? String) ?? "", type == "button" ? item["action"] as? String : nil)
             }
         } else {
-            entries = raw.components(separatedBy: "&&").flatMap { $0.components(separatedBy: "\n") }.compactMap { item in
+            if raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") { throw LegadoError.rule("发现栏目 JSON 格式错误") }
+            for item in raw.components(separatedBy: "&&").flatMap({ $0.components(separatedBy: "\n") }) {
                 let text = item.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return nil }
+                guard !text.isEmpty else { continue }
                 if let range = text.range(of: "::") {
-                    let url = String(text[range.upperBound...])
-                    return url.isEmpty ? nil : ExploreCategory(title: String(text[..<range.lowerBound]), url: url)
+                    add(String(text[..<range.lowerBound]), String(text[range.upperBound...]))
+                } else if text.hasPrefix("http://") || text.hasPrefix("https://") || text.hasPrefix("/") {
+                    add("推荐", text)
+                } else {
+                    group = text
                 }
-                return ExploreCategory(title: "推荐", url: text)
             }
         }
         var seen = Set<String>()
-        return entries.filter { seen.insert($0.url).inserted }
+        return entries.filter { seen.insert($0.id).inserted }
+    }
+
+    static func exploreAction(_ source: LegadoSource, category: ExploreCategory) throws {
+        guard let action = category.action else { return }
+        _ = try LegadoContext(source: source).evalJS(action, result: nil, baseURL: source.bookSourceUrl)
     }
 
     static func explore(_ s: LegadoSource, category: ExploreCategory, page: Int = 1) throws -> [LegadoSearchItem] {
         var source = s
         source.searchUrl = category.url
-        source.ruleSearch = s.ruleExplore ?? s.ruleSearch
-        return try search(source, key: "", page: page)
+        source.ruleSearch = (s.ruleSearch ?? [:]).merging((s.ruleExplore ?? [:]).filter { !$0.value.isEmpty }) { _, new in new }
+        return try search(source, key: "", page: page, allowDetailFallback: false)
     }
 
-    static func search(_ s: LegadoSource, key: String, page: Int = 1) throws -> [LegadoSearchItem] {
+    static func search(_ s: LegadoSource, key: String, page: Int = 1, allowDetailFallback: Bool = true) throws -> [LegadoSearchItem] {
         let ctx = LegadoContext(source: s)
         ctx.key = key
         ctx.page = page
@@ -99,22 +124,26 @@ enum LegadoClient {
         let resp = try r.fetch()
         let base = resp.url.absoluteString
         let rules = s.ruleSearch ?? [:]
+        guard !(rules["bookList"] ?? "").isEmpty, !(rules["name"] ?? "").isEmpty, !(rules["bookUrl"] ?? "").isEmpty else {
+            throw LegadoError.rule("\(s.bookSourceName)：缺少书籍列表、书名或详情地址规则")
+        }
         let page = LegadoAnalyzer(resp.text, baseURL: base, ctx: ctx)
         let list = try page.elements(rules["bookList"] ?? "")
         var out: [LegadoSearchItem] = []
         for el in list {
             let a = LegadoAnalyzer(el, baseURL: base, ctx: ctx)
             func f(_ k: String) -> String { (try? a.string(rules[k] ?? "")) ?? "" }
-            let name = clean(f("name"))
+            let name = clean(try a.string(rules["name"] ?? ""))
             guard !name.isEmpty else { continue }
-            var bookURL = f("bookUrl")
-            bookURL = bookURL.isEmpty ? base : LegadoURL.absolute(bookURL, base: base)
+            let rawBookURL = try a.string(rules["bookUrl"] ?? "")
+            guard !rawBookURL.isEmpty else { continue }
+            let bookURL = LegadoURL.absolute(rawBookURL, base: base)
             out.append(LegadoSearchItem(name: name, author: cleanAuthor(f("author")), kind: f("kind").replacingOccurrences(of: "\n", with: " · "),
                     intro: f("intro"), cover: LegadoURL.absolute(f("coverUrl"), base: base), latest: f("lastChapter"),
                     bookURL: bookURL, sourceURL: s.bookSourceUrl, sourceName: s.bookSourceName))
         }
         // Some sites jump straight to the book page when there is one hit.
-        if out.isEmpty, let info = try? info(s, html: resp.text, url: base, ctx: ctx), !info.name.isEmpty {
+        if allowDetailFallback, out.isEmpty, let info = try? info(s, html: resp.text, url: base, ctx: ctx), !info.name.isEmpty {
             out.append(LegadoSearchItem(name: info.name, author: info.author, kind: info.kind, intro: info.intro, cover: info.cover,
                     latest: info.latest, bookURL: base, sourceURL: s.bookSourceUrl, sourceName: s.bookSourceName))
         }
