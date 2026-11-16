@@ -29,16 +29,7 @@ struct CategoryView: View {
                     PillTabs(items: genre.subs, selection: $sub) { $0.label }
                 } else if let panel {
                     ForEach(panel.rows) { row in
-                        let opts = [HGFilterOption(id: "", name: "全部")] + row.items
-                        PillTabs(items: opts, selection: Binding(
-                            get: { opts.first { $0.id == (selected[row.type] ?? "") } ?? opts[0] },
-                            set: { option in
-                                if row.type == "genre" {
-                                    selected = option.id.isEmpty ? [:] : ["genre": option.id]
-                                    panel = nil
-                                    Task { await loadPanel(); reload() }
-                                } else { selected[row.type] = option.id; reload() }
-                            })) { $0.name }
+                        filterRow(row)
                     }
                 } else if let panelError {
                     ErrorStateView(error: panelError) { Task { await loadPanel(); reload() } }
@@ -54,6 +45,25 @@ struct CategoryView: View {
         .onChange(of: mode) { Task { if mode == .filter, panel == nil { await loadPanel() }; reload() } }
         .onChange(of: genre) { if !genre.subs.contains(sub) { sub = genre.subs[0] }; reload() }
         .onChange(of: sub) { reload() }
+    }
+
+    private func filterRow(_ row: HGFilterRow) -> some View {
+        let options = [HGFilterOption(id: "", name: "全部")] + row.items
+        let binding = Binding<HGFilterOption>(
+            get: { options.first { $0.id == (selected[row.type] ?? "") } ?? options[0] },
+            set: { option in select(option, dimension: row.type) })
+        return PillTabs(items: options, selection: binding) { $0.name }
+    }
+
+    private func select(_ option: HGFilterOption, dimension: String) {
+        if dimension == "genre" {
+            selected = option.id.isEmpty ? [:] : ["genre": option.id]
+            panel = nil
+            Task { await loadPanel(); reload() }
+        } else {
+            selected[dimension] = option.id
+            reload()
+        }
     }
 
     private func loadPanel() async {
