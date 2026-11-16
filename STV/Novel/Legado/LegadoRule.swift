@@ -87,6 +87,8 @@ final class LegadoContext {
             return ["body": resp.text, "status": resp.status, "url": resp.url.absoluteString, "headers": resp.headers]
         case "putVar": putVar(s("k"), s("v")); return nil
         case "getVar": return getVar(s("k"))
+        case "sourceGet": return LegadoVars.get(sourceScope, s("k")) ?? ""
+        case "sourcePut": LegadoVars.put(sourceScope, s("k"), s("v")); return s("v")
         case "getString", "getStringList":
             guard let cur = stack.last else { return name == "getString" ? "" : [] }
             let an = a["content"] is String ? LegadoAnalyzer(s("content"), baseURL: cur.baseURL, ctx: self) : cur
@@ -1046,6 +1048,7 @@ enum LegadoBytes {
                 stream.dst_ptr = dst
                 stream.dst_size = capacity
                 let st = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                guard out.count + capacity - stream.dst_size <= 16 * 1024 * 1024 else { throw LegadoError.rule("解压内容过大") }
                 out.append(dst, count: capacity - stream.dst_size)
                 if st == COMPRESSION_STATUS_END { break }
                 guard st == COMPRESSION_STATUS_OK else { throw LegadoError.rule("解压失败") }

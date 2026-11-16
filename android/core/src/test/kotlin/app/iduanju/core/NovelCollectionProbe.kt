@@ -24,13 +24,24 @@ object NovelCollectionProbe {
                 check(hits.isNotEmpty()) { "empty book list" }; hits.size
             } }
             var found = emptyList<NovelHit>()
-            stage("search") { found = NovelSources.search(source, "西游记"); check(found.isNotEmpty()) { "empty search" }; found.size }
+            val keyword = if(source.name=="七猫小说") "都市" else "西游记"
+            report.put("keyword",keyword)
+            stage("search") { found = NovelSources.search(source, keyword); check(found.isNotEmpty()) { "empty search" }; found.size }
             (found.firstOrNull() ?: hits.firstOrNull())?.let { book ->
                 var toc = emptyList<NovelChapter>()
                 stage("toc") { toc = NovelSources.chapters(source, book.url); check(toc.isNotEmpty()) { "empty chapter list" }; toc.size }
-                toc.firstOrNull()?.let { chapter -> stage("content") {
-                    val body = NovelSources.content(source, chapter, toc.getOrNull(1)?.url)
-                    check(body.length > 80) { "body too short" }
+                if (toc.isNotEmpty()) stage("content") {
+                    var last: Exception? = null
+                    var body = ""
+                    var chapter = toc.first()
+                    for ((index, candidate) in toc.take(3).withIndex()) {
+                        try {
+                            val text = NovelSources.content(source,candidate,toc.getOrNull(index+1)?.url,book.url)
+                            check(text.length > 80) { "body too short" }
+                            body=text;chapter=candidate;report.put("contentChapterIndex",index);break
+                        } catch (e: Exception) {last=e}
+                    }
+                    if(body.isBlank())throw last ?: IllegalStateException("no readable sample chapter")
                     val root = java.nio.file.Files.createTempDirectory("novel-probe").toFile()
                     try {
                         val cache = NovelCache(root)
@@ -39,7 +50,7 @@ object NovelCollectionProbe {
                         report.put("offlineCache", true)
                     } finally { root.deleteRecursively() }
                     body.length
-                } }
+                }
             }
         }
         println(report)

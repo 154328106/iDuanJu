@@ -44,6 +44,37 @@ class NovelSourcesTest {
         assertThrows(Exception::class.java) { NovelSources.ruleValue("", "@js:Packages.java.lang.Runtime.getRuntime().exec('anything')",s,s.id) }
     }
 
+    @Test fun binaryChapterRequestsAndInflater() {
+        val s=NovelSources.import("""{"bookSourceUrl":"https://binary.test"}""").single()
+        val response=NovelSources.fetchResponse("data:;base64,aGVsbG8=,{\"type\":\"raw\"}",s)
+        assertEquals("68656c6c6f",response.text)
+        assertEquals("hello",NovelSources.ruleValue(response.text,"@js:java.hexDecodeToString(result)",s,response.url))
+        val raw="chapter content".toByteArray()
+        val deflater=java.util.zip.Deflater(6,true)
+        val out=ByteArray(200)
+        deflater.setInput(raw);deflater.finish();val n=deflater.deflate(out);deflater.end()
+        val b64=java.util.Base64.getEncoder().encodeToString(out.copyOf(n))
+        val script="""@js:var inf=new Packages.java.util.zip.Inflater(true);inf.setInput(java.base64DecodeToByteArray('$b64'));var out=new Array(50).fill(0);var n=inf.inflate(out);String(new Packages.java.lang.String(out,0,n,'UTF-8'))+'|'+inf.finished();"""
+        assertEquals("chapter content|true",NovelSources.ruleValue("",script,s,s.id))
+    }
+
+    @Test fun bookStateIsolatedAndRestoredOnFailure() {
+        val s=NovelSource(org.json.JSONObject().put("bookSourceUrl","https://scope.test"))
+        NovelScript.withBook("bookA") { NovelSources.ruleValue("","@js:java.put('bid','A');source.put('shared','yes')",s,s.id) }
+        NovelScript.withBook("bookB") { NovelSources.ruleValue("","@js:java.put('bid','B')",s,s.id) }
+        assertEquals("A|yes",NovelScript.withBook("bookA") { NovelSources.ruleValue("","@js:java.get('bid')+'|'+source.get('shared')",s,s.id) })
+        assertEquals("B",NovelScript.withBook("bookB") { NovelSources.ruleValue("","@js:java.get('bid')",s,s.id) })
+        assertThrows(Exception::class.java) { NovelScript.withBook("bad") { error("fail") } }
+        assertNull(NovelScript.bookURL.get())
+    }
+
+    @Test fun imageOnlyChapterIsNotCachedAsText() {
+        val s=NovelSource(org.json.JSONObject("""{"bookSourceUrl":"https://image.test","ruleContent":{"content":"@js:'<p><img src=\"page.jpg\"></p>'"}}"""))
+        NovelSources.fixture={"<html></html>"}
+        val error=assertThrows(Exception::class.java){NovelSources.content(s,NovelChapter("chapter","https://image.test/1"))}
+        assertTrue(error.message!!.contains("图片页"))
+    }
+
     @Test fun realBundleContainsSourcesAndJsIsReportedClearly() {
         val path = System.getenv("NOVEL_COLLECTION")
         org.junit.Assume.assumeTrue("NOVEL_COLLECTION points at user-supplied 1335.json", path != null)

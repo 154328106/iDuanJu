@@ -28,6 +28,7 @@ data class NovelChapter(val title: String, val url: String)
 
 /** Text-source subset of Legado: CSS/Jsoup rules, simple JSON paths, GET/POST and discovery. */
 object NovelSources {
+    fun configureStorage(root: java.io.File) { NovelScript.configure(root) }
     const val userAgent = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     private val http = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).followRedirects(false).build()
     @Volatile var fixture: ((String) -> String)? = null
@@ -88,7 +89,7 @@ object NovelSources {
         if(address.startsWith("data:")) {
             val data = address.substringAfter(',')
             val bytes = if(address.substringBefore(',').endsWith(";base64")) java.util.Base64.getDecoder().decode(data) else java.net.URLDecoder.decode(data.replace("+","%2B"),"UTF-8").toByteArray()
-            return PageResponse(String(bytes),address)
+            return PageResponse(if(options.optString("type").isNotBlank())bytes.joinToString(""){"%02x".format(it)} else String(bytes),address)
         }
         fixture?.let { return PageResponse(it(address),address) }
         val headers = source.json.optJSONObject("header") ?: runCatching { JSONObject(source.json.optString("header")) }.getOrDefault(JSONObject())
@@ -115,7 +116,8 @@ object NovelSources {
                         while (true) { val n = stream.read(buffer); if (n < 0) break; require(out.size() + n <= 8 * 1024 * 1024) { "书源页面过大" }; out.write(buffer, 0, n) }
                         out.toByteArray()
                     } ?: error("书源空响应")
-                    return PageResponse(String(bytes, java.nio.charset.Charset.forName(charset)),address,response.headers.names().associateWith { response.header(it).orEmpty() })
+                    val text = if(options.optString("type").isNotBlank())bytes.joinToString(""){"%02x".format(it)} else String(bytes, java.nio.charset.Charset.forName(charset))
+                    return PageResponse(text,address,response.headers.names().associateWith { response.header(it).orEmpty() })
                 }
             }
         }
@@ -216,7 +218,7 @@ object NovelSources {
         val put = Regex("@put:(\\{[^}]*})").find(raw)
         if (put != null) {
             val vars=JSONObject(put.groupValues[1])
-            for(k in vars.keys()) NovelScript.storage[source.id+"|"+k]=ruleValue(content,vars.getString(k),source,base,key,page)
+            for(k in vars.keys()) NovelScript.setVariable(source.id,k,ruleValue(content,vars.getString(k),source,base,key,page))
             return ruleValue(content,raw.removeRange(put.range),source,base,key,page)
         }
         val jsAt = raw.indexOf("@js:").takeIf{it>=0} ?: raw.indexOf("<js>")
@@ -259,7 +261,12 @@ object NovelSources {
         return text.trim()
     }
 
-    private fun document(text: String): Any = when { text.trimStart().startsWith('{') -> JSONObject(text); text.trimStart().startsWith('[') -> JSONArray(text); else -> Jsoup.parse(text) }
+    private fun document(text: String): Any = when {
+        text.trimStart().startsWith('{') -> JSONObject(text)
+        text.trimStart().startsWith('[') -> JSONArray(text)
+        Regex("<[A-Za-z!/]").containsMatchIn(text) -> Jsoup.parse(text)
+        else -> text
+    }
 
     fun search(source: NovelSource, key: String, page: Int = 1, category: NovelCategory? = null): List<NovelHit> {
         val raw = category?.url ?: source.json.optString("searchUrl")
@@ -276,15 +283,12 @@ object NovelSources {
         }.distinctBy { it.url }
     }
 
-    fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> {
+    fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = NovelScript.withBook(bookURL) {
         var detail:Any = document(fetch(bookURL, source))
         val info=source.rules("ruleBookInfo")
         if(info.optString("init").isNotBlank()) detail=nodes(detail,info.getString("init"),source,bookURL).firstOrNull() ?: detail
         // Book-info name rules often set variables required by TOC/content scripts.
-        if(info.optString("name").contains("@put:")) {
-            val put=Regex("@put:(\\{.*})").find(info.getString("name"))
-            put?.let{ val vars=JSONObject(it.groupValues[1]);for(k in vars.keys())NovelScript.storage[source.id+"|"+k]=ruleValue(detail,vars.getString(k),source,bookURL) }
-        }
+        if(info.optString("name").isNotBlank())ruleValue(detail,info.getString("name"),source,bookURL)
         val toc = ruleValue(detail, info.optString("tocUrl"),source,bookURL)
         var url = if (toc.isBlank()) bookURL else absolute(toc, bookURL)
         val rules = source.rules("ruleToc"); val out = arrayListOf<NovelChapter>(); val seen = hashSetOf<String>();val queue=ArrayDeque(listOf(url))
@@ -298,14 +302,17 @@ object NovelSources {
             val next = ruleValue(doc, rules.optString("nextTocUrl"),source,url)
             for(link in next.lines().filter{it.isNotBlank()}){val target=absolute(link,url);if(target !in seen && target !in queue)queue.add(target)}
         }
-        return out.distinctBy { it.url }
+        out.distinctBy { it.url }
     }
 
-    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null): String {
-        val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>()
+    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) {
+        val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>(); var imageOnly = false
         while (seen.size < 30 && seen.add(url)) {
             val doc = document(fetch(url, source))
-            parts += cleanText(ruleValue(doc, rules.optString("content"),source,url))
+            val raw = ruleValue(doc, rules.optString("content"),source,url)
+            val cleaned = cleanText(raw)
+            imageOnly = imageOnly || (cleaned.isBlank() && Regex("<img\\b",RegexOption.IGNORE_CASE).containsMatchIn(raw))
+            parts += cleaned
             val next = ruleValue(doc, rules.optString("nextContentUrl"),source,url); if (next.isBlank()) break
             url = absolute(next, url); if (url == nextChapter) break
         }
@@ -313,8 +320,8 @@ object NovelSources {
         for (rule in rules.optString("replaceRegex").lines().filter { it.isNotBlank() }) {
             val p = rule.removePrefix("##").split("##"); text = text.replace(Regex(p[0]), p.getOrElse(1) { "" })
         }
-        require(text.isNotBlank()) { "章节正文为空或书源规则不兼容" }
-        return text
+        require(text.isNotBlank()) { if(imageOnly) "本章是图片页，请换文字版书源" else "章节正文为空或书源规则不兼容" }
+        text
     }
 
     fun cleanText(raw: String): String = Jsoup.parse(raw.replace(Regex("(?i)<br\\s*/?>|</p>|</div>"), "\n")).wholeText()

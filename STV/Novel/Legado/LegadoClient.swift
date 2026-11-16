@@ -226,7 +226,8 @@ enum LegadoClient {
                 if abs != nextChapterURL, !seen.contains(abs) { url = abs }
             }
         }
-        var text = LegadoContent.clean(parts.joined(separator: "\n"))
+        let combined = parts.joined(separator: "\n")
+        var text = LegadoContent.clean(combined)
         if let rr = rules["replaceRegex"], !rr.isEmpty {
             for piece in rr.components(separatedBy: "\n") where !piece.isEmpty {
                 let p = piece.hasPrefix("##") ? String(piece.dropFirst(2)) : piece
@@ -235,7 +236,7 @@ enum LegadoClient {
             }
             text = NovelImport.normalize(text)
         }
-        guard !text.isEmpty else { throw LegadoError.empty("正文为空") }
+        guard !text.isEmpty else { throw LegadoError.empty(combined.range(of: "<img\\b", options: [.regularExpression, .caseInsensitive]) != nil ? "本章是图片页，当前文本阅读器无法显示，请换文字版书源" : "正文为空") }
         return text
     }
 

@@ -26,6 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -62,6 +65,7 @@ fun NovelScreen(onBack: () -> Unit) {
     var showSwitch by remember { mutableStateOf(false) }
     var alternatives by remember { mutableStateOf<List<Pair<NovelSource,NovelHit>>>(emptyList()) }
     var switchBusy by remember { mutableStateOf(false) }
+    var switchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
     val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
@@ -88,7 +92,7 @@ fun NovelScreen(onBack: () -> Unit) {
         val chapter = chapters.getOrNull(index) ?: return
         val book = bookToSave ?: return
         val cached = withContext(Dispatchers.IO) { cache.read(s.id, book.url, chapter.url) }
-        val body = cached ?: withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url) }.also { value ->
+        val body = cached ?: withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url,book.url) }.also { value ->
             withContext(Dispatchers.IO) { cache.save(s.id,book.url,chapter.url,value) }
         }
         text = body; chapterIndex = index; localBook = false
@@ -101,7 +105,7 @@ fun NovelScreen(onBack: () -> Unit) {
         if (prefetch > 0) scope.launch(Dispatchers.IO) {
             for(i in index+1 until minOf(toc.size,index+1+prefetch)) {
                 if(cache.read(s.id,book.url,toc[i].url)==null) {
-                    try { cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url)) }
+                    try { cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url,book.url)) }
                     catch(e: CancellationException){throw e} catch(_:Exception){break}
                 }
             }
@@ -151,7 +155,7 @@ fun NovelScreen(onBack: () -> Unit) {
                 withContext(Dispatchers.IO) { cache.saveBook(s.id,book,toc) }
                 for(i in start until end) {
                     withContext(Dispatchers.IO) {
-                        if(cache.read(s.id,book.url,toc[i].url)==null) cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url))
+                        if(cache.read(s.id,book.url,toc[i].url)==null) cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url,book.url))
                     }
                     downloadDone++;cachedCount=withContext(Dispatchers.IO){cache.count(s.id,book.url,toc)}
                 }
@@ -161,15 +165,23 @@ fun NovelScreen(onBack: () -> Unit) {
     }
     fun findSources() {
         val target=currentBook ?: return
+        val selectedSource = selected
+        val candidates = sources.filter { it.enabled && it.id != selectedSource && it.json.optString("searchUrl").isNotBlank() }.toList()
         showSwitch=true
         if(switchBusy)return
         switchBusy=true;alternatives=emptyList()
-        scope.launch {
+        switchJob=scope.launch {
             try {
-                for(s in sources.filter{it.enabled && it.id!=selected}) {
-                    val matches=withContext(Dispatchers.IO){runCatching{NovelSources.search(s,target.name)}.getOrDefault(emptyList())}
-                        .filter{it.name==target.name && (it.author==target.author || it.author.isBlank() || target.author.isBlank())}
-                    alternatives=alternatives+matches.map{s to it}
+                coroutineScope {
+                    val gate = Semaphore(4)
+                    candidates.forEach { s -> launch {
+                        gate.withPermit {
+                            val found = try { withContext(Dispatchers.IO) { NovelSources.search(s,target.name) } }
+                                catch(e:CancellationException){throw e} catch(_:Exception){emptyList()}
+                            val matches=found.filter{it.name==target.name && (it.author==target.author || it.author.isBlank() || target.author.isBlank())}
+                            alternatives=(alternatives+matches.map{s to it}).distinctBy { it.first.id+"|"+it.second.url }
+                        }
+                    } }
                 }
             } finally {switchBusy=false}
         }
@@ -300,7 +312,7 @@ fun NovelScreen(onBack: () -> Unit) {
         Row {listOf(0,3,10,20).forEach{n->TextButton(onClick={prefetch=n;prefs.edit().putInt("prefetch",n).apply()}){Text(if(n==0)"关" else "$n 章",fontWeight=if(prefetch==n)FontWeight.Bold else FontWeight.Normal)}}}
         Text("保持应用前台，已完成章节可离线阅读。",fontSize=12.sp)
     }},confirmButton={TextButton(onClick={showDownload=false}){Text("完成")}})
-    if(showSwitch)AlertDialog(onDismissRequest={showSwitch=false},title={Text("切换书籍来源")},text={LazyColumn{
+    if(showSwitch)AlertDialog(onDismissRequest={switchJob?.cancel();showSwitch=false},title={Text("切换书籍来源")},text={LazyColumn{
         if(switchBusy)item{Text("正在搜索同名书籍…")}
         items(alternatives,key={it.first.id+it.second.url}){(s,book)->TextButton(onClick={work{
             val oldTitle=chapters.getOrNull(chapterIndex)?.title
@@ -308,10 +320,10 @@ fun NovelScreen(onBack: () -> Unit) {
             require(toc.isNotEmpty()){"该源目录为空"}
             val match=toc.indexOfFirst{it.title.replace(Regex("\\s+"),"")==oldTitle?.replace(Regex("\\s+"),"")}.takeIf{it>=0} ?: chapterIndex.coerceIn(0,toc.lastIndex)
             withContext(Dispatchers.IO){cache.saveBook(s.id,book,toc)}
-            selected=s.id;currentBook=book;chapters=toc;showSwitch=false;read(match,s,book)
+            switchJob?.cancel();selected=s.id;currentBook=book;chapters=toc;showSwitch=false;read(match,s,book)
         }}){Text(s.name)}}
         if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
-    }},confirmButton={TextButton(onClick={showSwitch=false}){Text("关闭")}})
+    }},confirmButton={TextButton(onClick={switchJob?.cancel();showSwitch=false}){Text("关闭")}})
     if (importing) AlertDialog(onDismissRequest = { importing = false }, title = { Text("导入阅读书源") },
         text = { Column { Text("粘贴 Legado JSON 或书源订阅 URL")
             OutlinedTextField(importText, { importText = it }, maxLines = 8)

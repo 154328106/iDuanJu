@@ -274,11 +274,11 @@ final class LegadoJS {
                 getEncoder: () => ({ encodeToString: (b) => call('b64.enc', { b: bytesOf(b) }), encode: (b) => call('bytes.enc', { s: call('b64.enc', { b: bytesOf(b) }), cs: 'UTF-8' }) }),
             };
             function Inflater(nowrap) {
-                let input = [];
+                let input = [], decoded = null, position = 0;
                 return {
-                    setInput: (b, off, len) => { off = off || 0; input = b.slice(off, len == null ? b.length : off + len); },
-                    inflate: (out, off, len) => { const r = call('inflate', { b: input, nowrap: !!nowrap }); off = off || 0; const n = Math.min(r.length, len == null ? out.length - off : len); for (let i = 0; i < n; i++) out[off + i] = r[i]; return n; },
-                    end: () => {}, finished: () => true,
+                    setInput: (b, off, len) => { off = off || 0; input = b.slice(off, len == null ? b.length : off + len); decoded = null; position = 0; },
+                    inflate: (out, off, len) => { if (decoded === null) decoded = call('inflate', { b: input, nowrap: !!nowrap }); off = off || 0; const n = Math.min(decoded.length - position, len == null ? out.length - off : len); for (let i = 0; i < n; i++) out[off + i] = decoded[position + i]; position += n; return n; },
+                    end: () => { input = []; decoded = []; position = 0; }, finished: () => decoded !== null && position >= decoded.length,
                 };
             }
             const MessageDigest = { getInstance: (alg) => { let acc = []; return {
@@ -302,10 +302,10 @@ globalThis.getSource = () => globalThis.source;
   globalThis.__wrapSource = (src) => {
 src.getKey = () => src.bookSourceUrl;
     src.key = src.bookSourceUrl;
-    src.getVariable = () => java.get('__sourceVariable');
-    src.setVariable = (v) => java.put('__sourceVariable', str(v));
-    src.get = (k) => java.get(k);
-    src.put = (k, v) => java.put(k, v);
+    src.getVariable = () => call('sourceGet', {k:'__sourceVariable'});
+    src.setVariable = (v) => call('sourcePut', {k:'__sourceVariable',v:str(v)});
+    src.get = (k) => call('sourceGet', {k:str(k)});
+    src.put = (k, v) => call('sourcePut', {k:str(k),v:str(v)});
     src.getLoginInfo = () => call('loginInfo', null);
 src.getLoginInfoMap = () => __jmap(parseObj(call('loginInfo', null)));
     src.putLoginInfo = (v) => { call('putLoginInfo', { v: str(v) }); return true; };

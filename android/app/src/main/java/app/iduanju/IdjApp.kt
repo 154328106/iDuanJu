@@ -35,6 +35,7 @@ class IdjApp : Application(), coil.ImageLoaderFactory {
         super.onCreate()
         instance = this
         settings = SettingsStore(this)
+        app.iduanju.core.novel.NovelSources.configureStorage(filesDir)
         HGPlayerDevice.storageDir = filesDir
         app.iduanju.core.hongguo.HGNet.playerUsesSystemProxy = settings.playerUsesSystemProxy
         HGPlayerDevice.overrideProvider = {

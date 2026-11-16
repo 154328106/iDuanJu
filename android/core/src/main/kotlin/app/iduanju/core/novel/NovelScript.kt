@@ -15,6 +15,29 @@ import javax.crypto.spec.SecretKeySpec
 internal class NovelScript(private val source: NovelSource, private val base: String, private val key: String = "", private val page: Int = 1) {
     companion object {
         @Volatile var storage: MutableMap<String, String> = ConcurrentHashMap()
+        internal val bookURL = ThreadLocal<String?>()
+        private var stateFile: java.io.File? = null
+        @Synchronized fun configure(root: java.io.File) {
+            val file = java.io.File(root,"novel-script-state.json")
+            if(stateFile == file)return
+            stateFile=file
+            val saved=runCatching{JSONObject(file.readText())}.getOrDefault(JSONObject())
+            storage=ConcurrentHashMap<String,String>().apply{for(k in saved.keys())put(k,saved.getString(k))}
+        }
+        @Synchronized private fun put(k:String,v:String) {
+            storage[k]=v
+            stateFile?.let { file -> file.parentFile?.mkdirs();val tmp=java.io.File(file.parentFile,file.name+".tmp")
+                tmp.writeText(JSONObject(storage.toMap()).toString()); java.nio.file.Files.move(tmp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+        }
+        internal fun <T> withBook(url:String?, block:()->T):T {
+            val previous=bookURL.get();bookURL.set(url)
+            try{return block()}finally{bookURL.set(previous)}
+        }
+        internal fun setVariable(source: String, key: String, value: String) {
+            val scope = bookURL.get()?.let { "$source|book|$it|$key" } ?: "$source|$key"
+            put(scope, value)
+        }
         private val prelude by lazy { NovelScript::class.java.getResourceAsStream("/novel-prelude.js")!!.bufferedReader().use { it.readText() } }
     }
     private val deadline = System.nanoTime() + 25_000_000_000L
@@ -36,13 +59,17 @@ internal class NovelScript(private val source: NovelSource, private val base: St
                 val method = Context.toString(args.getOrNull(0))
                 val raw = args.getOrNull(1)?.let { Context.toString(it) } ?: "{}"
                 val a = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
-                val value = invoke(method, a)
-                return JSONObject.valueToString(value ?: JSONObject.NULL)
+                try {
+                    val value = invoke(method, a)
+                    return JSONObject.valueToString(value ?: JSONObject.NULL)
+                } catch (e: Exception) {
+                    throw Context.reportRuntimeError(e.message ?: "书源宿主调用失败")
+                }
             }
         }
         ScriptableObject.putProperty(scope, "__host", host)
         cx.evaluateString(scope, "var globalThis=this;\n" + compatible(prelude), "novel-host", 1, null)
-        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${JSONObject.valueToString(result ?: JSONObject.NULL)};"
+        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${JSONObject.valueToString(result ?: JSONObject.NULL)};"
         cx.evaluateString(scope, globals, "novel-context", 1, null)
         val lib = source.json.optString("jsLib")
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)
@@ -55,6 +82,7 @@ internal class NovelScript(private val source: NovelSource, private val base: St
     private fun compatible(code: String) = code.replace(Regex("(\\b(?:map|forEach|filter)\\s*\\(\\s*)(\\[[A-Za-z_$][A-Za-z0-9_$,\\s]*\\])\\s*=>"), "$1($2)=>")
         .replace(Regex("for\\s*\\(const\\s+"), "for (var ")
     private fun scope(k: String) = source.id + "|" + k
+    private fun variableScope(k:String)=bookURL.get()?.let{source.id+"|book|"+it+"|"+k} ?: scope(k)
     private fun bytes(a: Any?): ByteArray = when(a) {
         is JSONArray -> ByteArray(a.length()) { a.optInt(it).toByte() }
         null, JSONObject.NULL -> byteArrayOf()
@@ -64,11 +92,13 @@ internal class NovelScript(private val source: NovelSource, private val base: St
     private fun invoke(name: String, a: JSONObject): Any? {
         fun str(k: String) = a.optString(k).takeUnless { it == "null" } ?: ""
         when (name) {
-            "getVar", "cacheGet" -> return storage[scope(str("k"))] ?: ""
-            "putVar", "cachePut" -> { storage[scope(str("k"))] = str("v"); return str("v") }
+            "getVar" -> return storage[variableScope(str("k"))] ?: storage[scope(str("k"))] ?: ""
+            "putVar" -> { put(variableScope(str("k")),str("v")); return str("v") }
+            "sourceGet", "cacheGet" -> return storage[scope(str("k"))] ?: ""
+            "sourcePut", "cachePut" -> { put(scope(str("k")),str("v")); return str("v") }
             "loginInfo" -> return storage[scope("loginInfo")] ?: "{}"
             "loginHeader" -> return storage[scope("loginHeader")] ?: "{}"
-            "putLoginInfo", "putLoginHeader" -> {storage[scope(if(name=="putLoginInfo")"loginInfo" else "loginHeader")] = str("v"); return true}
+            "putLoginInfo", "putLoginHeader" -> {put(scope(if(name=="putLoginInfo")"loginInfo" else "loginHeader"),str("v")); return true}
             "ajax" -> return NovelSources.fetch(str("url"), source, key, page)
             "connect" -> {
                 val opts = JSONObject().put("method", str("method").ifBlank { "GET" }).put("body", str("body"))
@@ -106,6 +136,45 @@ internal class NovelScript(private val source: NovelSource, private val base: St
                 val iv = bytes(a.opt("iv"))
                 if(iv.isEmpty())cipher.init(a.optInt("mode"),secret) else cipher.init(a.optInt("mode"),secret,IvParameterSpec(iv))
                 return jsonBytes(cipher.doFinal(bytes(a.opt("b"))))
+            }
+            "rsa.dec", "rsa.enc" -> {
+                val factory=java.security.KeyFactory.getInstance("RSA")
+                val privateBytes=bytes(a.opt("priv"))
+                val rsaKey=if(privateBytes.isNotEmpty())factory.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(privateBytes))
+                    else factory.generatePublic(java.security.spec.X509EncodedKeySpec(bytes(a.opt("key"))))
+                val size=((rsaKey as java.security.interfaces.RSAKey).modulus.bitLength()+7)/8
+                val encrypt=name=="rsa.enc"
+                val rawPublic = !encrypt && privateBytes.isEmpty()
+                val cipher=Cipher.getInstance(if(rawPublic)"RSA/ECB/NoPadding" else "RSA/ECB/PKCS1Padding")
+                cipher.init(if(encrypt)Cipher.ENCRYPT_MODE else Cipher.DECRYPT_MODE,rsaKey)
+                val input=bytes(a.opt("b"));val result=java.io.ByteArrayOutputStream()
+                val step=if(encrypt)size-11 else size
+                require(encrypt || input.size%size==0){"RSA 数据长度不正确"}
+                for(at in input.indices step step) {
+                    val block = cipher.doFinal(input,at,minOf(step,input.size-at))
+                    if(rawPublic) {
+                        val sep = (2 until block.size).firstOrNull { block[it] == 0.toByte() }
+                        val start = if(block.size>2 && block[0]==0.toByte() && block[1].toInt() in 1..2 && sep != null && sep>=10) sep+1
+                            else block.indexOfFirst { it != 0.toByte() }.let { if(it<0)block.size else it }
+                        result.write(block,start,block.size-start)
+                    } else result.write(block)
+                }
+                return jsonBytes(result.toByteArray())
+            }
+            "inflate" -> {
+                val inflater = java.util.zip.Inflater(a.optBoolean("nowrap"))
+                val out = java.io.ByteArrayOutputStream()
+                try {
+                    inflater.setInput(bytes(a.opt("b")))
+                    val buffer=ByteArray(8192)
+                    while(!inflater.finished()) {
+                        val n=inflater.inflate(buffer)
+                        check(n>0 || inflater.finished()) { "压缩数据截断或需要字典" }
+                        require(out.size()+n<=16*1024*1024) { "解压内容过大" }
+                        out.write(buffer,0,n)
+                    }
+                    return jsonBytes(out.toByteArray())
+                } finally { inflater.end() }
             }
             "encodeURI" -> return java.net.URLEncoder.encode(str("s"),str("cs").ifBlank{"UTF-8"}).replace("+","%20")
             "htmlFormat" -> return NovelSources.cleanText(str("s"))

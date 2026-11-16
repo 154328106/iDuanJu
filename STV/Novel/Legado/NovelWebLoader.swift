@@ -20,7 +20,7 @@ final class NovelWebLoader {
     private(set) var downloadStates: [String: DownloadState] = [:]
     private let store = NovelStore.shared
 
-    private func key(_ b: NovelBook, _ i: Int) -> String { b.id + "#" + String(i) }
+    private func key(_ b: NovelBook, _ i: Int) -> String { NovelStore.chapterFile(b, i).path }
 
     func error(_ b: NovelBook, _ i: Int) -> String? { failed[key(b, i)] }
     func isLoading(_ b: NovelBook, _ i: Int) -> Bool { running[key(b, i)] != nil }
@@ -69,7 +69,7 @@ final class NovelWebLoader {
         revision += 1
     }
 
-    /// Current chapter plus the next two.
+    /// Current chapter plus the configured lookahead, stopping on the first failed request.
     func prefetch(_ b: NovelBook, around i: Int) {
         ensure(b, i)
         let count = min(20, max(0, UserDefaults.standard.object(forKey: "novel.prefetch") as? Int ?? 3))
@@ -97,6 +97,8 @@ final class NovelWebLoader {
                 } catch {
                     downloadStates[book.id]?.failures += 1
                     downloadStates[book.id]?.message = error.localizedDescription
+                    // A blocked/login-required source must not fan out across an entire book.
+                    return
                 }
             }
             if downloadStates[book.id]?.failures == 0 { downloadStates[book.id]?.message = "下载完成，已可离线阅读" }
@@ -108,7 +110,8 @@ final class NovelWebLoader {
     /// Re-reads the 目录 (new chapters of an ongoing book). Returns the new chapter count.
     func refreshToc(_ b: NovelBook) async throws -> Int {
         guard let source = LegadoSourceStore.shared.source(b.sourceURL ?? ""), let toc = b.tocURL else { return b.chapters.count }
-        let list = try await LegadoClient.run { try LegadoClient.toc(source, tocURL: toc) }
+        let book = ["name": b.title, "author": b.author ?? "", "bookUrl": b.bookURL ?? "", "tocUrl": toc]
+        let list = try await LegadoClient.run { try LegadoClient.toc(source, tocURL: toc, book: book) }
         if list.count >= b.chapters.count { store.updateToc(b, list) }
         return list.count
     }
