@@ -20,12 +20,12 @@ APP_PLIST=DerivedDataRelease/Build/Products/Release-iphoneos/STV.app/Info.plist
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP_PLIST")" == "$BUILD" ]]
 if [[ "${STV_BUILD_SIMULATOR:-1}" == "1" || "${STV_RUN_TESTS:-0}" == "1" ]]; then
 SIM_ARCH=$(uname -m)
-xcodebuild "${common[@]}" -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -arch "$SIM_ARCH" ONLY_ACTIVE_ARCH=YES ENABLE_TESTABILITY=YES -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/simulator.log"
+xcodebuild "${common[@]}" -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' ARCHS="$SIM_ARCH" ONLY_ACTIVE_ARCH=YES ENABLE_TESTABILITY=YES -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/simulator.log"
 if [[ "${STV_RUN_TESTS:-0}" == "1" ]]; then
   SIM_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))')
   xcodebuild -project STV.xcodeproj -scheme STV -configuration Release \
     -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath DerivedDataRelease \
-    CODE_SIGNING_ALLOWED=NO -arch "$SIM_ARCH" ONLY_ACTIVE_ARCH=YES ENABLE_TESTABILITY=YES -parallel-testing-enabled NO \
+    CODE_SIGNING_ALLOWED=NO ARCHS="$SIM_ARCH" ONLY_ACTIVE_ARCH=YES ENABLE_TESTABILITY=YES -parallel-testing-enabled NO \
     -only-testing:STVTests/LegadoTests -only-testing:STVTests/PluginTests/testCMSCategoryRequestsKeepFullCategoryList \
     -only-testing:STVTests/PluginTests/testMacCMSParsing -only-testing:STVTests/CENCStreamTests \
     test 2>&1 | tee "$LOG_DIR/tests.log"
