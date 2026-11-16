@@ -648,11 +648,7 @@ class HongguoClient(
         )
     }
 
-    /**
-     * Signed POST for the pure video_model endpoint, same as iOS `resolvePure`: the exact wire query
-     * (pairs + ts + _rticket) and body are signed with Argus 551 / Ladon only (HGPlaybackSign).
-     * The legacy Gorgon / Medusa / Helios set is soft-rejected here (HTTP 200 + 0 bytes).
-     */
+    /** Current six-header player signature; category requests keep their separate 551 dialect. */
     private fun pureRequest(body: ByteArray, pairs: List<Pair<String, String>>, path: String = PURE_PATH): Request {
         val nowMs = nowMs()
         val (q, headers) = HGCurrentPlayer.sign(pairs, nowMs, pairs.first { it.first == "device_id" }.second, PURE_VN, body)
