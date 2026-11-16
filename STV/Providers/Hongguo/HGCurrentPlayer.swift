@@ -143,9 +143,27 @@ enum HGCurrentPlayer {
             if i&3==0 {let old=a;a=UInt8(truncatingIfNeeded:(ini>>(rounds&24))^UInt32(box[Int(b)]));b=box[Int(c)];c=box[Int(d)];d=box[Int(old)]}
             rounds+=2;for (j,v) in [a,b,c,d].enumerated() {expanded[at+4+j]=v^expanded[at-12+j]}}
         let pad=16-plain.count%16;let source=plain+[UInt8](repeating:UInt8(pad),count:pad);var previous=iv;var out=[UInt8]();let co=con[branch]
-        for at in stride(from:0,to:source.count,by:16) {var state=(0..<16).map {source[at+$0]^previous[$0]^expanded[4*($0/4)+co[$0%4]]}
-            for round in 1...2 {var old=state;state=(0..<16).map {box[Int(old[co[$0/4]*4+$0%4])]};old=state;state=(0..<16).map {old[order[branch][$0]]}
-                if round==1 {old=state;state=(0..<16).map {old[4*($0/4)+co[$0%4]]};for j in 0..<4 {let total=state[j]^state[4+j]^state[8+j]^state[12+j];let first=state[j]
+        for at in stride(from:0,to:source.count,by:16) {
+            var state = [UInt8](repeating: 0, count: 16)
+            for i in 0..<16 {
+                let keyIndex: Int = 4 * (i / 4) + co[i % 4]
+                state[i] = source[at + i] ^ previous[i] ^ expanded[keyIndex]
+            }
+            for round in 1...2 {
+                var old = state
+                for i in 0..<16 {
+                    let index: Int = co[i / 4] * 4 + i % 4
+                    state[i] = box[Int(old[index])]
+                }
+                old = state
+                for i in 0..<16 { state[i] = old[order[branch][i]] }
+                if round==1 {
+                    old=state
+                    for i in 0..<16 {
+                        let index: Int = 4 * (i / 4) + co[i % 4]
+                        state[i] = old[index]
+                    }
+                    for j in 0..<4 {let total=state[j]^state[4+j]^state[8+j]^state[12+j];let first=state[j]
                     for i in 0..<4 {let next=i<3 ? state[(i+1)*4+j] : first;let x=state[i*4+j]^next;let xt=(x<<1)^(x&128 != 0 ? 0x1b:0);state[i*4+j] ^= total^xt}}}
                 for i in 0..<16 {state[i] ^= expanded[16*round+4*(i/4)+co[i%4]]}}
             previous=(0..<16).map {state[$0]^expanded[16+$0]};out+=previous}
