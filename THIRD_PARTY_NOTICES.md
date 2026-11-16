@@ -77,5 +77,22 @@ which credits fqapp / N3urda/hongguoTV. The test vectors in `STVTests/PrefetchTe
 Source reference: https://github.com/zfdang/hongguo-open-player/commit/3f687c5
 
 ## License compatibility
+### Current Hongguo player signer (2026-11-16)
+
+`HGCurrentPlayer.swift` / `HGCurrentPlayer.kt` and `HGCurrentProfile.*` are ports of
+`my-name-is-alan/get_video_streaming`, commit `0613b49`,
+`internal/provider/hongguo/playersign/current*.go`. Swift and Kotlin use the same
+fixed application constants and synthetic native test vectors. The KS/custom
+transform originated in OpenHongguo commit `05aa580a2fa914becabc5ae4be5b05539c66bda6`
+under Apache-2.0 and was modified and validated by the gateway implementation.
+The ports adapt byte arithmetic, request construction and error handling to each
+platform; category requests keep their separate 551 signing profile.
+
+License and upstream notice: `STV/Resources/Licenses/HGCurrentPlayer-Apache-2.0.txt`
+and `STV/Resources/Licenses/HGCurrentPlayer-NOTICE.md`. The constants are protocol
+data, not device identities or session credentials. No captured SDK token is used
+by the current player signer. Native synthetic vectors test arithmetic only;
+server availability is checked separately.
+
 All components above (Apache-2.0, MIT, BSD-2-Clause, WTFPL, BSL-1.0, Unlicense, LGPL-2.1/LGPL-3.0 with exception, GPL-3.0-only) are
 compatible with distributing the whole work under GPL-3.0. This project itself is licensed under **GPL-3.0** (see `LICENSE`).

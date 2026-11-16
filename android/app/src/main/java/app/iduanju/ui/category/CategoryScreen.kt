@@ -58,17 +58,25 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var gen by remember { mutableIntStateOf(0) }
+    var panelGen by remember { mutableIntStateOf(0) }
 
     fun load(reset: Boolean) {
         if (loading && !reset) return
         if (reset) { items.clear(); nextOffset = 0; session = null; hasMore = false; gen++ }
         val myGen = gen
+        val isFilter = filterMode
+        val selectedIds = selected.values.filter { it.isNotEmpty() }.sorted()
+        val seenIds = items.map { it.seriesId }
+        val requestOffset = nextOffset
+        val requestSession = session
+        val requestGenre = genre
+        val requestSub = sub
         loading = true; err = null
         scope.launch {
             try {
                 val p = withContext(Dispatchers.IO) {
-                    if (!filterMode) IdjApp.instance.hongguo.rank(sub, genre, nextOffset, items.map { it.seriesId })
-                    else IdjApp.instance.hongguo.category(selected.values.filter { it.isNotEmpty() }.sorted(), nextOffset, session)
+                    if (!isFilter) IdjApp.instance.hongguo.rank(requestSub, requestGenre, requestOffset, seenIds)
+                    else IdjApp.instance.hongguo.category(selectedIds, requestOffset, requestSession, seenIds)
                 }
                 if (myGen != gen) return@launch
                 val seen = items.map { it.seriesId }.toSet()
@@ -78,10 +86,20 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
             if (myGen == gen) loading = false
         }
     }
+    suspend fun loadPanel() {
+        val selectedGenre = selected["genre"] ?: ""
+        val token = ++panelGen
+        panelErr = null
+        try {
+            val fresh = withContext(Dispatchers.IO) { IdjApp.instance.hongguo.panel(selectedGenre) }
+            if (token == panelGen && selectedGenre == (selected["genre"] ?: "")) panel = fresh
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { if (token == panelGen) panelErr = e.message }
+    }
     LaunchedEffect(filterMode, genre, sub) {
-        if (filterMode && panel == null) try { panel = withContext(Dispatchers.IO) { IdjApp.instance.hongguo.panel() } } catch (e: Exception) { panelErr = e.message }
+        if (filterMode && panel == null) loadPanel()
         if (!genre.subs.contains(sub)) sub = genre.subs[0]
-        load(true)
+        if (!filterMode || panel != null) load(true)
     }
     val grid = rememberLazyGridState()
     LaunchedEffect(grid) {
@@ -107,9 +125,14 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
                     panel?.rows?.forEach { row ->
                         val opts = listOf("" to "全部") + row.items.map { it.id to it.name }
                         Pills(opts.map { it.second }, opts.indexOfFirst { it.first == (selected[row.type] ?: "") }.coerceAtLeast(0)) {
-                            selected[row.type] = opts[it].first; load(true)
+                            if (row.type == "genre") {
+                                val value = opts[it].first
+                                selected.clear(); if (value.isNotEmpty()) selected["genre"] = value
+                                gen++; items.clear(); hasMore = false; panel = null
+                                scope.launch { loadPanel(); if (panel != null) load(true) }
+                            } else { selected[row.type] = opts[it].first; load(true) }
                         }
-                    } ?: panelErr?.let { Text(it, color = c.secondary, fontSize = 13.sp) }
+                    } ?: panelErr?.let { Text("$it · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { scope.launch { loadPanel(); if (panel != null) load(true) } }) }
                 }
             }
         }

@@ -534,27 +534,29 @@ actor HongguoClient {
 
     // MARK: panel / category (gateway category_transport.go)
 
-    private var panelCache: (Date, HGPanel)?
+    private var panelCache: [String: (Date, HGPanel)] = [:]
     private static let categoryPath = "/reading/distribution/category/landpage/v:version/"
     private static let categoryEndpoint = "https://api5-normal-sinfonlinea.fqnovel.com" + categoryPath + "?"
 
-    func panel() async throws -> HGPanel {
-        if let (at, p) = panelCache, Date().timeIntervalSince(at) < 600 { return p }
-        let data = try await categoryData(selection: [:], offset: 0, session: "", seen: [], panel: true)
+    func panel(genre: String = "") async throws -> HGPanel {
+        guard ["", "short_play", "comic_series", "ai_series"].contains(genre) else { throw ProviderError.invalid("未知剧种") }
+        if let (at, p) = panelCache[genre], Date().timeIntervalSince(at) < 600 { return p }
+        let data = try await categoryData(selection: genre.isEmpty ? [:] : ["genre": [genre]], offset: 0, session: "", seen: [], panel: true)
         let rows = J.arr(data["selector_rows"]).map { r -> HGFilterRow in
             let rm = J.dict(r)
             return HGFilterRow(type: J.str(rm["type"]), name: J.str(rm["row_name"]), selectType: J.int(rm["selection_type"]),
                                items: J.arr(rm["items"]).map { HGFilterOption(id: J.str(J.dict($0)["selector_item_id"]), name: J.str(J.dict($0)["show_name"])) })
         }
         let p = HGPanel(rows: rows)
-        panelCache = (Date(), p)
+        panelCache[genre] = (Date(), p)
         return p
     }
 
-    func category(filterIds: [String], offset: Int = 0, sessionId: String? = nil) async throws -> HGPage {
-        let panel = try await panel()
+    func category(filterIds: [String], offset: Int = 0, sessionId: String? = nil, seenIds: [String] = []) async throws -> HGPage {
+        let genre = filterIds.first { ["short_play", "comic_series", "ai_series"].contains($0) } ?? ""
+        let panel = try await panel(genre: genre)
         let selection = try Self.categorySelection(panel, filterIds)
-        let data = try await categoryData(selection: selection, offset: offset, session: sessionId ?? "", seen: [], panel: false)
+        let data = try await categoryData(selection: selection, offset: offset, session: sessionId ?? "", seen: seenIds, panel: false)
         let next = J.int(data["next_offset"])
         var sess = J.str(data["session_id"]); if sess.isEmpty { sess = sessionId ?? "" }
         let more = J.bool(data["has_more"]) && next > offset && !sess.isEmpty
@@ -570,8 +572,14 @@ actor HongguoClient {
             guard let key = pieces.first, key != "_rticket" else { return nil }
             return (key, pieces.count > 1 ? (pieces[1].removingPercentEncoding ?? pieces[1]) : "")
         }
-        let signed = HGPlayerSign.signPOST(path: Self.categoryPath, pairs: pairs, nowMillis: Self.nowMs(),
-                                           deviceID: d.deviceId, versionName: HGDevice.appVersion, body: Array(body))
+        let now = Self.nowMs()
+        let query = HGPlayerSign.encodeQuery(pairs + [("ts", String(now / 1000)), ("_rticket", String(now))])
+        var categoryHeaders = try HGPlayerSign.playbackHeaders(query: query, body: Array(body), timestamp: UInt32(now / 1000), emptyInstallToken: true)
+        categoryHeaders["Content-Type"] = "application/json; charset=utf-8"
+        categoryHeaders["Accept"] = "application/json; charset=utf-8,application/x-protobuf"
+        categoryHeaders["sdk-version"] = "2"; categoryHeaders["x-xs-from-web"] = "0"
+        categoryHeaders["x-ss-req-ticket"] = String(now)
+        let signed = (query: query, headers: categoryHeaders)
         guard let url = URL(string: Self.categoryEndpoint + signed.query) else { throw ProviderError.invalid("分类地址无效") }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -589,9 +597,9 @@ actor HongguoClient {
         return payload
     }
 
-    private static func categoryBody(selection: [String: [String]], offset: Int, session: String, seen: [String], panel: Bool) -> Data {
+    static func categoryBody(selection: [String: [String]], offset: Int, session: String, seen: [String], panel: Bool) -> Data {
         var scene = "default", kind = "only_content"
-        if selection["genre"]?.count == 1, let value = selection["genre"]?.first { scene = value }
+        if selection["genre"]?.count == 1, let value = selection["genre"]?.first, value != "short_play" { scene = value }
         if panel { kind = "only_panel" }
         return J.encodeSorted([
             "filter_ids": seen.joined(separator: ","), "req_scene": scene, "offset": offset, "session_id": session,
@@ -599,7 +607,7 @@ actor HongguoClient {
         ] as [String: Any])
     }
 
-    private static func categorySelection(_ panel: HGPanel, _ filterIds: [String]) throws -> [String: [String]] {
+    static func categorySelection(_ panel: HGPanel, _ filterIds: [String]) throws -> [String: [String]] {
         var selection = Dictionary(uniqueKeysWithValues: panel.rows.map { ($0.type, [String]()) })
         var single = Dictionary(uniqueKeysWithValues: panel.rows.map { ($0.type, $0.selectType == 2) })
         var types: [String: String] = [:]
@@ -616,45 +624,35 @@ actor HongguoClient {
     // MARK: resolve (resolve.go batch via postPlayerBatch → video_model.go single dialect)
 
     func resolveFresh(vid: String) async throws -> HGResolvedVideo {
-        var sawSoftReject = false
-        let identity = try? await ensurePlayerIdentity()
-        let pureDid = identity?.deviceId ?? ""
-        if let r = try await resolvePureLevels(vid, sawSoftReject: &sawSoftReject) { return r }
-        if sawSoftReject, !pureDid.isEmpty, (try? await ensurePlayerIdentity(replacing: pureDid)) != nil {
-            if let r = try await resolvePureLevels(vid, sawSoftReject: &sawSoftReject) { return r }
-        }
-        for level in [3, 4] {
+        for attempt in 0..<3 {
             try Task.checkCancellation()
+            let pairs = try await purePlayerPairs()
+            let did = pairs.first { $0.0 == "device_id" }?.1 ?? ""
             do {
-                if let r = try await resolveBatch(vid, level: level) {
+                for level in [3, 4] {
+                    var result: HGResolvedVideo?
+                    do { result = try await resolvePure(vid, level: level, pairs: pairs) }
+                    catch is PlayerEmptyBody {
+                        for path in ["/novel/player/multi_video_model/v1", "/novel/player/multi_video_model/player/v1"] {
+                            do { result = try await resolveCurrentBatch(vid, level: level, pairs: pairs, path: path); break }
+                            catch is PlayerEmptyBody { }
+                        }
+                    }
+                    guard let r = result else { throw PlayerEmptyBody() }
                     if r.err == Self.byteVC2Only && level == 3 { continue }
                     return r
                 }
             } catch is PlayerEmptyBody {
-                sawSoftReject = true
-                NSLog("[HG] resolveBatch soft-reject level=%d", level)
-            } catch {
-                NSLog("[HG] resolveBatch error level=%d: %@", level, String(describing: error))
+                if Self.purePlayerOverride != nil { throw PlayerEmptyBody() }
+                playerRejected.insert(did)
+                if playerIdentity?.deviceId == did { playerIdentity = nil }
+                if attempt == 2 {
+                    playerBlockedUntil = Date().addingTimeInterval(30)
+                    throw ProviderError.upstream("取流被上游空包拒绝，已尝试 3 个匿名身份，请稍后重试")
+                }
             }
         }
-        for level in [3, 4] {
-            try Task.checkCancellation()
-            do {
-                let r = try await resolveSingle(vid, level: level)
-                if r.err == Self.byteVC2Only && level == 3 { continue }
-                return r
-            } catch let e as ProviderError {
-                if case .upstream(let m) = e, m.contains("空响应") || m.contains("软拒绝") { sawSoftReject = true }
-                NSLog("[HG] resolveSingle error level=%d: %@", level, e.localizedDescription)
-                if level == 4 { break }
-            } catch {
-                NSLog("[HG] resolveSingle error level=%d: %@", level, String(describing: error))
-            }
-        }
-        if sawSoftReject {
-            throw ProviderError.upstream("取流被上游空包拒绝（软拒绝）")
-        }
-        throw ProviderError.upstream("取链失败")
+        throw ProviderError.upstream("没有可用播放流")
     }
 
     /// Pure video_model at level 3 then 4. An empty body at level 3 means the device is rejected, so level 4 is
@@ -750,7 +748,7 @@ actor HongguoClient {
                 ("need_personal_recommend", "1"), ("player_so_load", "1"), ("is_android_pad_screen", "0"), ("openudid", openudid)]
     }
 
-    private func resolvePure(_ vid: String, level: Int) async throws -> HGResolvedVideo {
+    private func resolvePure(_ vid: String, level: Int, pairs frozen: [(String, String)]? = nil) async throws -> HGResolvedVideo {
         // Keep the previously compatible single-video body; sign its exact bytes.
         let bodyObj: [String: Any] = ["video_id": vid,
                                       "biz_param": ["video_id_type": 0, "need_all_video_definition": true, "video_platform": 3,
@@ -762,9 +760,11 @@ actor HongguoClient {
             if attempt > 0 { try await Task.sleep(for: .milliseconds(500)) }
             let now = Date()
             let nowMs = Int64(now.timeIntervalSince1970 * 1000)
-            let ts = UInt32(nowMs / 1000)
-            let q = HGPlayerSign.encodeQuery(try await purePlayerPairs() + [("ts", String(ts)), ("_rticket", String(nowMs))])
-            let headers = try HGPlayerSign.playbackHeaders(query: q, body: Array(body), timestamp: ts)
+            let pairs: [(String, String)]
+            if let frozen { pairs = frozen } else { pairs = try await purePlayerPairs() }
+            let did = pairs.first { $0.0 == "device_id" }?.1 ?? ""
+            let signed = try HGCurrentPlayer.sign(pairs: pairs, nowMillis: nowMs, deviceID: did, versionName: Self.purePlayerVersionName, body: Array(body))
+            let q = signed.query, headers = signed.headers
             var req = URLRequest(url: URL(string: "https://" + Self.purePlayerHost + Self.purePlayerPath + "?" + q)!)
             req.httpMethod = "POST"
             req.httpBody = body
@@ -774,7 +774,7 @@ actor HongguoClient {
             req.setValue(Self.purePlayerUA, forHTTPHeaderField: "User-Agent")
             req.setValue("8662", forHTTPHeaderField: "x-ss-dp")
             req.setValue("101", forHTTPHeaderField: "lc")
-            req.setValue("\(nowMs)-\(Int64(now.timeIntervalSince1970 * 1_000_000_000) & 0x7fffffff)", forHTTPHeaderField: "x-reading-request")
+            req.setValue("\(headers["x-ss-req-ticket"]!)-\(Int64(now.timeIntervalSince1970 * 1_000_000_000) & 0x7fffffff)", forHTTPHeaderField: "x-reading-request")
             do {
                 // Same no-proxy session as batch — system proxy/SOCKS yields 200 empty on this Mac.
                 let (data, resp) = try await playerSession.data(for: req)
@@ -795,6 +795,32 @@ actor HongguoClient {
             }
         }
         throw last
+    }
+
+    private func resolveCurrentBatch(_ vid: String, level: Int, pairs: [(String, String)], path: String) async throws -> HGResolvedVideo {
+        let body = J.encodeSorted(["biz_param": ["detail_page_version": 0, "device_level": level, "disable_digg_stat": false,
+            "disable_video_relate_book": false, "need_all_video_definition": true, "need_mp4_align": false, "use_os_player": false,
+            "use_server_dns": true, "use_server_dns_scene": "cold_start_stage", "video_platform": 1024] as [String: Any],
+            "dr_scene": "player", "mixed_video_id_map": ["1004": [vid]]] as [String: Any])
+        let did = pairs.first { $0.0 == "device_id" }?.1 ?? ""
+        let now = Self.nowMs()
+        let signed = try HGCurrentPlayer.sign(pairs: pairs, nowMillis: now, deviceID: did, versionName: Self.purePlayerVersionName, body: Array(body))
+        var request = URLRequest(url: URL(string: "https://" + Self.purePlayerHost + path + "?" + signed.query)!)
+        request.httpMethod = "POST"; request.httpBody = body
+        request.allHTTPHeaderFields = signed.headers
+        request.setValue(Self.purePlayerUA, forHTTPHeaderField: "User-Agent")
+        request.setValue("8662", forHTTPHeaderField: "x-ss-dp"); request.setValue("101", forHTTPHeaderField: "lc")
+        request.setValue("\(signed.headers["x-ss-req-ticket"]!)-\(now & 0x7fffffff)", forHTTPHeaderField: "x-reading-request")
+        let (bytes, response) = try await playerSession.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw ProviderError.upstream("multi_video_model HTTP \(status)") }
+        guard !bytes.isEmpty else { throw PlayerEmptyBody() }
+        let j = try J.parse(bytes)
+        for code in [j["code"], J.dict(j["BaseResp"])["StatusCode"]] where code != nil {
+            guard J.str(code) == "0" else { throw ProviderError.upstream("multi_video_model code=\(J.str(code))") }
+        }
+        guard let model = Self.videoModelJSON(J.dict(J.dict(j["data"])[vid])["video_model"]) else { throw ProviderError.upstream("multi_video_model 缺少请求的分集") }
+        return try await materialize(model, vid: vid)
     }
 
     private static let byteVC2Only = "该集仅返回 ByteVC2 编码，iOS 无法解码"

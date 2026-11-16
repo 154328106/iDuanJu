@@ -19,7 +19,7 @@ object HGPlaybackSign {
 
     fun headers(
         query: String, body: ByteArray, timestamp: UInt,
-        argusRandom: UInt? = null, ladonRandom: UInt? = null,
+        argusRandom: UInt? = null, ladonRandom: UInt? = null, emptyInstallToken: Boolean = false,
     ): Map<String, String> {
         fun param(name: String): String {
             for (part in query.split("&")) {
@@ -47,7 +47,7 @@ object HGPlaybackSign {
         bean += S.pBytes(13u, S.sm3(if (body.isEmpty()) ByteArray(16) else S.md5(body)).copyOf(6))
         bean += S.pBytes(14u, S.sm3(if (query.isEmpty()) ByteArray(16) else query.toByteArray()).copyOf(6))
         bean += S.pBytes(15u, uint(1u, 1u) + uint(2u, 1u) + uint(3u, 1u) + uint(7u, 0xC792ECCCu))
-        bean += str(16u, param("iid")) + str(20u, "none") + uint(21u, 738u)
+        bean += str(16u, if (emptyInstallToken) "" else param("iid")) + str(20u, "none") + uint(21u, 738u)
         bean += S.pBytes(23u, str(1u, "NX551J") + uint(2u, 8196u) + uint(4u, 0x80E0D800u)) + uint(25u, 2u)
 
         val signKey = S.hexBytes("fc78e0a9657a0c748ce51559903ccf03510e51d3cff232d71343e88a321c5304")

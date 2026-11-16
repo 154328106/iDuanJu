@@ -10,6 +10,7 @@ struct CategoryView: View {
     @State private var panelError: Error?
     @State private var selected: [String: String] = [:]
     @State private var pager = Pager()
+    @State private var panelGeneration = 0
 
     var body: some View {
         ScrollView {
@@ -31,10 +32,16 @@ struct CategoryView: View {
                         let opts = [HGFilterOption(id: "", name: "全部")] + row.items
                         PillTabs(items: opts, selection: Binding(
                             get: { opts.first { $0.id == (selected[row.type] ?? "") } ?? opts[0] },
-                            set: { selected[row.type] = $0.id; reload() })) { $0.name }
+                            set: { option in
+                                if row.type == "genre" {
+                                    selected = option.id.isEmpty ? [:] : ["genre": option.id]
+                                    panel = nil
+                                    Task { await loadPanel(); reload() }
+                                } else { selected[row.type] = option.id; reload() }
+                            })) { $0.name }
                     }
                 } else if let panelError {
-                    ErrorStateView(error: panelError) { Task { await loadPanel() } }
+                    ErrorStateView(error: panelError) { Task { await loadPanel(); reload() } }
                 }
 
                 if let e = pager.error, pager.items.isEmpty { ErrorStateView(error: e) { reload() } }
@@ -50,7 +57,14 @@ struct CategoryView: View {
     }
 
     private func loadPanel() async {
-        do { panel = try await HongguoClient.shared.panel(); panelError = nil } catch { panelError = error }
+        panelGeneration += 1
+        let generation = panelGeneration, selectedGenre = selected["genre"] ?? ""
+        panelError = nil
+        do {
+            let fresh = try await HongguoClient.shared.panel(genre: selectedGenre)
+            guard generation == panelGeneration, selectedGenre == (selected["genre"] ?? "") else { return }
+            panel = fresh
+        } catch { if generation == panelGeneration { panelError = error } }
     }
 
     private func reload() {
@@ -58,8 +72,9 @@ struct CategoryView: View {
             let b = BoardSpec(kind: .hongguo(genre, sub))
             pager.reset { try await b.fetch($0, $1) }
         } else {
+            guard panel != nil else { return }
             let ids = selected.values.filter { !$0.isEmpty }.sorted()
-            pager.reset { prev, _ in try await HongguoClient.shared.category(filterIds: ids, offset: prev.nextOffset ?? 0, sessionId: prev.sessionId) }
+            pager.reset { prev, seen in try await HongguoClient.shared.category(filterIds: ids, offset: prev.nextOffset ?? 0, sessionId: prev.sessionId, seenIds: seen.map(\.seriesId)) }
         }
     }
 }
