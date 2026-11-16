@@ -419,6 +419,28 @@ final class PluginTests: XCTestCase {
 
     // MARK: 苹果 CMS
 
+    @MainActor func testCMSCategoryRequestsKeepFullCategoryList() async throws {
+        NetGuard.resolverOverride = { _ in ["93.184.216.34"] }
+        var queries: [[String: String]] = []
+        PluginFixtures.responder = { request in
+            let pairs = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let query = Dictionary(uniqueKeysWithValues: pairs.map { ($0.name, $0.value ?? "") })
+            queries.append(query)
+            let payload: [String: Any] = query["t"] == "6"
+                ? ["code": 1, "pagecount": 2, "class": [["type_id": 6, "type_name": "动作片"]], "list": [["vod_id": 42, "vod_name": "测试影片"]]]
+                : ["code": 1, "class": [["type_id": 1, "type_name": "电影"], ["type_id": 6, "type_name": "动作片"]], "list": []]
+            return PluginFixtures.Reply(status: 200, body: try! JSONSerialization.data(withJSONObject: payload))
+        }
+        let site = try await CMSStore.shared.add(name: "Fixture", api: "https://cms-regression.example.com/api", adult: false)
+        defer { CMSStore.shared.remove(site.key) }
+        let provider = MacCMSProvider(source: site.source, site: site)
+        let page = try await provider.list(SiteCategory(id: "6", title: "动作片", path: "6"), page: 2)
+        XCTAssertEqual(page.items.first?.seriesId, "42")
+        XCTAssertEqual(queries.last?["t"], "6")
+        XCTAssertEqual(queries.last?["pg"], "2")
+        XCTAssertEqual(CMSStore.site(site.key)?.categories.count, 2)
+    }
+
     static let cmsList: [String: Any] = [
         "code": 1, "page": 1, "pagecount": 3, "total": 60,
         "class": [["type_id": 1, "type_name": "电影"], ["type_id": 2, "type_name": "连续剧"], ["type_id": 9, "type_name": "萝莉"]],

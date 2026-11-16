@@ -10,6 +10,15 @@ import org.junit.Test
 
 /** 1:1 with iOS PluginTests.testMacCMSParsing / testMinorsFilter. */
 class MacCMSTest {
+    @Test fun categoryQueryAndUpstreamFailure() {
+        val u = MacCMS.url("https://example.com/api", mapOf("ac" to "detail", "t" to "6", "pg" to "2"))!!
+        assertTrue(u.contains("t=6")); assertTrue(u.contains("pg=2"))
+        try {
+            MacCMS.fixture = { """{"code":0,"msg":"维护中","list":[]}""" }
+            val e = assertThrows(Exception::class.java) { MacCMS.fetch("https://example.com/api", mapOf("ac" to "detail")) }
+            assertTrue(e.message!!.contains("维护中"))
+        } finally { MacCMS.fixture = null }
+    }
     private val cmsList = JSONObject("""{"code":1,"page":1,"pagecount":3,"total":60,
         "class":[{"type_id":1,"type_name":"电影"},{"type_id":2,"type_name":"连续剧"},{"type_id":9,"type_name":"萝莉"}],
         "list":[{"vod_id":101,"vod_name":"示例电影","vod_pic":"http://img.example.com/a.jpg","vod_remarks":"HD","type_name":"电影","vod_actor":"甲,乙"},

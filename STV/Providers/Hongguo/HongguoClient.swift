@@ -579,7 +579,7 @@ actor HongguoClient {
         for (k, v) in signed.headers { req.setValue(v, forHTTPHeaderField: k) }
         req.setValue(Self.ua, forHTTPHeaderField: "User-Agent")
         req.setValue("8662", forHTTPHeaderField: "x-ss-dp")
-        let (data, resp) = try await session.data(for: req)
+        let (data, resp) = try await self.session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw ProviderError.upstream("分类 HTTP \(status)") }
         let j = try J.parse(data)

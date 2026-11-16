@@ -8,13 +8,25 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 [Android 版](#android-版)。App 本身**不托管任何内容**，所有数据都由你的设备直接向各个公开站点请求。
 
 **下载**：到 [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) 获取 iOS 未签名 IPA 和 Android APK
-（[Android 1.5.2](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.2-android)）。
+（[Android 1.5.8](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.8-android)、
+[iOS 1.5 build 8](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b8)）。
+
+### 2026-11-16 更新
+
+- 修复 Actions：Android 使用 Maven Central 镜像、Gradle 缓存和有界重试；iOS 保留完整编译日志并作为 artifact 上传。
+- 苹果 CMS：首页按分类独立分页、刷新完整分类列表、显示上游错误与空分类提示。部分接口的“电影”等父分类本身无资源，请选择“动作片”等子分类。
+- 小说：iOS 新增“发现好书”，读取已导入书源的 `exploreUrl` / `ruleExplore`；支持文本、JSON 和 JS 生成的栏目。
+- Android 新增剧星榜、演员名搜索入口、小说 TXT 阅读、书源导入、搜索、发现栏目、目录、章节阅读与续读；新增预加载开关与 100–2000 MB 缓存设置。
+- Android 修复 CENC 样本描述、IV、全明文子样本、`saiz/saio` 和分片解析；使用已知明文回归测试。修复去广告开关持久化与缓存文件写入检查。
+
+**Android 安装提醒**：1.5.8 起发布包使用固定分发签名。此前版本使用调试签名，如果系统提示签名不一致，需要先保存书源、插件和采集站配置，再卸载旧版后安装。卸载会清除应用本地数据；此后同一分发签名的版本可覆盖更新。
 
 ## 功能
 
 - **内置源**：红果短剧（本地签名、匿名设备）、黄果（AI 短剧 / 视频）、Telegram 频道（网页预览 + 可选 TDLib 登录）
 - **长视频站点**（18+，默认关闭）：MissAV、Jable、SupJav、Hanime1、Pornhub、XVideos、Eporner 等
 - **漫画**：MangaDex、包子漫画，以及 JS 插件（manga18fx / komikindo / 18comic，18+，默认关闭）
+- **小说**：iOS 支持 TXT / EPUB、阅读书源、搜索、发现、阅读进度与朗读；Android 支持 TXT 和基础阅读书源，兼容范围见下文。
 - **JS 插件系统**：基于 QuickJS 的沙箱，每个插件独立运行、只能访问自己声明且你同意过的域名，cookie / 存储互相隔离，
   不能 `eval`、访问不到本机和内网。支持从网址 / 文件 / 粘贴添加，以及订阅列表。规范见 [`docs/plugins/SPEC_ZH.md`](docs/plugins/SPEC_ZH.md)
 - **苹果 CMS v10 采集站**通用适配（m3u8 / mp4 直链）
@@ -86,7 +98,7 @@ scripts/package.sh            # 输出到 ./dist/STV-<版本>-unsigned.ipa
 ## Android 版
 
 位于 [`android/`](android/)：原生 **Kotlin + Jetpack Compose + Media3（ExoPlayer）**，插件运行时为 QuickJS，
-目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.2**（预发布）。
+目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.8**（预发布）。
 
 ```bash
 # 要求 JDK 21 + Android SDK（platform 35）
@@ -95,8 +107,8 @@ cd android
 ./gradlew :core:test        # 离线单元测试
 ```
 
-Releases 里的 APK 用 Android 调试证书签名（未上架任何商店），首次安装需允许「安装未知来源应用」；
-以后换成正式签名的版本需要先卸载再装。
+Releases 中的 APK 使用固定分发签名（未上架任何商店），首次安装需允许“安装未知来源应用”。
+本地未配置签名变量时仍使用调试证书；不能保证覆盖安装 Release 包。
 
 已对齐 iOS：
 
@@ -106,8 +118,19 @@ Releases 里的 APK 用 Android 调试证书签名（未上架任何商店），
 - Telegram 公开频道（t.me 网页预览）+ 屏蔽规则（关键词 / 正则 / 域名、广告识别、隐藏或折叠）
 - 黄果、漫画（MangaDex、包子、插件）；首页频道栏与「频道」面板、多源搜索、继续观看 / 收藏 / 历史
 - 「我的」：成人片源开关（18+ 确认，默认关闭）、去广告、重置设备 / 会话、清缓存
+- 剧星榜：排名、头像、热度、代表作与分页，点击演员进入名字搜索
+- 小说：首页 / 我的 → 小说；文件或粘贴 JSON / URL 导入书源；CSS/Jsoup 与简单 JSONPath 规则的搜索、发现、目录和正文；TXT 导入、字体大小与章节续读
+- 播放设置：下一集预加载开关、播放缓存上限
 
-尚未移植：TDLib 登录与下载管理、漫画离线下载、插件执行超时中断与签名校验、长视频预缓冲设置、Face ID 片源锁。
+仍有差异：Android 尚未包含 iOS 的完整小说 JS/XPath 规则引擎、EPUB、朗读、演员主页与性别筛选、内置长视频站适配、TDLib 登录与下载管理、漫画离线下载、插件执行超时中断与签名校验、Cloudflare 验证、CENC 边下边解、Face ID 片源锁。小说推荐来自用户导入的书源，不内置推书君、优书网等第三方服务。
+
+### Actions 与发布
+
+在 GitHub **Actions → package → Run workflow** 运行双端构建。Android 先运行 `:core:test`，再生成 APK；iOS 生成未签名 IPA 与模拟器 app zip。构建失败时查看 `ios-build-logs` 和 `android-test-reports` artifacts。
+
+Android 固定签名使用仓库 Secrets `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`，别名 `iduanju`；私钥不在仓库中。维护者应保留离线备份，避免更换签名导致覆盖安装失效。
+
+离线测试：`cd android && ./gradlew :core:test`。联网测试需显式 `-Plive=1`；离线通过不代表所有上游站点始终可用。
 
 **红果取流**：上游会软拒绝从未注册过的本地设备（HTTP 200 空包）。Android 默认每次取流现注册一台一次性匿名设备，
 只用一次，仓库内不附带、不写死任何设备 ID；也可以在「我的」里填入你自己的设备覆盖。
@@ -155,7 +178,9 @@ sandboxed QuickJS plugin system (per-plugin domain allow-list, isolated cookies/
 - **Android** (`android/`): native Kotlin + Jetpack Compose + Media3, minSdk 26 / targetSdk 35. Build with JDK 21:
   `cd android && ./gradlew assembleRelease`. Prebuilt (debug-cert signed) APK on the
   [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) page. Not yet ported: TDLib login/downloads, manga offline
-  download, plugin timeout/signature checks, long-video precache, Face ID lock.
+  download, plugin timeout/signature checks, CF verification, streaming CENC and Face ID lock.
+- **Android 1.5.8 / iOS 1.5 build 8**: CMS category fixes, source-driven novel discovery, Android actor ranking, basic novel reader, cache controls and CENC regression fixes. Android does not yet implement the full iOS novel JS/XPath engine, EPUB or speech.
+- **Signing**: Android releases from 1.5.8 use a persistent distribution key. Older debug-signed builds may require uninstalling first (which clears local data); back up your source configuration before migrating.
 - Telegram login uses **your own** `api_id` / `api_hash` from my.telegram.org; none are bundled.
 - Adult (18+) sources are off by default and require explicit unlock.
 - For personal study only; respect each site's Terms of Service and your local laws.

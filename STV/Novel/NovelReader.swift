@@ -895,8 +895,9 @@ struct PillSlider: View {
 
     var body: some View {
         GeometryReader { g in
-            let h = g.size.height, d = h - 6
-            let x = 3 + (g.size.width - d - 6) * value.clamped
+            let h: CGFloat = g.size.height
+            let d: CGFloat = h - 6
+            let x: CGFloat = 3 + (g.size.width - d - 6) * CGFloat(value.clamped)
             ZStack(alignment: .leading) {
                 Capsule().fill(track)
                 HStack {

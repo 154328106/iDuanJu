@@ -33,6 +33,10 @@ import kotlinx.coroutines.withContext
 /** iOS HomeFeedPage for `.site(cms)`. */
 @Composable
 fun SiteFeedPage(site: CMSSite, onOpen: (String) -> Unit) {
+    LaunchedEffect(site.key) {
+        val categories = withContext(Dispatchers.IO) { runCatching { MacCMS.fetchCategories(site.api) }.getOrNull() }
+        if (!categories.isNullOrEmpty()) IdjApp.instance.cms.cacheCategories(site.key, categories)
+    }
     FeedGrid("cms:" + site.key, listOf("" to "最新") + site.categories.map { it.id to it.name }, { cat, page ->
         val o = MacCMS.fetch(site.api, buildMap { put("ac", "detail"); put("pg", page.toString()); if (cat.isNotEmpty()) put("t", cat) })
         if (cat.isEmpty() && page == 1) MacCMS.parseCategories(o).takeIf { it.isNotEmpty() }?.let { IdjApp.instance.cms.cacheCategories(site.key, it) }

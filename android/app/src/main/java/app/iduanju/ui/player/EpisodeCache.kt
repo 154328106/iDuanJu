@@ -7,6 +7,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -33,9 +34,15 @@ object EpisodeCache {
 
     fun get(vid: String, onStatus: (String) -> Unit = {}): Deferred<Playable> = get(app.iduanju.core.hongguo.HGEpisode(0, vid), onStatus)
 
-    fun get(ep: app.iduanju.core.hongguo.HGEpisode, onStatus: (String) -> Unit = {}): Deferred<Playable> =
-        inflight[ep.vid]?.takeIf { !it.isCancelled && !(it.isCompleted && it.getCompletionExceptionOrNull() != null) }
-            ?: scope.async { load(ep, onStatus) }.also { inflight[ep.vid] = it }
+    fun get(ep: app.iduanju.core.hongguo.HGEpisode, onStatus: (String) -> Unit = {}): Deferred<Playable> = synchronized(inflight) {
+        inflight[ep.vid]?.takeIf { it.isActive } ?: run {
+            val task = scope.async(start = CoroutineStart.LAZY) { load(ep, onStatus) }
+            inflight[ep.vid] = task
+            task.invokeOnCompletion { inflight.remove(ep.vid, task) }
+            task.start()
+            task
+        }
+    }
 
     fun preload(ep: app.iduanju.core.hongguo.HGEpisode) { get(ep) }
 
@@ -73,14 +80,14 @@ object EpisodeCache {
             tmp.writeBytes(dec)
             if (!tmp.renameTo(f)) throw java.io.IOException("无法保存播放缓存")
         } finally { tmp.delete() }
-        trim()
+        trim(f)
         return Playable(f.absolutePath, s.quality, s.codec, true)
     }
 
-    /** Keep the cache under ~600 MB (oldest first). */
-    private fun trim() {
-        val files = dir().listFiles()?.sortedBy { it.lastModified() } ?: return
-        var total = files.sumOf { it.length() }
+    /** Preserve the file returned to the player even when it alone exceeds the budget. */
+    private fun trim(keep: File) {
+        val files = dir().listFiles()?.filter { it != keep && !it.name.endsWith(".part") }?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() } + keep.length()
         val budget = IdjApp.instance.settings.playbackCacheMB.toLong() shl 20
         for (f in files) { if (total < budget) break; total -= f.length(); f.delete() }
     }

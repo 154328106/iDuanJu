@@ -18,6 +18,13 @@ jobs:
           xcode-version: latest-stable
       - name: Install XcodeGen
         run: brew install xcodegen
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            DerivedDataRelease/SourcePackages
+          key: ${{ runner.os }}-swift-packages-${{ hashFiles('project.yml', 'Packages/**/Package.swift') }}
+          restore-keys: ${{ runner.os }}-swift-packages-
       - name: Build unsigned IPA and simulator app
         run: scripts/package.sh "$RUNNER_TEMP/dist"
       - name: Upload build logs
