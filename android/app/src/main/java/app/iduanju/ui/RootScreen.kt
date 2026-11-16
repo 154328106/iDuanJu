@@ -61,6 +61,7 @@ fun RootScreen(initialRoute: String? = null) {
                 composable("profile") { ProfileScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("sources") { app.iduanju.ui.profile.SourcesScreen(onBack = { nav.popBackStack() }) }
                 composable("plugins") { app.iduanju.ui.profile.PluginsScreen(onBack = { nav.popBackStack() }) }
+                composable("novel") { app.iduanju.novel.NovelScreen(onBack = { nav.popBackStack() }) }
                 composable("licenses") { app.iduanju.ui.profile.LicensesScreen(onBack = { nav.popBackStack() }) }
                 composable("actorRank") { app.iduanju.ui.profile.ActorRankScreen(onBack = { nav.popBackStack() }, onSearch = { nav.navigate("actorSearch/" + android.net.Uri.encode(it)) }) }
                 composable("actorSearch/{name}") { e -> SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }, initialQuery = e.arguments!!.getString("name")!!) }

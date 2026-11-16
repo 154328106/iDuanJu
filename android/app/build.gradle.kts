@@ -10,14 +10,25 @@ android {
         applicationId = "app.iduanju"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1507
-        versionName = "1.5.7-android"
+        versionCode = 1508
+        versionName = "1.5.8-android"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        create("distribution") {
+            val path = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!path.isNullOrBlank()) {
+                storeFile = file(path)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = "iduanju"
+                keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) "debug" else "distribution")
         }
         debug { }
     }

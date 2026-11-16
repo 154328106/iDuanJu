@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Mirrors iOS HomeSource / HomeTab (HomeView.swift). */
-enum class HomeSource(val label: String) { hongguo("红果"), huangguo("黄果"), ai("AI剧"), channels("频道"), manga("漫画") }
+enum class HomeSource(val label: String) { hongguo("红果"), huangguo("黄果"), ai("AI剧"), channels("频道"), manga("漫画"), novel("小说") }
 
 sealed class HomeTab(val subLabel: String) {
     data class Hongguo(val g: HGRankGenre) : HomeTab(
@@ -119,7 +119,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
     // iOS HomeSource.all: [红果, 黄果, AI剧] + visible sites (采集站 / plugins) + [频道, 漫画]
     val sites = IdjApp.instance.cms.visibleSites
     val plugins = IdjApp.instance.plugins.visible(IdjApp.instance.cms.adultUnlocked).filter { it.type == "video" || it.type == "shortdrama" }
-    val pages: List<Any> = listOf<Any>(HomeSource.hongguo) + (if (IdjApp.instance.cms.adultUnlocked) listOf<Any>(HomeSource.huangguo) else emptyList()) + listOf<Any>(HomeSource.ai) + sites + plugins + listOf(HomeSource.channels, HomeSource.manga)
+    val pages: List<Any> = listOf<Any>(HomeSource.hongguo) + (if (IdjApp.instance.cms.adultUnlocked) listOf<Any>(HomeSource.huangguo) else emptyList()) + listOf<Any>(HomeSource.ai) + sites + plugins + listOf(HomeSource.channels, HomeSource.manga, HomeSource.novel)
     val labels = pages.map { when (it) { is HomeSource -> it.label; is app.iduanju.core.cms.CMSSite -> it.name; else -> (it as app.iduanju.plugin.PluginStore.Installed).name } }
     val pager = rememberPagerState { pages.size }
     LaunchedEffect(HomeJump.label, pages.size) {
@@ -188,6 +188,15 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                 val s = any as HomeSource
                 if (s == HomeSource.huangguo) { app.iduanju.huangguo.HuangguoFeedPage(onOpenDetail); return@HorizontalPager }
                 if (s == HomeSource.manga) { app.iduanju.manga.MangaHomePage(onOpenManga); return@HorizontalPager }
+                if (s == HomeSource.novel) {
+                    val go = app.iduanju.ui.LocalNavigate.current
+                    Column(Modifier.fillMaxSize().padding(24.dp)) {
+                        Text("小说 · 我的书架", color = IdjThemeColors.text, fontSize = 24.sp)
+                        Text("导入 TXT 或阅读书源，浏览推荐、搜索书籍与继续阅读。", color = IdjThemeColors.secondary)
+                        TextButton(onClick = { go("novel") }) { Text("打开小说") }
+                    }
+                    return@HorizontalPager
+                }
                 if (s == HomeSource.channels) { app.iduanju.tg.ChannelFeedPage(onPlay); return@HorizontalPager }
                 if (s == HomeSource.ai && app.iduanju.IdjApp.instance.cms.adultUnlocked) {
                     // iOS AI剧: 红果 AI剧 | 黄果 AI 站 (the latter only behind the adult gate)
