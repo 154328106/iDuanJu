@@ -2,6 +2,11 @@ name: package
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_simulator:
+        description: Build simulator app and run iOS regression tests (slower)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,7 +32,8 @@ jobs:
           restore-keys: ${{ runner.os }}-swift-packages-
       - name: Build unsigned IPA and simulator app
         env:
-          STV_RUN_TESTS: '1'
+          STV_RUN_TESTS: ${{ inputs.verify_simulator && '1' || '0' }}
+          STV_BUILD_SIMULATOR: ${{ inputs.verify_simulator && '1' || '0' }}
         run: scripts/package.sh "$RUNNER_TEMP/dist"
       - name: Upload build logs
         if: always()

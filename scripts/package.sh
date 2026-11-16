@@ -18,6 +18,7 @@ xcodebuild "${common[@]}" -sdk iphoneos -destination 'generic/platform=iOS' -der
 APP_PLIST=DerivedDataRelease/Build/Products/Release-iphoneos/STV.app/Info.plist
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_PLIST")" == "$VER" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP_PLIST")" == "$BUILD" ]]
+if [[ "${STV_BUILD_SIMULATOR:-1}" == "1" || "${STV_RUN_TESTS:-0}" == "1" ]]; then
 SIM_ARCH=$(uname -m)
 xcodebuild "${common[@]}" -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -arch "$SIM_ARCH" ONLY_ACTIVE_ARCH=YES ENABLE_TESTABILITY=YES -derivedDataPath DerivedDataRelease build 2>&1 | tee "$LOG_DIR/simulator.log"
 if [[ "${STV_RUN_TESTS:-0}" == "1" ]]; then
@@ -29,6 +30,7 @@ if [[ "${STV_RUN_TESTS:-0}" == "1" ]]; then
     -only-testing:STVTests/PluginTests/testMacCMSParsing -only-testing:STVTests/CENCStreamTests \
     test 2>&1 | tee "$LOG_DIR/tests.log"
 fi
+fi
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
@@ -37,9 +39,12 @@ cp -R DerivedDataRelease/Build/Products/Release-iphoneos/STV.app "$STAGE/Payload
 NAME="${STV_PKG_NAME:-${VER}b${BUILD}}"
 IPA="$OUT/STV-$NAME-unsigned.ipa"
 rm -f "$IPA"; (cd "$STAGE" && zip -qry "$IPA" Payload)
-SIMZIP="$OUT/STV-$NAME-simulator.app.zip"
-rm -f "$SIMZIP"; (cd DerivedDataRelease/Build/Products/Release-iphonesimulator && zip -qry "$SIMZIP" STV.app)
+if [[ "${STV_BUILD_SIMULATOR:-1}" == "1" || "${STV_RUN_TESTS:-0}" == "1" ]]; then
+  SIMZIP="$OUT/STV-$NAME-simulator.app.zip"
+  rm -f "$SIMZIP"; (cd DerivedDataRelease/Build/Products/Release-iphonesimulator && zip -qry "$SIMZIP" STV.app)
+  shasum -a 256 "$SIMZIP"
+fi
 rm -rf "$STAGE"
 echo "version $VER ($BUILD)"
-ls -l "$IPA" "$SIMZIP"
-shasum -a 256 "$IPA" "$SIMZIP"
+ls -l "$IPA"
+shasum -a 256 "$IPA"
