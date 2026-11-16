@@ -10,8 +10,7 @@ import java.nio.file.Files
 
 /**
  * Live (`-Plive=1`): consecutive episodes through the app's real resolve path. With video_model signed by
- * Argus 551 / Ladon (HGPlaybackSign, same as iOS) one registered device serves every episode; with the
- * legacy Gorgon/Medusa set the same device went P F F F and the emulator failed on every play.
+ * the current Medusa envelope (HGCurrentPlayer, same as iOS), a healthy registered identity is reused.
  */
 class HGPureRepeatLiveTest {
     @Test fun consecutiveEpisodesResolve() {

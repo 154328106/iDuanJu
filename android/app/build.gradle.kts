@@ -43,7 +43,11 @@ val copyBundledPlugins by tasks.registering(Sync::class) {
     from(rootProject.file("../STV/Resources/Plugins")) { include("*.idjplugin") }
     into(layout.buildDirectory.dir("generated/idj-assets/plugins"))
 }
-tasks.named("preBuild") { dependsOn(copyBundledPlugins) }
+val copySharedLicenses by tasks.registering(Sync::class) {
+    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*") }
+    into(layout.buildDirectory.dir("generated/idj-assets/licenses"))
+}
+tasks.named("preBuild") { dependsOn(copyBundledPlugins, copySharedLicenses) }
 dependencies {
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
