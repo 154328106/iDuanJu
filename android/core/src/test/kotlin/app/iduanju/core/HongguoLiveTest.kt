@@ -87,4 +87,20 @@ class HongguoLiveTest {
         println("[live] search 总裁 items=${page.items.size} first=${page.items.firstOrNull()?.title} hasMore=${page.hasMore}")
         assertTrue("search empty", page.items.isNotEmpty())
     }
+
+    @Test
+    fun signedCategory() {
+        val panel = client.panel()
+        println("[live] panel rows=${panel.rows.size} ${panel.rows.map { it.name + ":" + it.items.size }}")
+        assertTrue("panel empty", panel.rows.isNotEmpty())
+        val all = client.category(emptyList())
+        println("[live] category all items=${all.items.size} first=${all.items.firstOrNull()?.title}")
+        assertTrue("category empty", all.items.isNotEmpty())
+        val genre = panel.rows.firstOrNull { it.type == "genre" }?.items?.firstOrNull()
+        if (genre != null) {
+            val filtered = client.category(listOf(genre.id))
+            println("[live] category ${genre.name} items=${filtered.items.size} first=${filtered.items.firstOrNull()?.title}")
+            assertTrue("filtered category empty", filtered.items.isNotEmpty())
+        }
+    }
 }

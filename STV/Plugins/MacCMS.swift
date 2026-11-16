@@ -230,6 +230,8 @@ struct MacCMSProvider: SiteProvider {
         var q = ["ac": "detail", "pg": String(p)]
         if !c.id.isEmpty { q["t"] = c.id }
         let o = try await Self.fetch(site.api, q)
+        // Only the unfiltered latest page carries the site-wide class list. A category
+        // response can contain a partial class array and must not replace the home modules.
         if c.id.isEmpty, p == 1, case let cats = Self.parseCategories(o), !cats.isEmpty {
             let k = site.key
             await MainActor.run { CMSStore.shared.cacheCategories(k, cats) }

@@ -245,6 +245,14 @@ private struct HomeFeedPage: View {
     }
 
     var body: some View {
+        if case .site(let source) = tab, source.cmsKey != nil || source.pluginID != nil {
+            DynamicSiteFeed(source: source, onHero: onHero)
+        } else {
+            rankFeed
+        }
+    }
+
+    private var rankFeed: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if source.subs.count > 1 { subChips } else if case .site = source { boardChips }
@@ -381,6 +389,103 @@ private struct HomeFeedPage: View {
 
     private func loadLegacy() async {
         do { legacyChannels = try await HuangguoClient.shared.legacyChannels(); legacyError = nil } catch { legacyError = error }
+    }
+}
+
+/// CMS / JS plugin home: every returned category is a selectable module, and the selected one pages its own list.
+private struct DynamicSiteFeed: View {
+    let source: DramaSource
+    var onHero: (String) -> Void
+    @State private var categories: [SiteCategory] = []
+    @State private var selected = ""
+    @State private var pager = Pager()
+    @State private var heroCover: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if categories.count > 1 { chips }
+                if let e = pager.error, pager.items.isEmpty {
+                    ErrorStateView(error: e) { reload(selected) }
+                } else if pager.items.isEmpty && pager.isLoading {
+                    cardsSkeleton.padding(.horizontal, 16)
+                } else {
+                    NumberedGrid(items: pager.items, numbered: false, hasMore: pager.hasMore, loading: pager.isLoading) { pager.loadMore() }
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("home.page.\(source.label)")
+        .refreshable { await refresh() }
+        .task { await refresh() }
+        .onChange(of: heroCover) { _, cover in if let cover { onHero(cover) } }
+    }
+
+    private var chips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(categories) { c in
+                    let on = c.id == selected
+                    Button { selected = c.id; reload(c.id) } label: {
+                        Text(c.title).font(.system(size: 13, weight: on ? .semibold : .regular))
+                            .foregroundStyle(on ? STVTheme.bg : STVTheme.text.opacity(0.8))
+                            .padding(.horizontal, 12).frame(height: 30)
+                            .background(on ? STVTheme.text : STVTheme.text.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("home.module.\(c.title)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }.padding(.horizontal, 16)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .padding(.bottom, 4)
+    }
+
+    private var cardsSkeleton: some View {
+        LazyVGrid(columns: HomeSection.columns(landscape: source.isLongVideo), spacing: 16) {
+            ForEach(0..<(source.isLongVideo ? 2 : 3), id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    ShimmerBlock().aspectRatio(source.isLongVideo ? 16/9 : 3/4, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    ShimmerBlock().frame(height: 12).frame(maxWidth: 90)
+                }
+            }
+        }
+    }
+
+    private func refresh() async {
+        let loaded = await Self.loadCategories(source)
+        categories = loaded
+        let id = loaded.contains { $0.id == selected } ? selected : (loaded.first?.id ?? "")
+        selected = id
+        reload(id)
+    }
+
+    private func reload(_ id: String) {
+        let source = source
+        pager.reset { prev, _ in
+            guard let provider = Sites.provider(source) else { throw ProviderError.unsupported(source.label) }
+            let category = SiteCategory(id: id, title: "", path: id)
+            let page = try await provider.list(category, page: max(1, prev.nextOffset ?? 1))
+            if (prev.nextOffset ?? 1) <= 1, let cover = page.items.first?.cover, !cover.isEmpty {
+                await MainActor.run { heroCover = cover }
+            }
+            return page
+        }
+    }
+
+    private static func loadCategories(_ source: DramaSource) async -> [SiteCategory] {
+        if let key = source.cmsKey {
+            let stored = CMSStore.site(key)?.categories ?? []
+            let latest = SiteCategory(id: "", title: "最新", path: "")
+            return [latest] + stored.map { SiteCategory(id: $0.id, title: $0.name, path: $0.id) }
+        }
+        let fallback = SiteCategory(id: "", title: "推荐", path: "")
+        guard let provider = Sites.provider(source) else { return [fallback] }
+        let categories = provider.categories.filter { !$0.id.isEmpty }
+        return [fallback] + categories
     }
 }
 
