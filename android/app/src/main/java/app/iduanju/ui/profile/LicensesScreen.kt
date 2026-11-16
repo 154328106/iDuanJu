@@ -26,6 +26,8 @@ fun LicensesScreen(onBack: () -> Unit) {
             RowDivider()
             License("QuickJS", "MIT License", "插件运行时（经 QuickJS 包装库），沙箱封装为本应用代码。")
             RowDivider()
+            License("Rhino 1.7.15", "Mozilla Public License 2.0", "小说书源脚本引擎，未修改；来源 github.com/mozilla/rhino，许可随安装包 assets/licenses 分发。")
+            RowDivider()
             License("hongguo-open-player", "GPL-3.0-only · zfdang (commit 3f687c5)",
                 "红果播放签名（Argus 551 / Ladon）参考其 src/server/native/argus.js 移植，与 iOS 实现逐字节一致。")
             RowDivider()

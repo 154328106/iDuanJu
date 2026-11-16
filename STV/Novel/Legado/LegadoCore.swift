@@ -425,7 +425,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     return m;
   };
   globalThis.Packages = {
-                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater } }, security: { MessageDigest } },
+                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, nio: { charset: { Charset: { forName: (name) => str(name) }, StandardCharsets: { UTF_8: 'UTF-8' } } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater } }, security: { MessageDigest } },
                     javax: { crypto: { Cipher, spec: { SecretKeySpec, IvParameterSpec } } },
                     cn: { hutool: { crypto: { digest: { DigestUtil: { md5Hex: (s) => java.md5Encode(s) } } } } },
                 };
@@ -480,7 +480,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
         }
         // `book` / `source` / `chapter` objects also answer Legado's getter style (book.getVariable, source.getKey()).
         header += "if (typeof source === 'object' && source) __wrapSource(source);\n"
-        header += "if (typeof book === 'object' && book) { book.getVariable = () => ''; }\n"
+        header += "if (typeof book === 'object' && book) { book.getVariable = (k) => java.get(k || '__bookVariable'); book.setVariable = (k,v) => java.put(v === undefined ? '__bookVariable' : k, v === undefined ? k : v); }\n"
         // jsLib and the snippet run as separate scripts (separate scopes in Legado). Top-level `let` / `const` become
         // `var` so names declared in both, or by two snippets, do not clash in the shared global scope.
         if let lib = jsLib, !lib.isEmpty {

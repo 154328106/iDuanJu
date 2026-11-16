@@ -44,7 +44,7 @@ val copyBundledPlugins by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/idj-assets/plugins"))
 }
 val copySharedLicenses by tasks.registering(Sync::class) {
-    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*") }
+    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*", "Rhino-*") }
     into(layout.buildDirectory.dir("generated/idj-assets/licenses"))
 }
 tasks.named("preBuild") { dependsOn(copyBundledPlugins, copySharedLicenses) }

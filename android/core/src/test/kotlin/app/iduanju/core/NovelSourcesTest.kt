@@ -34,4 +34,25 @@ class NovelSourcesTest {
         s.json.put("searchUrl", "@js:java.ajax('x')")
         assertThrows(Exception::class.java) { NovelSources.search(s, "") }
     }
+
+    @Test fun scriptDiscoveryOptionsAndListRules() {
+        val s=NovelSources.import("""{"bookSourceUrl":"https://example.com","bookSourceName":"脚本","exploreUrl":"@js:JSON.stringify([{title:'分类',url:''},{title:'玄幻',url:'{{address(page)}}'}])","jsLib":"function address(p){return 'https://example.com/r?page='+p+',{\"headers\":{\"X-Test\":\"ok\"}}';}","ruleExplore":{"bookList":"@js:JSON.parse(result).list.map(function(x){return JSON.stringify(x);})","name":"$.name","bookUrl":"$.url"}}""").single()
+        val cats=NovelSources.categories(s)
+        assertEquals(1,cats.size);assertEquals("分类",cats[0].group)
+        NovelSources.fixture={ u -> assertEquals("https://example.com/r?page=2",u); """{"list":[{"name":"雾港","url":"/book/1"}]}""" }
+        assertEquals("雾港",NovelSources.search(s,"",2,cats[0]).single().name)
+        assertThrows(Exception::class.java) { NovelSources.ruleValue("", "@js:Packages.java.lang.Runtime.getRuntime().exec('anything')",s,s.id) }
+    }
+
+    @Test fun realBundleContainsSourcesAndJsIsReportedClearly() {
+        val path = System.getenv("NOVEL_COLLECTION")
+        org.junit.Assume.assumeTrue("NOVEL_COLLECTION points at user-supplied 1335.json", path != null)
+        val raw = java.io.File(path!!).readText()
+        val sources = NovelSources.import(raw)
+        assertTrue(sources.size >= 150)
+        assertTrue(sources.count { it.json.optInt("bookSourceType", 0) == 0 } >= 140)
+        val cat = sources.first { it.name == "猫扑中文" }
+        assertTrue(NovelSources.categories(cat).any { it.title == "排行榜" })
+        assertFalse(NovelSources.categories(cat).any { it.url.isBlank() && it.action == null })
+    }
 }

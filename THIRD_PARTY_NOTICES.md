@@ -30,6 +30,11 @@ Pornhub (mediaDefinitions) were cross-checked against its extractors. The Swift 
   also bundled as `STV/Resources/Licenses/quickjs-ng-LICENSE.txt` and shown in 开源许可.
 - `idj_sandbox.c/.h` (eval-less sandbox wrapper, interrupt deadline, host bridge) is this app's own code.
 
+## Rhino — Mozilla Public License 2.0
+- https://github.com/mozilla/rhino, version 1.7.15, unmodified Maven dependency `org.mozilla:rhino`.
+- Android book-source JavaScript evaluation runs interpreted, with a class shutter and explicit host bridge; no Java class or filesystem access is exposed to source scripts.
+- License: `STV/Resources/Licenses/Rhino-MPL-2.0.txt` (also bundled with Android). The shared Legado compatibility prelude is this project's own code.
+
 ## JMComic-Crawler-Python — MIT (algorithm reference only)
 - https://github.com/hect0x7/JMComic-Crawler-Python — the public 18comic image segment algorithm
   (`JmImageTool.get_num` / `decode_and_save`) was re-implemented in Swift (`ImageStripes`) and in the bundled

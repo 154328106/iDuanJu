@@ -252,14 +252,21 @@ struct WebCover: View {
 struct NovelWebDetailView: View {
     let items: [LegadoSearchItem]
     var onRead: (NovelBook) -> Void
+    var resumeFrom: NovelBook? = nil
     @State private var pick = 0
     @State private var info: LegadoBookInfo?
     @State private var toc: [LegadoChapter]?
     @State private var error: String?
     @State private var loading = false
+    @State private var alternatives: [LegadoSearchItem] = []
+    @State private var findingSources = false
+    @State private var downloadBook: NovelBook?
+    @State private var sourceTask: Task<Void, Never>?
+    @State private var loadGeneration = UUID()
+    private var allItems: [LegadoSearchItem] { items + alternatives.filter { candidate in !items.contains { $0.id == candidate.id } } }
     private let store = NovelStore.shared
 
-    private var item: LegadoSearchItem { items[min(pick, items.count - 1)] }
+    private var item: LegadoSearchItem { allItems[min(pick, allItems.count - 1)] }
     private var source: LegadoSource? { LegadoSourceStore.shared.source(item.sourceURL) }
     private var onShelf: NovelBook? { store.webBook(source: item.sourceURL, url: item.bookURL) }
 
@@ -277,14 +284,16 @@ struct NovelWebDetailView: View {
                     }
                 }
                 Menu {
-                    ForEach(items.indices, id: \.self) { i in
-                        Button { pick = i; Task { await load() } } label: { Label(items[i].sourceName, systemImage: i == pick ? "checkmark" : "book") }
+                    ForEach(allItems.indices, id: \.self) { i in
+                        Button { pick = i } label: { Label(allItems[i].sourceName, systemImage: i == pick ? "checkmark" : "book") }
                     }
+                    Button("搜索其他书源") { sourceTask?.cancel(); sourceTask = Task { await findSources() } }
                 } label: {
-                    HStack { Text("书源：\(item.sourceName)"); Spacer(); Text(items.count > 1 ? "换源（\(items.count)）" : "").foregroundStyle(.secondary); Image(systemName: "chevron.up.chevron.down") }
+                    HStack { Text("书源：\(item.sourceName)"); Spacer(); Text("换源（\(allItems.count)）").foregroundStyle(.secondary); Image(systemName: "chevron.up.chevron.down") }
                         .font(.system(size: 14)).padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
                 }
                 .accessibilityIdentifier("detail.source")
+                if findingSources { HStack { ProgressView("正在查找同名书籍的其他来源…"); Button("停止") { sourceTask?.cancel() } } }
                 let intro = (info?.intro.isEmpty == false ? info!.intro : item.intro).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !intro.isEmpty { Text(intro).font(.system(size: 15)).lineSpacing(5) }
                 if let latest = (info?.latest).flatMap({ $0.isEmpty ? nil : $0 }) ?? (item.latest.isEmpty ? nil : item.latest) {
@@ -306,6 +315,10 @@ struct NovelWebDetailView: View {
                 Button { read(open: false) } label: { Text(onShelf == nil ? "加入书架" : "已在书架").frame(maxWidth: .infinity, minHeight: 44) }
                     .buttonStyle(.bordered).disabled(toc == nil || onShelf != nil)
                     .accessibilityIdentifier("detail.add")
+                Button {
+                    downloadBook = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
+                } label: { Label("下载", systemImage: "arrow.down.circle").frame(minHeight: 44) }
+                    .buttonStyle(.bordered).disabled(toc?.isEmpty != false && onShelf == nil)
                 Button { read(open: true) } label: { Text("开始阅读").frame(maxWidth: .infinity, minHeight: 44) }
                     .buttonStyle(.borderedProminent).disabled(toc?.isEmpty != false && onShelf == nil)
                     .accessibilityIdentifier("detail.read")
@@ -314,27 +327,58 @@ struct NovelWebDetailView: View {
         }
         .navigationTitle(item.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task(id: pick) { await load() }
+        .onDisappear { sourceTask?.cancel() }
+        .sheet(item: $downloadBook) { book in NovelDownloadView(book: book) }
+    }
+
+    private func findSources() async {
+        guard !findingSources else { return }
+        findingSources = true
+        defer { findingSources = false }
+        let target = item
+        let list = LegadoSourceStore.shared.enabled.filter { $0.id != target.sourceURL && !($0.searchUrl ?? "").isEmpty }
+        await withTaskGroup(of: [LegadoSearchItem].self) { group in
+            var iterator = list.makeIterator()
+            func enqueue() {
+                guard let source = iterator.next() else { return }
+                group.addTask { (try? await LegadoClient.run { try LegadoClient.search(source, key: target.name) }) ?? [] }
+            }
+            for _ in 0..<4 { enqueue() }
+            for await results in group {
+                if Task.isCancelled { group.cancelAll(); return }
+                let matched = results.filter { $0.name == target.name && (target.author.isEmpty || $0.author.isEmpty || $0.author == target.author) }
+                for match in matched where !allItems.contains(where: { $0.id == match.id }) { alternatives.append(match) }
+                enqueue()
+            }
+        }
+        if !Task.isCancelled, alternatives.isEmpty { error = "暂未找到可用的同名书籍来源，可在书源管理中启用更多源后重试" }
     }
 
     private func load() async {
         guard let source else { error = "书源已删除"; return }
         loading = true; error = nil; info = nil; toc = nil
         let it = item
+        let token = UUID(); loadGeneration = token
         do {
             let i = try await LegadoClient.run { try LegadoClient.info(source, bookURL: it.bookURL) }
+            guard token == loadGeneration, !Task.isCancelled else { return }
             info = i
             let book: [String: String] = ["name": i.name, "author": i.author, "bookUrl": it.bookURL]
             let t = try await LegadoClient.run { try LegadoClient.toc(source, tocURL: i.tocURL, book: book) }
+            guard token == loadGeneration, !Task.isCancelled else { return }
             if t.isEmpty { error = "这个书源没有返回目录" } else { toc = t }
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if token == loadGeneration, !Task.isCancelled { self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
         }
-        loading = false
+        if token == loadGeneration { loading = false }
     }
 
     private func read(open: Bool) {
         let b = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
-        if open { onRead(b) }
+        if open {
+            if let old = resumeFrom, old.id != b.id { store.transferProgress(from: old, to: b) }
+            onRead(b)
+        }
     }
 }

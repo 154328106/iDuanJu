@@ -165,8 +165,10 @@ enum LegadoClient {
             a = LegadoAnalyzer(first, baseURL: url, ctx: ctx)
         }
         func f(_ k: String) -> String { (try? a.string(rules[k] ?? "")) ?? "" }
+        // Name rules can persist book variables (e.g. 七猫's bid) used by toc/content.
+        let name = clean(f("name"))
         let toc = f("tocUrl")
-        return LegadoBookInfo(name: clean(f("name")), author: cleanAuthor(f("author")), intro: f("intro"),
+        return LegadoBookInfo(name: name, author: cleanAuthor(f("author")), intro: f("intro"),
             cover: LegadoURL.absolute(f("coverUrl"), base: url), kind: f("kind").replacingOccurrences(of: "\n", with: " · "),
             latest: f("lastChapter"), tocURL: toc.isEmpty ? (original ?? url) : LegadoURL.absolute(toc, base: url))
     }

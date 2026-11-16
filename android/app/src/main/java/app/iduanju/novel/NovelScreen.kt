@@ -3,6 +3,9 @@ package app.iduanju.novel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,6 +13,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -19,6 +25,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -45,6 +52,18 @@ fun NovelScreen(onBack: () -> Unit) {
     var localBook by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var downloadBusy by remember { mutableStateOf(false) }
+    var downloadDone by remember { mutableIntStateOf(0) }
+    var downloadTotal by remember { mutableIntStateOf(0) }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    var cachedCount by remember { mutableIntStateOf(0) }
+    var prefetch by remember { mutableIntStateOf(prefs.getInt("prefetch",3)) }
+    var showDownload by remember { mutableStateOf(false) }
+    var showSwitch by remember { mutableStateOf(false) }
+    var alternatives by remember { mutableStateOf<List<Pair<NovelSource,NovelHit>>>(emptyList()) }
+    var switchBusy by remember { mutableStateOf(false) }
+    var selectedGroup by remember { mutableStateOf("") }
+    val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
     val scope = rememberCoroutineScope()
     val readerState = rememberLazyListState()
@@ -67,12 +86,26 @@ fun NovelScreen(onBack: () -> Unit) {
     suspend fun read(index: Int, selectedSource: NovelSource? = source, bookToSave: NovelHit? = currentBook) {
         val s = selectedSource ?: return
         val chapter = chapters.getOrNull(index) ?: return
-        val body = withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url) }
+        val book = bookToSave ?: return
+        val cached = withContext(Dispatchers.IO) { cache.read(s.id, book.url, chapter.url) }
+        val body = cached ?: withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url) }.also { value ->
+            withContext(Dispatchers.IO) { cache.save(s.id,book.url,chapter.url,value) }
+        }
         text = body; chapterIndex = index; localBook = false
         bookToSave?.let { book ->
             prefs.edit().putString("last", JSONObject().put("source", s.id).put("name", book.name).put("author", book.author).put("url", book.url).put("chapter", index).toString()).apply()
         }
         readerState.scrollToItem(0)
+        val toc = chapters.toList()
+        cachedCount = withContext(Dispatchers.IO) { cache.count(s.id,book.url,toc) }
+        if (prefetch > 0) scope.launch(Dispatchers.IO) {
+            for(i in index+1 until minOf(toc.size,index+1+prefetch)) {
+                if(cache.read(s.id,book.url,toc[i].url)==null) {
+                    try { cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url)) }
+                    catch(e: CancellationException){throw e} catch(_:Exception){break}
+                }
+            }
+        }
     }
     fun search(reset: Boolean, cat: NovelCategory? = null) = work {
         val s = source ?: error("请先导入并选择书源")
@@ -102,7 +135,44 @@ fun NovelScreen(onBack: () -> Unit) {
     }
     LaunchedEffect(selected) {
         hits = emptyList(); categories = emptyList(); more = false; error = null
-        if (source != null) try { categories = NovelSources.categories(source) } catch (e: Exception) { error = e.message }
+        if (source != null) try {
+            categories = withContext(Dispatchers.IO) { NovelSources.categories(source) }
+            selectedGroup = categories.firstOrNull()?.group.orEmpty()
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message }
+    }
+    fun download(count: Int?) {
+        val book = currentBook ?: return; val s = source ?: return; val toc = chapters.toList()
+        if(downloadBusy)return
+        val start=if(count==null)0 else chapterIndex.coerceAtLeast(0)
+        val end=if(count==null)toc.size else minOf(toc.size,start+count)
+        downloadBusy=true;downloadDone=0;downloadTotal=end-start
+        downloadJob=scope.launch {
+            try {
+                withContext(Dispatchers.IO) { cache.saveBook(s.id,book,toc) }
+                for(i in start until end) {
+                    withContext(Dispatchers.IO) {
+                        if(cache.read(s.id,book.url,toc[i].url)==null) cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url))
+                    }
+                    downloadDone++;cachedCount=withContext(Dispatchers.IO){cache.count(s.id,book.url,toc)}
+                }
+            } catch(e:CancellationException){error="下载已暂停，可继续";throw e} catch(e:Exception){error="下载中断：${e.message}，已完成章节保留"}
+            finally { downloadBusy=false }
+        }
+    }
+    fun findSources() {
+        val target=currentBook ?: return
+        showSwitch=true
+        if(switchBusy)return
+        switchBusy=true;alternatives=emptyList()
+        scope.launch {
+            try {
+                for(s in sources.filter{it.enabled && it.id!=selected}) {
+                    val matches=withContext(Dispatchers.IO){runCatching{NovelSources.search(s,target.name)}.getOrDefault(emptyList())}
+                        .filter{it.name==target.name && (it.author==target.author || it.author.isBlank() || target.author.isBlank())}
+                    alternatives=alternatives+matches.map{s to it}
+                }
+            } finally {switchBusy=false}
+        }
     }
     fun back() { if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else onBack() }
     androidx.activity.compose.BackHandler { back() }
@@ -123,12 +193,27 @@ fun NovelScreen(onBack: () -> Unit) {
                     TextButton(onClick = { work { read(chapterIndex + 1) } }, enabled = chapterIndex + 1 < chapters.size && !busy) { Text("下一章") }
                 }
             }
+            if(!localBook) Row {
+                TextButton(onClick={showDownload=true}){Text("缓存 / 下载")}
+                TextButton(onClick={findSources()}){Text("换源")}
+                Text("已缓存 $cachedCount 章",color=IdjThemeColors.secondary,fontSize=12.sp,modifier=Modifier.padding(12.dp))
+            }
             val lines = remember(text) { text.lines().filter { it.isNotBlank() }.flatMap { it.chunked(2000) } }
             LazyColumn(state = readerState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 30.dp)) {
                 items(lines.size) { i -> Text(lines[i], color = IdjThemeColors.text, fontSize = font.sp, lineHeight = (font * 1.8).sp, modifier = Modifier.padding(vertical = 6.dp)) }
             }
         } else if (currentBook != null) {
-            Text(currentBook!!.name, color = IdjThemeColors.text)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(currentBook!!.name, color = IdjThemeColors.text, modifier = Modifier.weight(1f))
+                Text("已缓存 $cachedCount/${chapters.size}", color = IdjThemeColors.secondary, fontSize = 12.sp)
+            }
+            if (downloadBusy) {
+                LinearProgressIndicator(progress = { if (downloadTotal == 0) 0f else downloadDone.toFloat() / downloadTotal }, modifier = Modifier.fillMaxWidth())
+                Text("正在缓存 $downloadDone / $downloadTotal 章", color = IdjThemeColors.secondary, fontSize = 12.sp)
+            } else {
+                Row { TextButton(enabled = !busy && chapters.isNotEmpty(), onClick = {showDownload=true}) { Text("缓存 / 下载") }
+                    TextButton(onClick={findSources()}){Text("换源")}}
+            }
             LazyColumn(Modifier.weight(1f)) {
                 items(chapters.size) { i -> Text(chapters[i].title, color = IdjThemeColors.text, modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { work { read(i) } }.padding(14.dp)) }
                 if (!busy && chapters.isEmpty()) item { Text("目录为空，请检查书源规则", color = IdjThemeColors.secondary) }
@@ -143,7 +228,7 @@ fun NovelScreen(onBack: () -> Unit) {
                         val s = sources.firstOrNull { it.id == last.optString("source") } ?: error("续读书源已删除")
                         val book = NovelHit(last.getString("name"), last.optString("author"), last.getString("url"))
                         selected = s.id; currentBook = book
-                        chapters = withContext(Dispatchers.IO) { NovelSources.chapters(s, last.getString("url")) }
+                        chapters = withContext(Dispatchers.IO) { cache.books().firstOrNull{it.source==s.id&&it.book.url==book.url}?.chapters ?: NovelSources.chapters(s,book.url) }
                         if (chapters.isNotEmpty()) read(last.optInt("chapter").coerceIn(0, chapters.lastIndex), s, book)
                     }
                 } }, enabled = !busy) { Text("继续阅读") }
@@ -157,27 +242,76 @@ fun NovelScreen(onBack: () -> Unit) {
             }
             Row { OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("书名 / 作者") }, singleLine = true)
                 TextButton(onClick = { search(true) }, enabled = !busy && query.isNotBlank()) { Text("搜索") } }
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
+            if(categories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
+                categories.map{it.group}.distinct().forEach { group ->
+                    TextButton(onClick={selectedGroup=group}){Text(group,fontWeight=if(group==selectedGroup)FontWeight.Bold else FontWeight.Normal)}
+                }
+            }
+            Row(Modifier.weight(1f)) {
+            if(categories.isNotEmpty()) LazyColumn(Modifier.width(92.dp).fillMaxHeight().background(IdjThemeColors.elevated)) {
+                items(categories.filter{it.group==selectedGroup},key={it.id}) { cat ->
+                    Text(cat.title,color=if(cat==category)IdjThemeColors.accentWarm else IdjThemeColors.text,fontSize=14.sp,
+                        fontWeight=if(cat==category)FontWeight.Bold else FontWeight.Normal,
+                        modifier=Modifier.fillMaxWidth().clickable(enabled=!busy) {
+                            if(cat.action!=null)work{withContext(Dispatchers.IO){NovelSources.categoryAction(source!!,cat)};categories=withContext(Dispatchers.IO){NovelSources.categories(source!!)}}
+                            else search(true,cat)
+                        }.padding(horizontal=10.dp,vertical=18.dp))
+                }
+            }
+            LazyColumn(Modifier.weight(1f).fillMaxHeight().padding(start=12.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                 if (hits.isEmpty()) {
                     item { Text("发现 · 书源推荐与榜单", color = IdjThemeColors.text, modifier = Modifier.padding(vertical = 12.dp)) }
-                    items(categories, key = { it.url }) { cat -> Text(cat.title, color = IdjThemeColors.accent, modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { search(true, cat) }.padding(12.dp)) }
-                    if (categories.isEmpty()) item { Text("此书源没有发现栏目，可搜索或导入带 exploreUrl 的书源。支持 CSS/Jsoup 与简单 JSONPath；复杂 JS/XPath 书源暂不支持。", color = IdjThemeColors.secondary) }
+                    item { Text(if(categories.isEmpty())"此书源没有发现栏目，可搜索或导入其他书源。" else "选择左侧栏目，查看书源实时榜单", color = IdjThemeColors.secondary) }
+                    items(cache.books(),key={it.source+it.book.url}) { saved ->
+                        Text("离线 · ${saved.book.name}",color=IdjThemeColors.text,modifier=Modifier.fillMaxWidth().clickable{
+                            selected=saved.source;currentBook=saved.book;chapters=saved.chapters;cachedCount=cache.count(saved.source,saved.book.url,saved.chapters)
+                        }.padding(vertical=12.dp))
+                    }
                 } else {
                     item { TextButton(onClick = { hits = emptyList(); more = false }) { Text("返回发现栏目") } }
                     items(hits, key = { it.url }) { book ->
                         Column(Modifier.fillMaxWidth().clickable(enabled = !busy) { work {
                             val s = source ?: error("请先选择书源")
                             val result = withContext(Dispatchers.IO) { NovelSources.chapters(s, book.url) }
-                            currentBook = book; chapters = result
+                            withContext(Dispatchers.IO){cache.saveBook(s.id,book,result)}
+                            currentBook = book; chapters = result;cachedCount=cache.count(s.id,book.url,result)
                         } }.padding(vertical = 12.dp)) {
-                            Text(book.name, color = IdjThemeColors.text); Text(book.author, color = IdjThemeColors.secondary)
+                            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                                coil.compose.AsyncImage(book.cover,null,Modifier.size(58.dp,80.dp).background(IdjThemeColors.elevated),contentScale=ContentScale.Crop)
+                                Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                                    Text("${hits.indexOf(book)+1}. ${book.name}",color=IdjThemeColors.text,fontSize=17.sp,fontWeight=FontWeight.SemiBold,maxLines=2)
+                                    Text(listOf(book.author,book.kind).filter{it.isNotBlank()}.joinToString(" · "),color=IdjThemeColors.secondary,fontSize=12.sp,maxLines=2)
+                                    if(book.latest.isNotBlank())Text(book.latest,color=IdjThemeColors.secondary,fontSize=11.sp,maxLines=1)
+                                }
+                            }
                         }
                     }
                     if (more) item { TextButton(onClick = { search(false) }, enabled = !busy) { Text("加载更多") } }
                 }
             }
+            }
         }
     }
+    if(showDownload) AlertDialog(onDismissRequest={showDownload=false},title={Text("缓存与下载")},text={Column{
+        Text("已缓存 $cachedCount / ${chapters.size} 章")
+        if(downloadBusy){Text("本次 $downloadDone / $downloadTotal");TextButton(onClick={downloadJob?.cancel()}){Text("暂停")}}
+        else {TextButton(onClick={download(50)}){Text("缓存后 50 章")};TextButton(onClick={download(200)}){Text("缓存后 200 章")};TextButton(onClick={download(null)}){Text("下载全本 / 继续")}}
+        Text("提前缓存")
+        Row {listOf(0,3,10,20).forEach{n->TextButton(onClick={prefetch=n;prefs.edit().putInt("prefetch",n).apply()}){Text(if(n==0)"关" else "$n 章",fontWeight=if(prefetch==n)FontWeight.Bold else FontWeight.Normal)}}}
+        Text("保持应用前台，已完成章节可离线阅读。",fontSize=12.sp)
+    }},confirmButton={TextButton(onClick={showDownload=false}){Text("完成")}})
+    if(showSwitch)AlertDialog(onDismissRequest={showSwitch=false},title={Text("切换书籍来源")},text={LazyColumn{
+        if(switchBusy)item{Text("正在搜索同名书籍…")}
+        items(alternatives,key={it.first.id+it.second.url}){(s,book)->TextButton(onClick={work{
+            val oldTitle=chapters.getOrNull(chapterIndex)?.title
+            val toc=withContext(Dispatchers.IO){NovelSources.chapters(s,book.url)}
+            require(toc.isNotEmpty()){"该源目录为空"}
+            val match=toc.indexOfFirst{it.title.replace(Regex("\\s+"),"")==oldTitle?.replace(Regex("\\s+"),"")}.takeIf{it>=0} ?: chapterIndex.coerceIn(0,toc.lastIndex)
+            withContext(Dispatchers.IO){cache.saveBook(s.id,book,toc)}
+            selected=s.id;currentBook=book;chapters=toc;showSwitch=false;read(match,s,book)
+        }}){Text(s.name)}}
+        if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
+    }},confirmButton={TextButton(onClick={showSwitch=false}){Text("关闭")}})
     if (importing) AlertDialog(onDismissRequest = { importing = false }, title = { Text("导入阅读书源") },
         text = { Column { Text("粘贴 Legado JSON 或书源订阅 URL")
             OutlinedTextField(importText, { importText = it }, maxLines = 8)

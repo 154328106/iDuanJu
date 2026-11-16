@@ -149,7 +149,7 @@ struct NovelPagedView: UIViewControllerRepresentable {
 /// Reader after WeRead (iOS): chapter name top-left, page number bottom-right, interactive page turning,
 /// tap the middle or swipe up for the toolbar (目录 · 书籍 · 进度 · 亮度 · 字体) and 听书.
 struct NovelReaderView: View {
-    let book: NovelBook
+    @State private var book: NovelBook
     private let store = NovelStore.shared
     @State private var prefs = NovelPrefs.shared
     @State private var fonts = NovelFonts.shared
@@ -173,10 +173,12 @@ struct NovelReaderView: View {
     @State private var tocSearch = false
     @State private var query = ""
     @State private var hits: [(chapter: Int, offset: Int, snippet: String)] = []
+    @State private var showDownloads = false
+    @State private var showSources = false
     enum Tab: Equatable { case toc, info, progress, light, font, fonts, turn, listen }
 
     init(book: NovelBook) {
-        self.book = book
+        _book = State(initialValue: book)
         _paginator = State(initialValue: NovelPaginator(book: book))
     }
 
@@ -229,8 +231,24 @@ struct NovelReaderView: View {
                 }
             }
             .onChange(of: layoutKey(geo)) { _, _ in relayout(geo) }
+            .onChange(of: book.id) { _, _ in configure(geo); restore(); if book.isWeb { loader.prefetch(book, around: ref.chapter) } }
         }
         .statusBarHidden(!menu)
+        .sheet(isPresented: $showDownloads) { NovelDownloadView(book: book, chapter: ref.chapter) }
+        .sheet(isPresented: $showSources) {
+            if let sourceURL = book.sourceURL, let bookURL = book.bookURL {
+                NavigationStack {
+                    NovelWebDetailView(items: [LegadoSearchItem(name: book.title, author: book.author ?? "", kind: "", intro: "", cover: book.coverURL ?? "", latest: "", bookURL: bookURL, sourceURL: sourceURL, sourceName: LegadoSourceStore.shared.source(sourceURL)?.bookSourceName ?? "当前来源")], onRead: { replacement in
+                        showSources = false
+                        speaker.stop()
+                        book = replacement
+                        paginator = NovelPaginator(book: replacement)
+                        ref = NovelPageRef(chapter: store.progress[replacement.id]?.chapter ?? 0, index: 0)
+                        ready = false; version += 1
+                    }, resumeFrom: book)
+                }
+            }
+        }
         .preferredColorScheme(prefs.theme == .night ? .dark : .light)
         .onChange(of: speaker.sentence) { _, s in if let s { follow(s) } }
         .onChange(of: loader.revision) { _, _ in
@@ -343,6 +361,11 @@ struct NovelReaderView: View {
                 }
                 .accessibilityIdentifier("novel.back")
                 Spacer()
+                if book.isWeb {
+                    Button { save(); showSources = true } label: { Text("换源").font(.system(size: 15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }
+                    Button { showDownloads = true } label: { Image(systemName: "arrow.down.circle").font(.system(size: 22)).frame(width: 44, height: 44) }
+                        .accessibilityLabel("缓存与下载")
+                }
             }
             .foregroundStyle(pal.ink)
             .padding(.horizontal, 6)
