@@ -40,6 +40,8 @@ targets:
       path: STV/Info.plist
       properties:
         CFBundleDisplayName: i短剧
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSFaceIDUsageDescription: 用于解锁「片源管理」里隐藏的长视频片源
         NSPhotoLibraryAddUsageDescription: 用于把你下载的图片和视频保存到相册
         LSApplicationQueriesSchemes: [tg]

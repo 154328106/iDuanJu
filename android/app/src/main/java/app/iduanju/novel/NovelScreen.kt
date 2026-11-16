@@ -64,12 +64,12 @@ fun NovelScreen(onBack: () -> Unit) {
         for (s in parsed) { sources.removeAll { it.id == s.id }; sources.add(s) }
         saveSources(); selected = parsed.first().id; importing = false
     }
-    suspend fun read(index: Int, selectedSource: NovelSource? = source) {
+    suspend fun read(index: Int, selectedSource: NovelSource? = source, bookToSave: NovelHit? = currentBook) {
         val s = selectedSource ?: return
         val chapter = chapters.getOrNull(index) ?: return
         val body = withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url) }
         text = body; chapterIndex = index; localBook = false
-        currentBook?.let { book ->
+        bookToSave?.let { book ->
             prefs.edit().putString("last", JSONObject().put("source", s.id).put("name", book.name).put("author", book.author).put("url", book.url).put("chapter", index).toString()).apply()
         }
         readerState.scrollToItem(0)
@@ -141,9 +141,10 @@ fun NovelScreen(onBack: () -> Unit) {
                     if (last == null) { text = withContext(Dispatchers.IO) { File(context.filesDir, "novel-local.txt").readText() }; localBook = true }
                     else {
                         val s = sources.firstOrNull { it.id == last.optString("source") } ?: error("续读书源已删除")
-                        selected = s.id; currentBook = NovelHit(last.getString("name"), last.optString("author"), last.getString("url"))
+                        val book = NovelHit(last.getString("name"), last.optString("author"), last.getString("url"))
+                        selected = s.id; currentBook = book
                         chapters = withContext(Dispatchers.IO) { NovelSources.chapters(s, last.getString("url")) }
-                        if (chapters.isNotEmpty()) read(last.optInt("chapter").coerceIn(0, chapters.lastIndex), s)
+                        if (chapters.isNotEmpty()) read(last.optInt("chapter").coerceIn(0, chapters.lastIndex), s, book)
                     }
                 } }, enabled = !busy) { Text("继续阅读") }
             }
