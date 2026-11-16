@@ -777,6 +777,15 @@ enum LegadoURL {
         let charset = options["charset"] as? String
         // {{ }} templates
         rule = try substitute(rule, ctx: ctx, base: base, charset: charset, encodeKey: true)
+        // A template (e.g. {{qmTag(...)}}) may return a complete request + options.
+        // Parse that suffix after evaluation, before URL encoding eats the JSON.
+        if let range = Self.optionsStart(rule) {
+            let tail = String(rule[rule.index(after: range.lowerBound)...])
+            if let generated = lenientObject(tail, ctx: ctx) {
+                options.merge(generated) { _, new in new }
+                rule = String(rule[..<range.lowerBound])
+            }
+        }
         guard let url = resolve(rule, base: base) else { throw LegadoError.rule("网址无效：\(rule)") }
         var req = URLRequest(url: url)
         req.setValue(LegadoHTTP.userAgent, forHTTPHeaderField: "User-Agent")
@@ -836,7 +845,11 @@ enum LegadoURL {
         while i < rule.endIndex {
             if rule[i...].hasPrefix("{{") { depth += 1; i = rule.index(i, offsetBy: 2); continue }
             if depth > 0, rule[i...].hasPrefix("}}") { depth -= 1; i = rule.index(i, offsetBy: 2); continue }
-            if depth == 0, rule[i...].hasPrefix(",{") { outside.append(i..<rule.index(i, offsetBy: 2)) }
+            if depth == 0, rule[i] == "," {
+                var next = rule.index(after: i)
+                while next < rule.endIndex, rule[next].isWhitespace { next = rule.index(after: next) }
+                if next < rule.endIndex, rule[next] == "{" { outside.append(i..<rule.index(after: next)) }
+            }
             i = rule.index(after: i)
         }
         return outside.last

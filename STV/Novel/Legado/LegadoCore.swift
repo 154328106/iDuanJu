@@ -425,7 +425,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     return m;
   };
   globalThis.Packages = {
-                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, util: { Arrays, Base64, zip: { Inflater } }, security: { MessageDigest } },
+                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater } }, security: { MessageDigest } },
                     javax: { crypto: { Cipher, spec: { SecretKeySpec, IvParameterSpec } } },
                     cn: { hutool: { crypto: { digest: { DigestUtil: { md5Hex: (s) => java.md5Encode(s) } } } } },
                 };
@@ -458,6 +458,8 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
                         openUrl: () => {}, open: () => {}, getThemeConfig: () => ({}),
                 });
 
+                Object.assign(globalThis.java, Packages.java);
+                globalThis.javax = Packages.javax;
                 globalThis.__legado_call = call;
         })(__host);
 """#
@@ -491,7 +493,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
         }
         // The snippet runs inside a block: its top-level let / const stay local (no clash with the injected globals,
         // jsLib or earlier snippets) and the block's completion value is still the result.
-        var src = header + "{\n" + code + "\n}"
+        var src = header + "{\n" + Self.compatibleSyntax(code) + "\n}"
         #if DEBUG
         // STV_LEGADO_JSSTACK=1: error messages carry the JS stack (to find which call failed in a big jsLib).
         if ProcessInfo.processInfo.environment["STV_LEGADO_JSSTACK"] == "1" {
@@ -509,7 +511,13 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     }
 
     static func relaxed(_ js: String) -> String {
-        js.replacingOccurrences(of: #"(?m)^(\s{0,4})(?:let|const)(\s+[A-Za-z_$])"#, with: "$1var$2", options: .regularExpression)
+        compatibleSyntax(js).replacingOccurrences(of: #"(?m)^(\s{0,4})(?:let|const)(\s+[A-Za-z_$])"#, with: "$1var$2", options: .regularExpression)
+    }
+
+    // Rhino accepts the collection's `map([a,b]=>...)`; QuickJS requires parentheses.
+    static func compatibleSyntax(_ js: String) -> String {
+        js.replacingOccurrences(of: #"(\b(?:map|forEach|filter)\s*\(\s*)(\[[A-Za-z_$][A-Za-z0-9_$,\s]*\])\s*=>"#,
+                                with: "$1($2)=>", options: .regularExpression)
     }
 
     static func message(_ err: UnsafeMutablePointer<CChar>?) -> String {
