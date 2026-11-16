@@ -35,6 +35,8 @@ import CryptoKit
             crossed=crossed || ticket/1000 != now/1000
         }
         guard crossed else {throw ProviderError.invalid("boundary not exercised")}
+        let category = try HGPlayerSign.playbackHeaders(query: "aid=8662&device_id=12345&version_name=7.3.9.32&ts=1700000000&_rticket=1700000000123", body: Array(#"{"video_id":"42"}"#.utf8), timestamp: 1700000000, argusRandom: 123456789, ladonRandom: 0x4e38220c, emptyInstallToken: true)
+        guard category["x-argus"] == "8oHyrVYEy1xDCDlx64ko40qC6JC9VYY/ZkjJzEl50iSFDw8Yfph1hupLxfKrA9GswSEz0Yi4goA7OQ4u+H8ECdOaQhJiO70jsz7mX7TvvtFfiAeLdglueZk1gtRL/PIXBma+d3IKI3d6CMG/O0CHHhYGEN4hmhz6tNG42M8oJZQUx/Dw6jRGZk1wXUyDFqKe6V09LQh5y7Thf3GWO4RIgXDv5uPtCbhHbwn9PZY2VPuRMUAbogfTJ9Ijp7Pu6XCP5EQR5nI2JTK8A9b7RGYIfIeQ", category["x-ladon"] == "DCI4TntjztbzoPWZ0NBDr7CfcwXQTs2iMUwCwlyNrCS8bqTW" else { throw ProviderError.invalid("category 551 vector") }
         print("PASS: 32 native envelopes, 22 transforms, 48 factors and 32 request time bindings")
     }
 }

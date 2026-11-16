@@ -11,6 +11,13 @@ import org.junit.Test
  * Vectors 3–4: produced by iOS `HGPlayerSign.playbackHeaders` with fixed randoms (2026-11-10).
  */
 class HGPlaybackSignTest {
+    @Test fun gatewayCategory551Vector() {
+        val query = "aid=8662&device_id=12345&version_name=7.3.9.32&ts=1700000000&_rticket=1700000000123"
+        val h = HGPlaybackSign.headers(query, """{"video_id":"42"}""".toByteArray(), 1700000000u, 123456789u, 0x4e38220cu, emptyInstallToken = true)
+        assertEquals("8oHyrVYEy1xDCDlx64ko40qC6JC9VYY/ZkjJzEl50iSFDw8Yfph1hupLxfKrA9GswSEz0Yi4goA7OQ4u+H8ECdOaQhJiO70jsz7mX7TvvtFfiAeLdglueZk1gtRL/PIXBma+d3IKI3d6CMG/O0CHHhYGEN4hmhz6tNG42M8oJZQUx/Dw6jRGZk1wXUyDFqKe6V09LQh5y7Thf3GWO4RIgXDv5uPtCbhHbwn9PZY2VPuRMUAbogfTJ9Ijp7Pu6XCP5EQR5nI2JTK8A9b7RGYIfIeQ", h["x-argus"])
+        assertEquals("DCI4TntjztbzoPWZ0NBDr7CfcwXQTs2iMUwCwlyNrCS8bqTW", h["x-ladon"])
+        assertFalse(h.containsKey("x-medusa"))
+    }
     @Test fun openPlayerVector1() {
         val h = HGPlaybackSign.headers("aid=1967&device_id=dev_aaaaaaaa&iid=111", ByteArray(0), 1700000000u, 659662259u, 67305985u)
         assertEquals("8oF304qEDbfv2tmuZJhSIR1pFbZa9D3QxvEEiVNrm54Av877F40mKNw0TvKKIWEIod2TkiLHixpM/c7R/aH6SN4vNA1rmBvt6FoGwDuVmfhMF9iiybRqoTUi2RbP8uE5ALD4Ab7uj/YzTRotQ6Pcg5DHng6zlrLi8umMY06+ej6UDAUZ5SJhbxRwtrH6xnwiVN2oHb48o0UuVo+5NzLAfo7m0RTVrlv1tqexZboMHKNDJ39b8HlSahjZyJ5/ETs3dVZeoQ3MPF7vQE6qDjGksCd8", h["x-argus"])

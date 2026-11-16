@@ -609,6 +609,32 @@ class HongguoClient(
     private var playerRegisteredAt = 0L
     private var playerRejected = mutableSetOf<String>()
     private var playerBlockedUntil = 0L
+    private var playerTimeOffset = 0L
+    private var playerClockAfter = 0L
+
+    @Synchronized private fun signingMillis(): Long {
+        val sent = nowMs()
+        if (sent >= playerClockAfter) {
+            playerClockAfter = sent + 60_000
+            val clockHttp = playerHttp.newBuilder().callTimeout(5, TimeUnit.SECONDS).followRedirects(false).build()
+            try {
+                clockHttp.newCall(Request.Builder().url("https://$PURE_HOST$PURE_PATH").head().header("Cache-Control", "no-cache").header("User-Agent", PURE_UA).build()).execute().use { response ->
+                    val received = nowMs()
+                    val age = response.header("Age")
+                    if (response.code in 200..499 && received - sent in 0..10_000 && (age == null || age.toLongOrNull() == 0L)) {
+                        val parser = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+                        parser.timeZone = java.util.TimeZone.getTimeZone("GMT")
+                        response.header("Date")?.let { value -> parser.parse(value)?.let { server ->
+                            playerTimeOffset = server.time + 500 - (sent + received) / 2
+                            playerClockAfter = received + 300_000
+                        } }
+                    }
+                }
+            } catch (_: java.io.IOException) { /* Keep the previous calibration and retry in one minute. */ }
+            catch (_: java.text.ParseException) { /* Invalid Date is not a usable time sample. */ }
+        }
+        return nowMs() + playerTimeOffset
+    }
 
     @Synchronized private fun ensurePlayerIdentity(failedID: String = ""): HGOneShotDevice.Identity {
         if (failedID.isNotEmpty()) { playerRejected += failedID; if (playerIdentity?.did == failedID) playerIdentity = null }
@@ -650,7 +676,7 @@ class HongguoClient(
 
     /** Current six-header player signature; category requests keep their separate 551 dialect. */
     private fun pureRequest(body: ByteArray, pairs: List<Pair<String, String>>, path: String = PURE_PATH): Request {
-        val nowMs = nowMs()
+        val nowMs = signingMillis()
         val (q, headers) = HGCurrentPlayer.sign(pairs, nowMs, pairs.first { it.first == "device_id" }.second, PURE_VN, body)
         val rb = Request.Builder().url("https://$PURE_HOST$path?$q")
             .post(body.toRequestBody("application/json; charset=UTF-8".toMediaType()))

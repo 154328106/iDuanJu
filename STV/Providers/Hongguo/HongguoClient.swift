@@ -687,6 +687,35 @@ actor HongguoClient {
     private var playerRejected = Set<String>()
     private var playerBlockedUntil: Date?
     private var playerRegisterAfter = Date.distantPast
+    private var playerTimeOffset: TimeInterval = 0
+    private var playerClockAfter = Date.distantPast
+
+    private func signingMillis() async throws -> Int64 {
+        let now = Date()
+        if now >= playerClockAfter {
+            playerClockAfter = now.addingTimeInterval(60)
+            var request = URLRequest(url: URL(string: "https://" + Self.purePlayerHost + Self.purePlayerPath)!, timeoutInterval: 5)
+            request.httpMethod = "HEAD"
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.setValue(Self.purePlayerUA, forHTTPHeaderField: "User-Agent")
+            do {
+                let (_, response) = try await playerSession.data(for: request)
+                let received = Date()
+                if let http = response as? HTTPURLResponse, (200..<500).contains(http.statusCode),
+                   response.url?.host == Self.purePlayerHost, received.timeIntervalSince(now) <= 10,
+                   http.value(forHTTPHeaderField: "Age").map({ Int($0) == 0 }) ?? true,
+                   let value = http.value(forHTTPHeaderField: "Date") {
+                    let parser = DateFormatter(); parser.locale = Locale(identifier: "en_US_POSIX")
+                    parser.timeZone = TimeZone(secondsFromGMT: 0); parser.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                    if let server = parser.date(from: value) {
+                        playerTimeOffset = server.timeIntervalSince1970 + 0.5 - (now.timeIntervalSince1970 + received.timeIntervalSince1970) / 2
+                        playerClockAfter = received.addingTimeInterval(300)
+                    }
+                }
+            } catch { try Task.checkCancellation() }
+        }
+        return Int64((Date().timeIntervalSince1970 + playerTimeOffset) * 1000)
+    }
 
     private func ensurePlayerIdentity(replacing failedID: String = "") async throws -> HGPlayerIdentity {
         if !failedID.isEmpty { playerRejected.insert(failedID); if playerIdentity?.deviceId == failedID { playerIdentity = nil } }
@@ -759,7 +788,7 @@ actor HongguoClient {
             try Task.checkCancellation()
             if attempt > 0 { try await Task.sleep(for: .milliseconds(500)) }
             let now = Date()
-            let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+            let nowMs = try await signingMillis()
             let pairs: [(String, String)]
             if let frozen { pairs = frozen } else { pairs = try await purePlayerPairs() }
             let did = pairs.first { $0.0 == "device_id" }?.1 ?? ""
@@ -803,7 +832,7 @@ actor HongguoClient {
             "use_server_dns": true, "use_server_dns_scene": "cold_start_stage", "video_platform": 1024] as [String: Any],
             "dr_scene": "player", "mixed_video_id_map": ["1004": [vid]]] as [String: Any])
         let did = pairs.first { $0.0 == "device_id" }?.1 ?? ""
-        let now = Self.nowMs()
+        let now = try await signingMillis()
         let signed = try HGCurrentPlayer.sign(pairs: pairs, nowMillis: now, deviceID: did, versionName: Self.purePlayerVersionName, body: Array(body))
         var request = URLRequest(url: URL(string: "https://" + Self.purePlayerHost + path + "?" + signed.query)!)
         request.httpMethod = "POST"; request.httpBody = body
