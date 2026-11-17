@@ -13,8 +13,8 @@ android {
         applicationId = "app.iduanju"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1512
-        versionName = "1.5.12-android"
+        versionCode = 1513
+        versionName = "1.5.13-android"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
