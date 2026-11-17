@@ -424,7 +424,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             val last = remember { arrayOfNulls<String>(1) }
             if (panel != null) last[0] = panel
             val shown = last[0]
-            Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xD61C1E24))
+            Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xF51C1E24))
                 .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(24.dp)).pointerInput(Unit) { detectTapGestures { } }
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp)) {
                 when (shown) {
