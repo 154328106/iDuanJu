@@ -42,6 +42,11 @@ iOS 的榜单不再自带独立红色主题；搜索与榜单复用书籍行，�
 <img src="screenshots/novel-sources.png" width="240" alt="统一主题的书源配置">
 <img src="screenshots/novel-search.png" width="240" alt="统一主题的搜索">
 
+Android 原生截图已从 [44024121759](https://github.com/my-name-is-alan/iDuanJu/actions/runs/44024121759) 下载并检查。该次 Android 实网测试再次取得上述两本书的相同目录数和前三章长度，3 章离线回读、浅深色界面操作均通过；测试截图导出管道也已修复。
+
+<img src="screenshots/novel-android-download.png" width="240" alt="Android 深色缓存下载">
+<img src="screenshots/novel-android-sources.png" width="240" alt="Android 浅色书源配置">
+
 ## 复现
 
 Android：先将合集保存到本地，不提交文件。
