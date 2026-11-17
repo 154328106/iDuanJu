@@ -26,6 +26,7 @@ jobs:
           xcrun simctl boot "$SIM" || true
           xcrun simctl bootstatus "$SIM" -b
           xcrun simctl install "$SIM" "$RUNNER_TEMP/novel-preview/build/Build/Products/Debug-iphonesimulator/STV.app"
+          xcrun simctl terminate "$SIM" app.iduanju.novelpreview || true
           SIMCTL_CHILD_NOVEL_PREVIEW=1 xcrun simctl launch "$SIM" app.iduanju.novelpreview
           sleep 5
           xcrun simctl io "$SIM" screenshot "$RUNNER_TEMP/novel-rank-preview.png"

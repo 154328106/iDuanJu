@@ -120,6 +120,7 @@ fun NovelScreen(onBack: () -> Unit) {
         val s = source ?: error("请先导入并选择书源")
         val nextPage = if (reset) 1 else page
         val chosen = if (reset) cat else category
+        if (reset) { hits = emptyList(); more = false; category = chosen }
         val result = withContext(Dispatchers.IO) { NovelSources.search(s, query, nextPage, chosen) }
         if (selected != s.id) return@work
         val existing = if (reset) emptyList() else hits
@@ -144,7 +145,7 @@ fun NovelScreen(onBack: () -> Unit) {
         }
     }
     LaunchedEffect(selected) {
-        hits = emptyList(); categories = emptyList(); more = false; error = null
+        hits = emptyList(); categories = emptyList(); category = null; more = false; error = null
         if (source != null) try {
             categories = withContext(Dispatchers.IO) { NovelSources.categories(source) }
             selectedGroup = categories.firstOrNull()?.group.orEmpty()
@@ -263,7 +264,12 @@ fun NovelScreen(onBack: () -> Unit) {
                 TextButton(onClick = { search(true) }, enabled = !busy && query.isNotBlank()) { Text("搜索") } }
             if(categories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 categories.map{it.group}.distinct().forEach { group ->
-                    TextButton(onClick={selectedGroup=group}){Text(group,fontWeight=if(group==selectedGroup)FontWeight.Bold else FontWeight.Normal)}
+                    TextButton(onClick={
+                        selectedGroup=group
+                        val first = categories.firstOrNull { it.group == group && it.action == null && it.url.isNotBlank() }
+                        if (first != null) search(true, first)
+                        else { hits=emptyList();category=null;more=false }
+                    }, enabled=!busy){Text(group,fontWeight=if(group==selectedGroup)FontWeight.Bold else FontWeight.Normal)}
                 }
             }
             Row(Modifier.weight(1f)) {
