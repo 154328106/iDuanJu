@@ -127,7 +127,7 @@ struct PlayerProgressBar: View {
                         .accessibilityIdentifier("player.progress.bubble")
                 }
             }
-            .gesture(mini || duration <= 0 ? nil : DragGesture(minimumDistance: 0)
+            .gesture(mini || duration <= 0 ? nil : DragGesture(minimumDistance: 3)
                 .onChanged { v in
                     if drag == nil {
                         dragStart = played; scrubbing = true
@@ -143,7 +143,13 @@ struct PlayerProgressBar: View {
                     co.scrubPreview = nil
                     scrubbing = false
                     onInteract()
-                })
+                }
+                // A zero-distance drag can lose a stationary tap during SwiftUI gesture arbitration.
+                // Keep taps explicit and exclusive with scrubbing, so a release sends exactly one seek.
+                .exclusively(before: SpatialTapGesture().onEnded { v in
+                    co.seek(fraction: min(1, max(0, v.location.x / max(1, w))))
+                    onInteract()
+                }))
         }
         .frame(height: mini ? Self.miniH : 22)
         .task(id: drag.map { Int($0 * max(1, co.duration) / PlayerThumbnailer.bucket) }) {

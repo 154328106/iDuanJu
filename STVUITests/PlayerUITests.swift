@@ -123,7 +123,10 @@ final class PlayerUITests: XCTestCase {
         // Tap on the bar (no drag) also seeks.
         el("player.progress").coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
         showChrome("player.progress")
-        XCTAssertLessThan(seconds(el("player.progress").value as? String ?? ""), 25, "tap-to-seek failed")
+        // AVPlayer.seek is asynchronous: retain the same <25s requirement, but await its acknowledgement.
+        let sought = NSPredicate { [self] _, _ in seconds(el("player.progress").value as? String ?? "") < 25 }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: sought, evaluatedWith: bar)], timeout: 3), .completed,
+                       "tap-to-seek failed")
     }
 
     /// Pinch out on the video → 铺满全屏, pinch in → 完整自适应.
@@ -239,9 +242,11 @@ final class PlayerUITests: XCTestCase {
 
     private func swipeEpisode(next: Bool, x: CGFloat = 0.5) {
         let window = app.windows.firstMatch
+        // Cross half a page deliberately. The previous 45% drag relied on UIKit's end-velocity
+        // estimate and could correctly snap back under simulator load instead of changing episode.
         window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.65 : 0.35))
             .press(forDuration: 0.05, thenDragTo:
-                window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.2 : 0.8)))
+                window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.1 : 0.9)))
         // Wait for the native scroll phase, not a fixed 500ms that can interrupt the previous bounce under load.
         let idle = NSPredicate(format: "value == %@", "idle")
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: idle, evaluatedWith: el("player.feed"))], timeout: 6), .completed,
