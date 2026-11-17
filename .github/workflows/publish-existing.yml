@@ -11,6 +11,13 @@ on:
         description: Release suffix, without changing the package version
         required: true
         default: hgfix
+      release_label:
+        description: Display label for this release
+        required: true
+        default: 红果修复版
+      notes_file:
+        description: Optional committed release notes under docs/releases/
+        required: false
 
 permissions:
   actions: read
@@ -25,6 +32,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
       BUILD_RUN: ${{ inputs.build_run }}
       SUFFIX: ${{ inputs.suffix }}
+      RELEASE_LABEL: ${{ inputs.release_label }}
+      NOTES_FILE: ${{ inputs.notes_file }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,12 +107,12 @@ jobs:
           for platform in android ios; do
             if [ "$platform" = android ]; then
               tag="$ANDROID_TAG"
-              title="i短剧 Android $ANDROID_VERSION · 红果修复版"
-              install="包内版本仍为 $ANDROID_VERSION-android（$ANDROID_CODE），文件直接来自既有构建，没有重编译。与 1.5.8 使用同一分发签名，请手动下载安装覆盖；版本号相同不会自动提示更新。"
+              title="i短剧 Android $ANDROID_VERSION · $RELEASE_LABEL"
+              install="包内版本为 $ANDROID_VERSION-android（$ANDROID_CODE），直接发布已验证产物。与 1.5.8 起的发布包使用同一分发签名，可覆盖安装。"
             else
               tag="$IOS_TAG"
-              title="i短剧 iOS ${IOS_VERSION}b${IOS_BUILD} · 红果修复版"
-              install="包内版本仍为 $IOS_VERSION build $IOS_BUILD，文件直接来自既有构建，没有重编译。IPA 未签名，最低 iOS 18，请自行重签侧载。"
+              title="i短剧 iOS ${IOS_VERSION}b${IOS_BUILD} · $RELEASE_LABEL"
+              install="包内版本为 $IOS_VERSION build $IOS_BUILD，直接发布已验证产物。IPA 未签名，最低 iOS 18，请自行重签侧载。"
             fi
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag already exists; refusing to overwrite" >&2
@@ -122,6 +131,16 @@ jobs:
           构建源码：$BUILD_SHA
           原始成功构建：https://github.com/$GH_REPO/actions/runs/$BUILD_RUN
           EOF
+            if [ -n "$NOTES_FILE" ]; then
+              python3 - <<'PY'
+          import os, pathlib
+          path = pathlib.Path(os.environ['NOTES_FILE']).resolve()
+          root = pathlib.Path('docs/releases').resolve()
+          assert path.is_relative_to(root) and path.suffix == '.md' and path.is_file()
+          PY
+              cp -- "$NOTES_FILE" "$platform-notes.md"
+              printf '\n%s\n\n构建源码：%s\n构建：https://github.com/%s/actions/runs/%s\n' "$install" "$BUILD_SHA" "$GH_REPO" "$BUILD_RUN" >> "$platform-notes.md"
+            fi
             gh release create "$tag" dist/"$platform"/* --target "$BUILD_SHA" --title "$title" --notes-file "$platform-notes.md" --prerelease --draft
             gh release edit "$tag" --draft=false --prerelease
           done

@@ -9,7 +9,7 @@
 本轮新增：剧星榜、小说 TXT / 基础阅读书源（导入、搜索、发现、目录、章节阅读与续读）、预加载开关、缓存上限。
 修复 CMS 分类反馈、CENC 元数据解析、去广告开关持久化和缓存保存检查。
 
-小说规则目前支持 CSS/Jsoup、简单 JSONPath、GET/POST 和分页；JS/XPath、EPUB 与朗读尚未移植。完整差异见根目录 README。
+小说当前源码支持 CSS/Jsoup、JSONPath、部分 XPath / JS、GET/POST、分页、分组发现、预取、离线下载与同书换源。已用用户提供的合集 1335 检查；不是全部书源都可用，详见 [验收记录](../docs/novel-validation-20261117.md)。完整 Java/WebView 兼容、EPUB 文件导入与朗读尚未完成。上述小说改动不在旧 `hgfix` APK 内。
 
 ## 要求
 - minSdk 26 / targetSdk 35
