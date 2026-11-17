@@ -22,6 +22,13 @@ enum LegadoVars {
         return c
     }
     static func get(_ scope: String, _ k: String) -> String? { lock.lock(); defer { lock.unlock() }; return load()[scope]?[k] }
+    static func update(_ scope: String, _ k: String, _ transform: (String?) -> String) {
+        lock.lock(); defer { lock.unlock() }
+        var all = load(); let old = all[scope]?[k]; let value = transform(old)
+        guard old != value else { return }
+        all[scope, default: [:]][k] = value; cache = all
+        UserDefaults.standard.set(all, forKey: key)
+    }
     static func put(_ scope: String, _ k: String, _ v: String) {
         lock.lock(); defer { lock.unlock() }
         var all = load()
@@ -80,7 +87,10 @@ final class LegadoContext {
         func s(_ k: String) -> String { a[k] as? String ?? "" }
         switch name {
         case "sourceInfoSave":
-            LegadoVars.put(sourceScope, "__exploreInfoMap", s("value")); return nil
+            func values(_ raw: String) -> [String: String] {
+                ((try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] ?? [:]).mapValues { LegadoAnalyzer.textOf($0) }
+            }
+            LegadoClient.mergeExploreInfo(source, initial: values(s("initial")), changed: values(s("value"))); return nil
         case "ajax":
             let r = try LegadoURL.request(s("url"), ctx: self, base: source.bookSourceUrl)
             return try r.fetch().text

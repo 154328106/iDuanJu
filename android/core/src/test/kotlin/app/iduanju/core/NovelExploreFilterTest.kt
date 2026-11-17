@@ -31,6 +31,20 @@ class NovelExploreFilterTest {
         assertEquals("c",NovelSources.categories(s)[0].value);assertEquals("off",NovelSources.categories(s)[1].value)
     }
 
+    @Test fun staleBackgroundScriptCannotOverwriteNewerFilterSelection(){
+        val s=NovelSource(JSONObject().put("bookSourceUrl","https://filter-race.test/"+java.util.UUID.randomUUID()))
+        val control=NovelCategory("sort","",type="select",chars=listOf("new","hot"))
+        NovelSources.categoryAction(s,control,"new")
+        NovelSources.fixture={NovelSources.categoryAction(s,control,"hot");"ok"}
+        NovelSources.ruleValue("","@js:java.ajax('/gate');infoMap.put('other','kept');'ok'",s,s.id)
+        val info=NovelScript.exploreInfo(s.id)
+        assertEquals("hot",info.getString("sort"));assertEquals("kept",info.getString("other"))
+    }
+    @Test fun cosmeticViewNameFailureKeepsUsableCategories(){
+        val s=NovelSource(JSONObject().put("bookSourceUrl","https://view-name.test").put("exploreUrl","""[{"title":"筛选","type":"button","viewName":"missingFunction()"},{"title":"榜单","url":"/rank"}]"""))
+        val cats=NovelSources.categories(s);assertEquals(2,cats.size);assertEquals("筛选",cats.first().displayTitle)
+    }
+
     /** Explicit, optional public-network capture; ordinary offline tests never fetch replacement pages. */
     @Test fun recordExactSourcePublicIndexes(){
         val out=System.getenv("STV_CAPTURE_QIMAO")

@@ -313,6 +313,10 @@ private struct ExploreTextControl: View {
                 guard value != category.value else { return }
                 pending = Task { do { try await Task.sleep(for: .milliseconds(450)); onValue(value) } catch {} }
             }
+            .onChange(of: enabled) { _, value in
+                pending?.cancel()
+                if value && text != category.value { pending = Task { do { try await Task.sleep(for: .milliseconds(450)); onValue(text) } catch {} } }
+            }
             .onChange(of: category.value) { _, value in text = value }
             .onDisappear { pending?.cancel() }
     }

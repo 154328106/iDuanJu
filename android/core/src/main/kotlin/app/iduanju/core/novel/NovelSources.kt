@@ -181,21 +181,23 @@ object NovelSources {
         if (raw.isEmpty()) return emptyList()
         if(raw.startsWith("@js:") || raw.startsWith("<js>")) raw = NovelScript(source,source.id).eval(script(raw))?.toString().orEmpty()
         val parsed = parseCategories(raw)
-        val info = NovelScript.exploreInfo(source.id)
+        val initial = NovelScript.exploreInfo(source.id)
+        val info = JSONObject(initial.toString())
         var changed = false
         parsed.filter { it.isControl }.forEach { c -> if (!info.has(c.title)) { info.put(c.title, c.defaultValue.ifEmpty { c.chars.firstOrNull().orEmpty() }); changed = true } }
-        if (changed) NovelScript.saveExploreInfo(source.id, info)
+        if (changed) NovelScript.mergeExploreInfo(source.id,initial,info)
         return parsed.map { c ->
-            val display = if (c.viewName.isBlank()) c.title else NovelScript(source,source.id).eval(script(c.viewName))?.toString() ?: c.title
+            val display = if (c.viewName.isBlank()) c.title else runCatching{NovelScript(source,source.id).eval(script(c.viewName))?.toString()}.getOrNull() ?: c.title
             c.copy(value=info.optString(c.title),displayTitle=display)
         }
     }
 
     fun categoryAction(source: NovelSource, category: NovelCategory, value:String? = null) {
         if (category.isControl) {
-            val info = NovelScript.exploreInfo(source.id)
+            val initial = NovelScript.exploreInfo(source.id)
+            val info = JSONObject(initial.toString())
             val next = value ?: if (category.type == "toggle" && category.chars.isNotEmpty()) category.chars[(category.chars.indexOf(info.optString(category.title)) + 1).mod(category.chars.size)] else null
-            if (next != null) { info.put(category.title,next); NovelScript.saveExploreInfo(source.id,info) }
+            if (next != null) { info.put(category.title,next); NovelScript.mergeExploreInfo(source.id,initial,info) }
         }
         category.action?.takeIf { it.isNotBlank() }?.let { NovelScript(source,source.id).eval(script(it)) }
     }

@@ -78,12 +78,13 @@ enum LegadoClient {
             } else { raw = LegadoAnalyzer.textOf(value) }
         }
         let parsed = try parseExploreCategories(raw)
-        var info = exploreInfo(s)
+        let initial = exploreInfo(s)
+        var info = initial
         for c in parsed where c.isControl && info[c.title] == nil { info[c.title] = c.defaultValue.isEmpty ? (c.chars.first ?? "") : c.defaultValue }
-        saveExploreInfo(s, info)
-        return try parsed.map { c in
+        mergeExploreInfo(s, initial: initial, changed: info)
+        return parsed.map { c in
             var c = c; c.value = info[c.title] ?? ""; c.displayTitle = c.title
-            if !c.viewName.isEmpty { c.displayTitle = LegadoAnalyzer.textOf(try LegadoContext(source: s).evalJS(c.viewName, result: nil, baseURL: s.bookSourceUrl)) }
+            if !c.viewName.isEmpty { c.displayTitle = (try? LegadoContext(source: s).evalJS(c.viewName, result: nil, baseURL: s.bookSourceUrl)).map { LegadoAnalyzer.textOf($0) } ?? c.title }
             return c
         }
     }
@@ -93,10 +94,16 @@ enum LegadoClient {
         let values = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] ?? [:]
         return values.mapValues { LegadoAnalyzer.textOf($0) }
     }
-    static func saveExploreInfo(_ source: LegadoSource, _ values: [String: String]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) else { return }
-        let value = String(decoding: data, as: UTF8.self)
-        if value != LegadoVars.get("s|" + source.bookSourceUrl, "__exploreInfoMap") { LegadoVars.put("s|" + source.bookSourceUrl, "__exploreInfoMap", value) }
+    static func mergeExploreInfo(_ source: LegadoSource, initial: [String: String], changed: [String: String]) {
+        let keys = Set(initial.keys).union(changed.keys).filter { initial[$0] != changed[$0] }
+        guard !keys.isEmpty else { return }
+        LegadoVars.update("s|" + source.bookSourceUrl, "__exploreInfoMap") { raw in
+            let decoded = (try? JSONSerialization.jsonObject(with: Data((raw ?? "{}").utf8))) as? [String: Any] ?? [:]
+            var current = decoded.mapValues { LegadoAnalyzer.textOf($0) }
+            for key in keys { current[key] = changed[key] }
+            guard let data = try? JSONSerialization.data(withJSONObject: current, options: [.sortedKeys]) else { return raw ?? "{}" }
+            return String(decoding: data, as: UTF8.self)
+        }
     }
     static func refreshedCategory(_ previous: ExploreCategory?, in categories: [ExploreCategory], group: String) -> ExploreCategory? {
         categories.first { !$0.isControl && $0.selectionKey == previous?.selectionKey }
@@ -167,12 +174,13 @@ enum LegadoClient {
     }
 
     static func exploreAction(_ source: LegadoSource, category: ExploreCategory, value: String? = nil) throws {
-        var info = exploreInfo(source)
+        let initial = exploreInfo(source)
+        var info = initial
         var next = value
         if next == nil, category.type == "toggle", !category.chars.isEmpty {
             next = category.chars[((category.chars.firstIndex(of: info[category.title] ?? "") ?? -1) + 1) % category.chars.count]
         }
-        if let next { info[category.title] = next; saveExploreInfo(source, info) }
+        if let next { info[category.title] = next; mergeExploreInfo(source, initial: initial, changed: info) }
         guard let action = category.action, !action.isEmpty else { return }
         let code = action.hasPrefix("@js:") ? String(action.dropFirst(4)) : action.replacingOccurrences(of: "<js>", with: "").replacingOccurrences(of: "</js>", with: "")
         _ = try LegadoContext(source: source).evalJS(code, result: nil, baseURL: source.bookSourceUrl)

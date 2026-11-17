@@ -44,6 +44,25 @@ final class LegadoTests: XCTestCase {
         XCTAssertEqual(try LegadoClient.exploreCategories(source)[1].value, "off")
     }
 
+    func testStaleBackgroundScriptCannotOverwriteNewerFilterSelection() throws {
+        let source = LegadoSource(bookSourceUrl: "https://filter-race.test/" + UUID().uuidString, bookSourceName: "race", searchUrl: "/s")
+        let control = LegadoClient.ExploreCategory(title: "sort", url: "", type: "select", chars: ["new", "hot"])
+        try LegadoClient.exploreAction(source, category: control, value: "new")
+        LegadoHTTP.transport = { request in
+            try LegadoClient.exploreAction(source, category: control, value: "hot")
+            return (Data("ok".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        _ = try LegadoContext(source: source).evalJS("java.ajax('/gate');infoMap.put('other','kept');'ok'", result: nil, baseURL: source.bookSourceUrl)
+        let info = LegadoClient.exploreInfo(source)
+        XCTAssertEqual(info["sort"], "hot"); XCTAssertEqual(info["other"], "kept")
+    }
+    func testCosmeticViewNameFailureKeepsUsableCategories() throws {
+        var source = htmlSource
+        source.exploreUrl = #"[{"title":"筛选","type":"button","viewName":"missingFunction()"},{"title":"榜单","url":"/rank"}]"#
+        let cats = try LegadoClient.exploreCategories(source)
+        XCTAssertEqual(cats.count, 2); XCTAssertEqual(cats[0].displayTitle, "筛选")
+    }
+
     private var requests: [URLRequest] = []
 
     override func setUp() {
