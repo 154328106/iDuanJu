@@ -34,6 +34,8 @@ struct PlayerScreen: View {
     @State private var loadError: Error?
     @State private var showChrome = true
     @State private var lastInteraction = Date()
+    /// PR10 7cda81c: suppress centre transport until an explicit reveal after an episode change.
+    @State private var centerSuppressed = false
     @State private var scrubbing = false
     @State private var locked = false
     @State private var altSources: [HGSeries] = []
@@ -152,7 +154,7 @@ struct PlayerScreen: View {
                     } else {
                         if locked {
                             if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
-                        } else if controlsVisible, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
+                        } else if controlsVisible, !centerSuppressed, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
                             PlayerCenterControls(co: co, onInteract: flashChrome)
                                 .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
                                 .transition(.opacity)
@@ -229,7 +231,14 @@ struct PlayerScreen: View {
         } message: { Text(co.pipError ?? "") }
         .onAppear { OrientationGate.unlock() }
         .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
-        .onChange(of: co.current) { _, _ in scrubbing = false }
+        .onChange(of: co.current) { old, _ in
+            scrubbing = false
+            if old != nil { flashChrome(); centerSuppressed = true } else { flashChrome() }
+        }
+        .onChange(of: co.readyIndex) { _, index in
+            guard index != nil else { return }
+            if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
+        }
         
         .onChange(of: landscape) { _, l in if !l { locked = false }; panel = nil }
         .sheet(item: $verifyTarget) { t in SiteVerifySheet(target: t) { if let c = co.current { co.activate(c) } } }
@@ -400,6 +409,7 @@ struct PlayerScreen: View {
                             .font(.system(size: 21, weight: .bold)).lineLimit(1)
                             .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
                             .accessibilityIdentifier("player.title")
+                            .accessibilityValue("第\(co.episodes[i].ep)集")
                             .padding(.bottom, 10)
                     }
                     .opacity(panel != nil ? 0.35 : 1)
@@ -463,6 +473,7 @@ struct PlayerScreen: View {
                             .font(.system(size: 22, weight: .bold)).lineLimit(1)
                             .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
                             .accessibilityIdentifier("player.title")
+                            .accessibilityValue("第\(co.episodes[i].ep)集")
                             .opacity(scrubbing ? 0.28 : 1).opacity(panel != nil ? 0.35 : 1)
                         Spacer(minLength: 12)
                         iconRow(i).opacity(dim).modifier(ChromeFade(on: chrome))
@@ -763,7 +774,7 @@ struct PlayerScreen: View {
     private func handleTap() {
         if panel != nil { closePanel(); return }
         if locked { flashChrome(); return }
-        if showChrome && controlsVisible { withAnimation(.easeOut(duration: 0.2)) { showChrome = false } }
+        if showChrome && controlsVisible && !centerSuppressed { withAnimation(.easeOut(duration: 0.2)) { showChrome = false } }
         else { flashChrome() }
     }
 
@@ -869,9 +880,12 @@ struct PlayerScreen: View {
     }
 
     private func flashChrome() {
+        centerSuppressed = false
         showChrome = true
         lastInteraction = Date()
     }
+
+    private func rearmAutoHide() { lastInteraction = Date() }
 
     private func load() async {
         do {

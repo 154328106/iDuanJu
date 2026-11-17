@@ -188,10 +188,9 @@ final class PlayerUITests: XCTestCase {
     }
 
     private func assertEpisode(_ number: Int, file: StaticString = #filePath, line: UInt = #line) {
-        let selected = NSPredicate(format: "value == %@", "第\(number)集")
-        let ready = expectation(for: selected, evaluatedWith: el("player.episodeInfo"))
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed,
-                       "expected episode \(number)", file: file, line: line)
+        let end = Date().addingTimeInterval(8)
+        while Date() < end, el("player.title").value as? String != "第\(number)集" { Thread.sleep(forTimeInterval: 0.2) }
+        XCTAssertEqual(el("player.title").value as? String, "第\(number)集", "expected episode \(number)", file: file, line: line)
         XCTAssertTrue(el("player.progress").waitForExistence(timeout: 20),
                       "selected episode did not become ready", file: file, line: line)
     }
@@ -276,6 +275,77 @@ final class PlayerUITests: XCTestCase {
         assertEpisode(1)
         swipeEpisode(next: true)
         assertEpisode(2)
+    }
+
+    // MARK: Always-on title / progress, quiet episode switches
+
+    /// Waits for the auto-hiding chrome to go away, then checks the always-on parts survived.
+    private func assertOnlyTitleAndProgressRemain(file: StaticString = #filePath, line: UInt = #line) {
+        let gone = NSPredicate(format: "hittable == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: gone, evaluatedWith: el("player.episodes"))], timeout: 8), .completed,
+                       "auto-hiding chrome did not hide", file: file, line: line)
+        XCTAssertFalse(el("player.playPause").exists, "centre controls must auto-hide", file: file, line: line)
+        XCTAssertTrue(el("player.title").exists && el("player.title").isHittable, "title must stay visible", file: file, line: line)
+        XCTAssertTrue(el("player.progress").exists && el("player.progress").isHittable, "progress bar must stay visible", file: file, line: line)
+    }
+
+    /// Polls `seconds` long: the centre ⟲10 / ▶ / ⟳10 group must never appear.
+    private func assertCenterStaysHidden(for seconds: TimeInterval, _ why: String, file: StaticString = #filePath, line: UInt = #line) {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            XCTAssertFalse(el("player.playPause").exists, why, file: file, line: line)
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+    }
+
+    func testTitleAndProgressStayVisibleAndSwipeKeepsCenterHidden() {
+        launch(["STV_FX_EPISODES": "4", "STV_PLAYER_LOAD_DELAY": "1.5"])
+        XCTAssertTrue(el("player.progress").waitForExistence(timeout: 20), "player did not become ready")
+        assertEpisode(1)
+        assertOnlyTitleAndProgressRemain()
+        shot("ux_title_progress_always_on")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitOrientation(landscape: true))
+        swipeEpisode(next: true)
+        assertCenterStaysHidden(for: 5, "episode swipe must not pop the centre controls")
+        assertEpisode(2)
+        XCTAssertTrue(el("player.title").exists, "title must stay visible after a switch")
+        // An explicit tap still brings the full controls back.
+        showChrome("player.playPause")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitOrientation(landscape: true))
+        // Even locked (including after the unlock affordance auto-hides), title/progress remain.
+        showChrome("player.lock"); el("player.lock").tap()
+        Thread.sleep(forTimeInterval: 4)
+        XCTAssertTrue(el("player.title").exists && el("player.progress").exists)
+        XCTAssertFalse(el("player.playPause").exists)
+        shot("ux_landscape_locked_title_progress")
+    }
+
+    func testEpisodePanelPickKeepsCenterHidden() {
+        launch(["STV_FX_EPISODES": "4"])
+        XCTAssertTrue(el("player.progress").waitForExistence(timeout: 20), "player did not become ready")
+        showChrome("player.episodes"); el("player.episodes").tap()
+        let pick = el("player.ep.3")
+        XCTAssertTrue(pick.waitForExistence(timeout: 5), "episode panel did not list episode 3")
+        pick.tap()
+        assertCenterStaysHidden(for: 5, "picking from the episode panel must not pop the centre controls")
+        assertEpisode(3)
+    }
+
+    func testAutoplayAdvanceKeepsCenterHidden() {
+        // STV_PANEL_DELAY pushes the screenshot hook's own flashChrome() past the end of the test.
+        launch(["STV_FX_EPISODES": "4", "STV_SEEK": "52", "STV_PANEL_DELAY": "120"])
+        XCTAssertTrue(el("player.progress").waitForExistence(timeout: 20), "player did not become ready")
+        assertOnlyTitleAndProgressRemain()
+        let end = Date().addingTimeInterval(20)
+        while Date() < end, el("player.title").value as? String != "第2集" {
+            XCTAssertFalse(el("player.playPause").exists, "autoplay advance must not pop the centre controls")
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        XCTAssertEqual(el("player.title").value as? String, "第2集")
+        assertCenterStaysHidden(for: 4, "the next episode becoming ready must not pop the centre controls")
+        XCTAssertTrue(el("player.title").exists && el("player.progress").exists)
     }
 
     func popoverGone(_ id: String) -> Bool {
