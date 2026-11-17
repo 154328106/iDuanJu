@@ -312,7 +312,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         Box(Modifier.fillMaxWidth().height(if(landscape)140.dp else 170.dp)
             .background(Brush.verticalGradient(listOf(Color.Black.copy(0.88f), Color.Black.copy(0.65f), Color.Transparent))))
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if(landscape)180.dp else 330.dp)
-            .background(Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(0.74f), 1f to Color.Black.copy(0.94f))))
+            .background(Brush.verticalGradient(0f to Color.Transparent, 0.42f to Color.Black.copy(if(landscape)0.94f else 0.74f), 1f to Color.Black.copy(if(landscape)0.985f else 0.94f))))
         Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = if(landscape)64.dp else 16.dp).padding(top = if(landscape)14.dp else 6.dp).graphicsLayer { alpha = if(landscape)1f else chromeA }) {
             Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", showChrome && !locked, onBack)
@@ -359,7 +359,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         }
         // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
-            .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 16.dp else 4.dp)) {
+            .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 24.dp else 4.dp)) {
             val d = detail
             if (d != null && !landscape) {
                 Row(Modifier.graphicsLayer { alpha = chromeA }.heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -396,13 +396,13 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                         modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(true) })
                 }
             }
-            if(landscape) Row(Modifier.fillMaxWidth().padding(top=12.dp).graphicsLayer{alpha=if(locked)0f else chromeA},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            if(landscape) Row(Modifier.fillMaxWidth().padding(top=6.dp).graphicsLayer{alpha=if(locked)0f else chromeA},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(pos<15000&&dur>45000) LandChip(Icons.Filled.PlayArrow,"跳过片头",null,false,showChrome&&!locked){player.seekTo(15000)}
                 Spacer(Modifier.weight(1f))
                 LandChip(Icons.Filled.GridView,"选集",null,panel=="episodes",showChrome&&!locked){panel=if(panel=="episodes")null else "episodes"}
                 LandChip(Icons.Filled.Speed,"倍速",if(speed==1f)"1.0×" else "${speed}×",panel=="speed",showChrome&&!locked){panel=if(panel=="speed")null else "speed"}
                 LandChip(Icons.Filled.HighQuality,"画质",quality?:tags.res,panel=="quality",showChrome&&!locked){panel=if(panel=="quality")null else "quality"}
-                LandChip(Icons.Filled.Subtitles,"弹幕",if(danmaku)"开" else "关",danmaku&&seriesId.all{it.isDigit()},showChrome&&!locked){if(seriesId.all{it.isDigit()})danmaku=!danmaku}
+                LandChip(Icons.Filled.Subtitles,"弹幕",if(seriesId.all{it.isDigit()}) (if(danmaku)"开" else "关") else null,danmaku&&seriesId.all{it.isDigit()},showChrome&&!locked&&seriesId.all{it.isDigit()}){danmaku=!danmaku}
                 LandChip(Icons.Filled.ClosedCaption,"音轨字幕",null,panel=="audio",showChrome&&!locked){panel=if(panel=="audio")null else "audio"}
             } else Row(Modifier.fillMaxWidth().padding(top = 10.dp).graphicsLayer { alpha = chromeA }.padding(horizontal = if (landscape) 120.dp else 0.dp)) {
                 val dmOK = seriesId.all { it.isDigit() }
@@ -497,7 +497,7 @@ private fun CircleBtn(icon: ImageVector, label: String, enabled: Boolean = true,
 @Composable
 private fun LandChip(icon:ImageVector,title:String,value:String?,on:Boolean,enabled:Boolean,onClick:()->Unit){
     val pc=IdjDarkColors
-    Row(Modifier.height(34.dp).clip(CircleShape).background(if(on)pc.accentSoft else Color(0x75141418))
+    Row(Modifier.height(34.dp).graphicsLayer { alpha = if(enabled)1f else 0.45f }.clip(CircleShape).background(if(on)pc.accentSoft else Color(0x75141418))
         .border(1.dp,if(on)pc.accentLine else Color.White.copy(0.14f),CircleShape).pressClick(enabled=enabled,onClick=onClick).padding(horizontal=13.dp),
         verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)){
         Icon(icon,null,tint=if(on)pc.accent else Color.White,modifier=Modifier.size(17.dp))

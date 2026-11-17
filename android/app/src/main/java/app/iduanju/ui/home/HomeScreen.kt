@@ -82,17 +82,19 @@ object BoardCache {
     val items = mutableStateMapOf<String, List<HGSeries>>()
     val failed = mutableStateMapOf<String, String>()
     private val loading = HashSet<String>()
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
     suspend fun load(b: BoardSpec, force: Boolean = false) {
         synchronized(loading) { if (b.id in loading || (!force && items.containsKey(b.id))) return; loading.add(b.id) }
-        try {
-            // NonCancellable: leaving 首页 (e.g. opening a drama) must not throw away a fetch that is already in
-            // flight, nor mark the board as failed; the result lands in the cache for when the page is shown again.
-            android.util.Log.i("IDJ", "board fetch ${b.id}")
-            val r = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { IdjApp.instance.hongguo.rank(b.sub, b.genre).items }
-            items[b.id] = r; failed.remove(b.id)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e
-        } catch (e: Exception) { failed[b.id] = e.message ?: "加载失败"; android.util.Log.w("IDJ", "board ${b.id} failed: $e") }
-        finally { synchronized(loading) { loading.remove(b.id) } }
+        // Repository lifetime, not the current composition: even an early navigation away keeps the result.
+        scope.launch {
+            try {
+                android.util.Log.i("IDJ", "board fetch ${b.id}")
+                val r = withContext(Dispatchers.IO) { IdjApp.instance.hongguo.rank(b.sub, b.genre).items }
+                items[b.id] = r; failed.remove(b.id)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { failed[b.id] = e.message ?: "加载失败"; android.util.Log.w("IDJ", "board ${b.id} failed: $e") }
+            finally { synchronized(loading) { loading.remove(b.id) } }
+        }
     }
 }
 
