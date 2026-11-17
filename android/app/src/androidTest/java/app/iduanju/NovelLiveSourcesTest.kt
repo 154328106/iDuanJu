@@ -43,8 +43,6 @@ class NovelLiveSourcesTest {
         }
         val output=File(context.getExternalFilesDir(null),"novel-real-sources.json")
         output.writeText(report.toString(2))
-        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa; cp ${output.absolutePath} /sdcard/Download/novel-qa/").use {
-            java.io.FileInputStream(it.fileDescriptor).use { stream -> stream.readBytes() }
-        }
+        saveNovelEvidence(output.name,output.readBytes())
     }
 }

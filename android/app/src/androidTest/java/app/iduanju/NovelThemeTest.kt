@@ -44,9 +44,7 @@ class NovelThemeTest {
         val bitmap=instrumentation.uiAutomation.takeScreenshot()
         try { path.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)} }
         finally {bitmap.recycle()}
-        instrumentation.uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa; cp ${path.absolutePath} /sdcard/Download/novel-qa/").use {
-            java.io.FileInputStream(it.fileDescriptor).use { stream -> stream.readBytes() }
-        }
+        saveNovelEvidence(path.name,path.readBytes())
     }
     private fun verify(dark:Boolean){
         val style=if(dark)"dark" else "light"
