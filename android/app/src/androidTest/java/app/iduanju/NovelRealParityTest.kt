@@ -12,6 +12,7 @@ import okhttp3.Request
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.After
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -23,7 +24,11 @@ class NovelRealParityTest {
         val bmp=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         try {val out=java.io.ByteArrayOutputStream();bmp.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);saveNovelEvidence(name,out.toByteArray())}finally{bmp.recycle()}
     }
+    @After fun restoreSourceStorage(){ NovelSources.fixture=null; NovelSources.configureStorage(InstrumentationRegistry.getInstrumentation().targetContext.filesDir) }
     @Test fun realQimaoRankingDetailAndReader(){
+        // A fresh-flow scenario must not inherit expanded/selected source filters from earlier tests.
+        val isolatedContext=InstrumentationRegistry.getInstrumentation().targetContext
+        NovelSources.configureStorage(File(isolatedContext.cacheDir,"novel-live-acceptance-"+java.util.UUID.randomUUID()))
         saveNovelEvidence("parity-android-real-flow-current.json",org.json.JSONObject().put("flowCompleted",false).put("startedAtMs",System.currentTimeMillis()).put("readerParityComplete",false).toString(2).toByteArray())
         NovelSources.fixture=null
         val raw=InstrumentationRegistry.getInstrumentation().context.assets.open("real-1335.json").bufferedReader().use{it.readText()}
