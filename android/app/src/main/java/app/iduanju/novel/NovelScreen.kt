@@ -4,6 +4,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -431,14 +435,16 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
         if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
     }},confirmButton={TextButton(onClick={switchJob?.cancel();showSwitch=false}){Text("关闭")}})
     if(importing)ModalBottomSheet(onDismissRequest={importing=false},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=c.surface,shape=RoundedCornerShape(topStart=28.dp,topEnd=28.dp),dragHandle=null) {
-        Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+        val importKeyboard=LocalSoftwareKeyboardController.current
+        val importFocus=LocalFocusManager.current
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("novel.import.sheet").padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text("导入书籍与书源",color=c.text,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));RoundIconButton(Icons.Rounded.Close,"关闭"){importing=false}}
             Text("书籍",color=c.secondary,fontSize=12.sp)
             Row(Modifier.fillMaxWidth().dsCard(16.dp).pressClick {filePicker.launch(arrayOf("text/*","application/octet-stream"));importing=false}.padding(16.dp),verticalAlignment=Alignment.CenterVertically){IconWell(Icons.Rounded.MenuBook);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("导入本地书籍",color=c.text,fontSize=15.sp,fontWeight=FontWeight.SemiBold);Text("TXT · UTF-8 / GB18030 / UTF-16",color=c.secondary,fontSize=12.sp)};Icon(Icons.Rounded.ChevronRight,null,tint=c.tertiary)}
             Text("书源",color=c.secondary,fontSize=12.sp)
             OutlinedTextField(importText,{importText=it},Modifier.fillMaxWidth(),placeholder={Text("粘贴书源网址或 JSON")},shape=RoundedCornerShape(14.dp),maxLines=3,
                 trailingIcon={TextButton(onClick={val clip=context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager;importText=clip.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()}){Text("粘贴")}})
-            PillButton(if(busy)"正在导入…" else "导入书源",Modifier.fillMaxWidth(),Icons.Rounded.Add,enabled=!busy&&importText.isNotBlank()) {work{
+            PillButton(if(busy)"正在导入…" else "导入书源",Modifier.fillMaxWidth(),Icons.Rounded.Add,enabled=!busy&&importText.isNotBlank()) {importFocus.clearFocus();importKeyboard?.hide();work{
                 val raw=importText.trim()
                 val data=if(raw.startsWith("https://")||raw.startsWith("http://"))withContext(Dispatchers.IO){NovelSources.fetch(raw,NovelSource(JSONObject().put("bookSourceUrl",raw)))}else raw
                 addSources(data)

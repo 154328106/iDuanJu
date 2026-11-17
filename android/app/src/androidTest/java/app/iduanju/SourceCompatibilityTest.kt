@@ -22,6 +22,11 @@ class SourceCompatibilityTest {
  private fun requireLive(){org.junit.Assume.assumeTrue("Pass -e sourceCompatLive 1 for bounded live source tests",InstrumentationRegistry.getArguments().getString("sourceCompatLive")=="1")}
  @After fun cleanup(){NovelSources.fixture=null;NovelSources.requestObserver=null}
  private fun shot(name:String){ui.waitForIdle();val b=ui.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap();try{val o=java.io.ByteArrayOutputStream();b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,o);saveNovelEvidence(name,o.toByteArray())}finally{b.recycle()}}
+ private fun shotDevice(name:String){
+  ui.waitForIdle();InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+  val b=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+  try{val out=java.io.ByteArrayOutputStream();b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);saveNovelEvidence(name,out.toByteArray())}finally{b.recycle()}
+ }
  @Test fun unsupportedImportsShowHonestNativeFeedback(){
   val old=app.iduanju.ui.UiEvidence.page
   app.iduanju.ui.UiEvidence.page="import"
@@ -32,15 +37,15 @@ class SourceCompatibilityTest {
    input.performTextInput("""{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":1}""")
    ui.onNode(hasText("导入书源") and hasClickAction()).performClick()
    ui.waitUntil(10000){ui.onAllNodesWithText("暂不支持有声",substring=true).fetchSemanticsNodes().isNotEmpty()}
-   androidx.test.espresso.Espresso.closeSoftKeyboard()
-   ui.onAllNodesWithText("暂不支持有声",substring=true).onLast().assertIsDisplayed()
-   shot("source-android-unsupported-audio.png")
-   input.performTextClearance();input.performTextInput("""[{"sourceUrl":"https://compat-rss.invalid","ruleArticles":"a"}]""")
+   ui.onNodeWithTag("novel.import.sheet").assertIsDisplayed()
+   ui.onNode(hasText("暂不支持有声",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
+   shotDevice("source-android-unsupported-audio.png")
+   input.performScrollTo().performTextClearance();input.performTextInput("""[{"sourceUrl":"https://compat-rss.invalid","ruleArticles":"a"}]""")
    ui.onNode(hasText("导入书源") and hasClickAction()).performClick()
    ui.waitUntil(10000){ui.onAllNodesWithText("暂不支持 Legado RSS",substring=true).fetchSemanticsNodes().isNotEmpty()}
-   androidx.test.espresso.Espresso.closeSoftKeyboard()
-   ui.onAllNodesWithText("暂不支持 Legado RSS",substring=true).onLast().assertIsDisplayed()
-   shot("source-android-unsupported-rss.png")
+   ui.onNodeWithTag("novel.import.sheet").assertIsDisplayed()
+   ui.onNode(hasText("暂不支持 Legado RSS",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
+   shotDevice("source-android-unsupported-rss.png")
   }finally{app.iduanju.ui.UiEvidence.page=old}
  }
 
