@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
+    // Local color-bar fixture is Debug-only; no sample media is added to a Release artifact.
+    sourceSets.getByName("debug").assets.srcDir("../../STVTests/Fixtures")
+
     namespace = "app.iduanju"
     compileSdk = 35
     defaultConfig {
@@ -34,7 +37,7 @@ android {
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { buildConfig = true; compose = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     // 推荐插件: the same .idjplugin bundles the iOS app ships (STV/Resources/Plugins), copied at build time
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/idj-assets"))

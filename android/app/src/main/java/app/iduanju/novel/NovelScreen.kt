@@ -43,14 +43,14 @@ import java.io.File
 /** Imported sources and reading progress are private to this installation. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NovelScreen(onBack: () -> Unit) {
+fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("novel", 0) }
     val sources = remember { mutableStateListOf<NovelSource>().apply { addAll(runCatching { NovelSources.import(prefs.getString("sources", "[]")!!) }.getOrDefault(emptyList())) } }
     var selected by remember { mutableStateOf(sources.firstOrNull()?.id ?: "") }
     var query by remember { mutableStateOf("") }
     var importText by remember { mutableStateOf("") }
-    var importing by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="import") }
     var hits by remember { mutableStateOf<List<NovelHit>>(emptyList()) }
     var categories by remember { mutableStateOf<List<NovelCategory>>(emptyList()) }
     var category by remember { mutableStateOf<NovelCategory?>(null) }
@@ -77,12 +77,14 @@ fun NovelScreen(onBack: () -> Unit) {
     var readGeneration by remember { mutableIntStateOf(0) }
     var prefetchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
-    var shelf by remember { mutableStateOf(true) }
-    var sourcePage by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="search") }
+    var shelf by remember { mutableStateOf(!(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="rank")) }
+    var sourcePage by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="sources") }
     var importResult by remember { mutableStateOf<String?>(null) }
     val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val readerState = rememberLazyListState()
     val source = sources.firstOrNull { it.id == selected }
@@ -128,7 +130,9 @@ fun NovelScreen(onBack: () -> Unit) {
             }
         }
     }
-    fun search(reset: Boolean, cat: NovelCategory? = null) = work {
+    fun search(reset: Boolean, cat: NovelCategory? = null) {
+        if(searching){keyboard?.hide();focus.clearFocus()}
+        work {
         val s = source ?: error("请先导入并选择书源")
         val nextPage = if (reset) 1 else page
         val chosen = if (reset) cat else category
@@ -138,6 +142,7 @@ fun NovelScreen(onBack: () -> Unit) {
         val existing = if (reset) emptyList() else hits
         val fresh = result.filter { r -> existing.none { it.url == r.url } }
         hits = existing + fresh; page = nextPage + 1; more = fresh.isNotEmpty(); category = chosen
+    }
     }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) work {
@@ -207,9 +212,9 @@ fun NovelScreen(onBack: () -> Unit) {
         }
     }
     fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else if(sourcePage) sourcePage=false else if(searching) { searching=false;hits=emptyList();category=null;more=false } else if(!shelf) shelf=true else onBack() }
-    androidx.activity.compose.BackHandler { back() }
+    androidx.activity.compose.BackHandler(enabled=!embedded || !shelf || sourcePage || searching || currentBook!=null || text.isNotEmpty()) { back() }
     val c=IdjThemeColors
-    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+    if(!sourcePage) Column(Modifier.fillMaxSize().background(c.bg).then(if(embedded)Modifier else Modifier.statusBarsPadding())) {
         if(!shelf || searching || currentBook!=null || text.isNotEmpty()) DSNavBar(
             if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else if(currentBook!=null) "书籍详情" else if(searching) "搜书" else "小说榜单",
             leading={BackButton{back()}},trailing={if(searching)CapsuleButton("书源",Icons.Rounded.Cloud){sourcePage=true} else RoundIconButton(Icons.Rounded.Search,"搜书"){searching=true}})
@@ -254,7 +259,7 @@ fun NovelScreen(onBack: () -> Unit) {
                 onBook={id,book->val saved=cache.books().firstOrNull{it.source==id&&it.book.url==book.url};if(saved!=null){selected=id;currentBook=book;chapters=saved.chapters;cachedCount=cache.count(id,book.url,saved.chapters)}},
                 onLocal={work{text=withContext(Dispatchers.IO){File(context.filesDir,"novel-local.txt").readText()};localBook=true}},
                 onImport={importResult=null;importing=true},onSearch={searching=true;hits=emptyList();more=false;category=null},
-                onRank={shelf=false;searching=false;hits=emptyList()},onSources={sourcePage=true})
+                onRank={shelf=false;searching=false;hits=emptyList()},onSources={sourcePage=true},embedded=embedded)
         } else {
             var expanded by remember { mutableStateOf(false) }
             if(searching) {
@@ -347,7 +352,7 @@ fun NovelScreen(onBack: () -> Unit) {
         }}){Text(s.name)}}
         if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
     }},confirmButton={TextButton(onClick={switchJob?.cancel();showSwitch=false}){Text("关闭")}})
-    if(importing)ModalBottomSheet(onDismissRequest={importing=false},containerColor=c.surface,shape=RoundedCornerShape(topStart=28.dp,topEnd=28.dp),dragHandle=null) {
+    if(importing)ModalBottomSheet(onDismissRequest={importing=false},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=c.surface,shape=RoundedCornerShape(topStart=28.dp,topEnd=28.dp),dragHandle=null) {
         Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text("导入书籍与书源",color=c.text,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));RoundIconButton(Icons.Rounded.Close,"关闭"){importing=false}}
             Text("书籍",color=c.secondary,fontSize=12.sp)

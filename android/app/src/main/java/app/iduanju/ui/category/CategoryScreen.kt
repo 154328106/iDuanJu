@@ -65,7 +65,7 @@ import kotlinx.coroutines.withContext
 fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     val c = IdjThemeColors
     val scope = rememberCoroutineScope()
-    var filterMode by remember { mutableStateOf(false) }
+    var filterMode by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page == "filter") }
     var genre by remember { mutableStateOf(HGRankGenre.all) }
     var sub by remember { mutableStateOf(HGRankSub.hotSearch) }
     var panel by remember { mutableStateOf<HGPanel?>(null) }
@@ -123,6 +123,7 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
         if (!filterMode || panel != null) load(true)
     }
     val grid = rememberLazyGridState()
+    LaunchedEffect(Unit) { if(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.scroll) { kotlinx.coroutines.delay(2500); grid.scrollToItem(3) } }
     LaunchedEffect(grid) {
         snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
             if (hasMore && !loading && last >= grid.layoutInfo.totalItemsCount - 4) load(false)

@@ -28,22 +28,16 @@ import app.iduanju.ui.components.*
 /** Native redesign 04–08. Empty states never manufacture books or source results. */
 @Composable
 internal fun NovelShelf(books: List<Pair<String, NovelHit>>, hasLocal: Boolean, onBook: (String,NovelHit)->Unit,
-    onLocal: ()->Unit, onImport: ()->Unit, onSearch: ()->Unit, onRank: ()->Unit, onSources: ()->Unit) {
+    onLocal: ()->Unit, onImport: ()->Unit, onSearch: ()->Unit, onRank: ()->Unit, onSources: ()->Unit, embedded:Boolean=false) {
     val c=IdjThemeColors
     LazyColumn(contentPadding=PaddingValues(bottom=36.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
+        if(!embedded) {
+            item { Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("书架",color=c.text,fontSize=28.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.weight(1f))
                 RoundIconButton(Icons.Rounded.Add,"导入书籍",onClick=onImport)
-            }
+            } }
+            item { DSSearchBar("搜索书名、作者或书源",Modifier.padding(horizontal=16.dp).pressClick(onClick=onSearch)) }
         }
-        item { DSSearchBar("搜索书名、作者或书源",Modifier.padding(horizontal=16.dp).pressClick(onClick=onSearch)) }
-        item { Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-            ShelfQuick(Icons.Rounded.Leaderboard,"小说榜单",Modifier.weight(1f),onRank)
-            ShelfQuick(Icons.Rounded.Cloud,"我的书源",Modifier.weight(1f),onSources)
-            ShelfQuick(Icons.Rounded.FileDownload,"导入书籍",Modifier.weight(1f),onImport)
-        } }
-        item { SectionHeader2("最近阅读",if(books.isEmpty()&&!hasLocal)"还没有阅读记录" else "继续上次的故事") }
         if(hasLocal) item {
             Row(Modifier.padding(horizontal=16.dp).fillMaxWidth().dsCard().pressClick(onClick=onLocal).padding(16.dp),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 NovelPoster(NovelHit("本地小说","TXT 文件","local"),Modifier.size(72.dp,100.dp))
@@ -59,13 +53,21 @@ internal fun NovelShelf(books: List<Pair<String, NovelHit>>, hasLocal: Boolean, 
             Row(Modifier.padding(horizontal=16.dp).fillMaxWidth().dsCard().pressClick {onBook(src,b)}.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 NovelPoster(b,Modifier.size(72.dp,100.dp))
                 Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Text(b.name,color=c.text,fontSize=18.sp,fontWeight=FontWeight.Bold,maxLines=1)
+                    Text("继续阅读",color=c.accentWarm,fontSize=12.sp,fontWeight=FontWeight.SemiBold)
+                    Text(b.name,color=c.text,fontSize=20.sp,fontWeight=FontWeight.Bold,maxLines=1)
                     Text(b.author,color=c.secondary,fontSize=13.sp)
                     DSStatus("已缓存 · 可离线阅读",StatusTone.Ok)
+                    CapsuleButton("继续阅读",Icons.Rounded.PlayArrow){onBook(src,b)}
                 }
             }
         }
-        item { SectionHeader2("我的书籍","${books.size+if(hasLocal)1 else 0} 本",trailing={MoreLink("导入",onClick=onImport)}) }
+        item { Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+            ShelfQuick(Icons.Rounded.Search,"搜书",Modifier.weight(1f),onSearch)
+            ShelfQuick(Icons.Rounded.Leaderboard,"排行榜",Modifier.weight(1f),onRank)
+            ShelfQuick(Icons.Rounded.Cloud,"书源",Modifier.weight(1f),onSources)
+            ShelfQuick(Icons.Rounded.FileDownload,"导入",Modifier.weight(1f),onImport)
+        } }
+        item { SectionHeader2("我的书架","${books.size+if(hasLocal)1 else 0} 本",trailing={MoreLink("导入",onClick=onImport)}) }
         if(books.isEmpty()&&!hasLocal) item { EmptyNovel("书架空空的","导入本地 TXT，或添加书源后搜索并缓存喜欢的小说。") }
         items(books.chunked(3)) { row -> Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
             row.forEach { (src,b)->Column(Modifier.weight(1f).pressClick {onBook(src,b)},verticalArrangement=Arrangement.spacedBy(8.dp)) {

@@ -39,6 +39,7 @@ fun RootScreen(initialRoute: String? = null) {
     var tab by remember { mutableIntStateOf(0) }
     val back = nav.currentBackStackEntryAsState().value
     val route = back?.destination?.route ?: "home"
+    LaunchedEffect(route) { when(route) { "home" -> tab=0; "search" -> tab=1; "category" -> tab=2; "profile" -> tab=3 } }
     val atRoot = route in setOf("home", "search", "category", "profile")
     /** Backdrop for the floating tab bar's blur (Haze): everything the NavHost draws. */
     val haze = androidx.compose.runtime.remember { dev.chrisbanes.haze.HazeState() }

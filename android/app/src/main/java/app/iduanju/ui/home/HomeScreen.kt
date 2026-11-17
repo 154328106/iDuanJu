@@ -195,12 +195,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                 if (s == HomeSource.huangguo) { app.iduanju.huangguo.HuangguoFeedPage(onOpenDetail); return@HorizontalPager }
                 if (s == HomeSource.manga) { app.iduanju.manga.MangaHomePage(onOpenManga); return@HorizontalPager }
                 if (s == HomeSource.novel) {
-                    val go = app.iduanju.ui.LocalNavigate.current
-                    Column(Modifier.fillMaxSize().padding(24.dp)) {
-                        Text("小说 · 我的书架", color = IdjThemeColors.text, fontSize = 24.sp)
-                        Text("导入 TXT 或阅读书源，浏览推荐、搜索书籍与继续阅读。", color = IdjThemeColors.secondary)
-                        TextButton(onClick = { go("novel") }) { Text("打开小说") }
-                    }
+                    app.iduanju.novel.NovelScreen(onBack = {}, embedded = true)
                     return@HorizontalPager
                 }
                 if (s == HomeSource.channels) { app.iduanju.tg.ChannelFeedPage(onPlay); return@HorizontalPager }

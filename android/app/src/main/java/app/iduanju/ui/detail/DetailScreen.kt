@@ -84,7 +84,11 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
     var reload by remember { mutableIntStateOf(0) }
     LaunchedEffect(seriesId, reload) {
         err = null
-        try { d = withContext(Dispatchers.IO) { app.iduanju.data.Catalog.detail(seriesId) } }
+        try { d = if(app.iduanju.BuildConfig.DEBUG && seriesId=="ui-color-bars") HGSeriesDetail(
+            seriesId=seriesId,title="本地界面测试 · 非真实片源",desc="此页面使用明确标注的本地样例数据，用于检查详情页的排版、折叠、选集和滚动吸顶，不代表真实片源服务。".repeat(4),
+            author="界面验证",totalEps=48,episodes=(1..48).map{app.iduanju.core.hongguo.HGEpisode(it,"fixture-$it",60,"测试第 $it 集")},
+            tags=listOf("本地样例","界面测试","48 集全"),favoriteCount=132000,rating=9.2,ratingCount="本地样例",hotText="界面测试",source="本地样例")
+            else withContext(Dispatchers.IO) { app.iduanju.data.Catalog.detail(seriesId) } }
         catch (e: Exception) { err = e.message ?: "加载失败" }
     }
     val resume = lib.progress(seriesId)
@@ -92,6 +96,7 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
         mutableIntStateOf(d?.let { dd -> EpisodeGroups.ranges(dd.episodes.size).indexOfFirst { resume != null && resume.episodeIndex in it }.coerceAtLeast(0) } ?: 0)
     }
     val scroll = rememberScrollState()
+    LaunchedEffect(d) { if(d!=null && app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.scroll) { kotlinx.coroutines.delay(1200); scroll.scrollTo((scroll.maxValue*0.75).toInt()) } }
     val density = LocalDensity.current
     val pinned by remember { derivedStateOf { scroll.value > with(density) { 236.dp.toPx() } } }
     var actionsBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }

@@ -68,6 +68,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     var epIndex by remember { mutableIntStateOf(-1) }
     var status by remember { mutableStateOf("加载中…") }
     var error by remember { mutableStateOf<String?>(null) }
+    val fixture = app.iduanju.BuildConfig.DEBUG && seriesId == "ui-color-bars"
+    var centerSuppressed by remember { mutableStateOf(false) }
+    var previousEpisode by remember { mutableIntStateOf(-1) }
     var showChrome by remember { mutableStateOf(true) }
     var playing by remember { mutableStateOf(false) }
     var pos by remember { mutableLongStateOf(0L) }
@@ -77,10 +80,12 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     var holdSpeed by remember { mutableStateOf(false) }
     var seekHint by remember { mutableStateOf<String?>(null) }
     /** "episodes" · "speed" · "quality" · "audio"; one panel at a time. */
-    var panel by remember { mutableStateOf<String?>(null) }
+    var panel by remember { mutableStateOf(if(app.iduanju.BuildConfig.DEBUG)app.iduanju.ui.UiEvidence.panel else null) }
     var danmaku by remember { mutableStateOf(true) }
     var quality by remember { mutableStateOf<String?>(null) }
     var fillMode by remember { mutableStateOf(false) }
+    var locked by remember { mutableStateOf(false) }
+    var autoNext by remember { mutableStateOf(true) }
     val activity = ctx as? android.app.Activity
     val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     fun setLandscape(on: Boolean) {
@@ -107,7 +112,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     DisposableEffect(Unit) {
         val l = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) {
+                if (state == Player.STATE_ENDED && autoNext) {
                     val n = detail?.episodes?.size ?: 0
                     if (epIndex + 1 < n) epIndex += 1
                 }
@@ -125,6 +130,13 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     }
 
     LaunchedEffect(seriesId) {
+        if(fixture) {
+            detail=HGSeriesDetail(seriesId=seriesId,title="本地彩条测试 · 非真实片源",totalEps=48,source="本地测试",
+                episodes=(1..48).map{app.iduanju.core.hongguo.HGEpisode(it,"fixture-$it",60,"彩条第 $it 段")})
+            epIndex=startEp.coerceIn(0,47)
+            if(app.iduanju.ui.UiEvidence.landscape)setLandscape(true)
+            return@LaunchedEffect
+        }
         try {
             val d = withContext(Dispatchers.IO) { app.iduanju.data.Catalog.detail(seriesId, web = false) }
             detail = d
@@ -135,8 +147,17 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     LaunchedEffect(detail, epIndex, retry) {
         val d = detail ?: return@LaunchedEffect
         val ep = d.episodes.getOrNull(epIndex) ?: return@LaunchedEffect
+        if(previousEpisode >= 0 && previousEpisode != epIndex) centerSuppressed=true
+        previousEpisode=epIndex
         error = null; status = "取流中…"
         player.stop(); player.clearMediaItems()
+        if(fixture) {
+            val local=java.io.File(ctx.cacheDir,"ui-color-bars.mp4")
+            if(!local.exists())withContext(Dispatchers.IO){ctx.assets.open("player_landscape.mp4").use{input->local.outputStream().use{input.copyTo(it)}}}
+            player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(local)))
+            status="";player.prepare();player.play()
+            return@LaunchedEffect
+        }
         try {
             val p = EpisodeCache.get(ep) { status = it }.await()
             quality = p.quality
@@ -161,6 +182,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         }
     }
 
+    LaunchedEffect(fixture) {
+        if(fixture && app.iduanju.ui.UiEvidence.switchEpisode) { delay(6000); epIndex=(epIndex+1)%48 }
+    }
     LaunchedEffect(player) {
         var tick = 0
         while (isActive) {
@@ -174,7 +198,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             delay(250)
         }
     }
-    LaunchedEffect(showChrome, playing, panel) { if (showChrome && playing && panel == null) { delay(4000); showChrome = false } }
+    LaunchedEffect(showChrome, playing, panel) { if (showChrome && playing && panel == null && !(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.keepChrome)) { delay(4000); showChrome = false } }
     LaunchedEffect(seekHint) { if (seekHint != null) { delay(700); seekHint = null } }
     DisposableEffect(Unit) {
         onDispose {
@@ -211,8 +235,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             Modifier.fillMaxSize()
                 .pointerInput(Unit) {
                     detectTapGestures(
-                        onTap = { if (panel != null) panel = null else showChrome = !showChrome },
-                        onDoubleTap = { o ->
+                        onTap = { if(locked) showChrome=true else if (panel != null) panel = null else if(centerSuppressed) {centerSuppressed=false;showChrome=true} else showChrome = !showChrome },
+                        onDoubleTap = doubleTap@ { o ->
+                            if(locked)return@doubleTap
                             val w = size.width
                             when {
                                 o.x < w / 3 -> { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)); seekHint = "-10s" }
@@ -225,21 +250,21 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                             if (holdSpeed) { holdSpeed = false; player.setPlaybackSpeed(speed) }
                             ok
                         },
-                        onLongPress = { holdSpeed = true; player.setPlaybackSpeed(2f) },
+                        onLongPress = { if(!locked){holdSpeed = true; player.setPlaybackSpeed(2f)} },
                     )
                 }
                 .pointerInput(detail) {
                     var acc = 0f
                     detectVerticalDragGestures(onDragStart = { acc = 0f }, onDragEnd = {
                         val n = detail?.episodes?.size ?: 0
-                        if (acc < -160 && epIndex + 1 < n) epIndex += 1
-                        else if (acc > 160 && epIndex > 0) epIndex -= 1
+                        if (!locked && acc < -160 && epIndex + 1 < n) epIndex += 1
+                        else if (!locked && acc > 160 && epIndex > 0) epIndex -= 1
                     }) { _, d -> acc += d }
                 }
                 .pointerInput(Unit) {
                     var start = 0L; var acc = 0f
                     detectHorizontalDragGestures(onDragStart = { start = player.currentPosition; acc = 0f }, onDragEnd = {
-                        player.seekTo((start + (acc / size.width * 90_000).toLong()).coerceIn(0, player.duration.coerceAtLeast(0)))
+                        if(!locked)player.seekTo((start + (acc / size.width * 90_000).toLong()).coerceIn(0, player.duration.coerceAtLeast(0)))
                         seekHint = null
                     }) { _, d ->
                         acc += d
@@ -282,29 +307,43 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         val pc = IdjDarkColors
         val chromeA by androidx.compose.animation.core.animateFloatAsState(if (showChrome || panel != null) 1f else 0f, DS.panel(), label = "chrome")
         val ready = status.isEmpty() && error == null && dur > 0
-        Box(Modifier.fillMaxWidth().height(170.dp).graphicsLayer { alpha = chromeA }
-            .background(Brush.verticalGradient(listOf(Color.Black.copy(0.62f), Color.Transparent))))
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(330.dp).graphicsLayer { alpha = 0.35f + 0.65f * chromeA }
-            .background(Brush.verticalGradient(0f to Color.Transparent, 0.55f to Color.Black.copy(0.6f), 1f to Color.Black.copy(0.88f))))
-        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp).padding(top = 6.dp).graphicsLayer { alpha = chromeA }) {
+        Box(Modifier.fillMaxWidth().height(if(landscape)140.dp else 170.dp).graphicsLayer { alpha = chromeA }
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(0.88f), Color.Black.copy(0.65f), Color.Transparent))))
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if(landscape)180.dp else 330.dp)
+            .background(Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(0.74f), 1f to Color.Black.copy(0.94f))))
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = if(landscape)64.dp else 16.dp).padding(top = if(landscape)14.dp else 6.dp).graphicsLayer { alpha = if(landscape)1f else chromeA }) {
             Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", showChrome, onBack)
-                Spacer(Modifier.weight(1f))
-                CircleBtn(Icons.Filled.PictureInPictureAlt, "画中画", showChrome) {}
-                Spacer(Modifier.width(10.dp))
-                val fav = lib.isFavorite(seriesId)
-                CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", showChrome) {
-                    detail?.let { lib.toggleFavorite(seriesId, it.title, it.cover) }
+                CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", showChrome && !locked, onBack)
+                if(landscape) {
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(detail?.title.orEmpty(),color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text("第 ${detail?.episodes?.getOrNull(epIndex)?.ep ?: 1} 集 / 共 ${detail?.episodes?.size ?: 0} 集",color=Color.White.copy(0.7f),fontSize=12.sp)
+                    }
+                    TechLine(tags,Modifier.padding(end=14.dp))
+                    LandChip(Icons.Filled.Repeat,"连播",if(autoNext)"开" else "关",autoNext,showChrome&&!locked){autoNext=!autoNext}
+                    Spacer(Modifier.width(10.dp))
+                    CircleBtn(if(locked)Icons.Filled.Lock else Icons.Filled.LockOpen,if(locked)"解锁" else "锁屏",showChrome){locked=!locked}
+                    Spacer(Modifier.width(10.dp))
+                    CircleBtn(Icons.Filled.FullscreenExit,"退出横屏",showChrome&&!locked){setLandscape(false)}
+                } else {
+                    Spacer(Modifier.weight(1f))
+                    CircleBtn(Icons.Filled.PictureInPictureAlt, "画中画", showChrome) {}
+                    Spacer(Modifier.width(10.dp))
+                    val fav = lib.isFavorite(seriesId)
+                    CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", showChrome) {
+                        detail?.let { lib.toggleFavorite(seriesId, it.title, it.cover) }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    CircleBtn(Icons.Filled.MoreHoriz, "更多", showChrome) { fillMode = !fillMode }
                 }
-                Spacer(Modifier.width(10.dp))
-                CircleBtn(Icons.Filled.MoreHoriz, "更多", showChrome) { fillMode = !fillMode }
             }
             if (!landscape) TechLine(tags, Modifier.fillMaxWidth().padding(top = 6.dp))
         }
-        androidx.compose.animation.AnimatedVisibility(showChrome && ready && panel == null, Modifier.align(Alignment.Center),
+        androidx.compose.animation.AnimatedVisibility(showChrome && ready && !centerSuppressed && !locked && panel == null, Modifier.align(Alignment.Center),
             enter = fadeIn(DS.panel()) + androidx.compose.animation.scaleIn(DS.panel(), initialScale = 0.92f),
             exit = fadeOut(DS.panel()) + androidx.compose.animation.scaleOut(DS.panel(), targetScale = 0.92f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if(landscape)72.dp else 44.dp)) {
                 Icon(Icons.Filled.Replay10, "后退10秒", tint = Color.White, modifier = Modifier.size(36.dp).pressClick(0.9f) { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) })
                 Box(Modifier.size(68.dp).clip(CircleShape).background(Color(0x7514141A)).border(1.dp, Color.White.copy(0.18f), CircleShape)
                     .pressClick(0.92f, label = if (playing) "暂停" else "播放") { if (player.isPlaying) player.pause() else player.play() },
@@ -315,6 +354,62 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 }
                 Icon(Icons.Filled.Forward10, "前进10秒", tint = Color.White, modifier = Modifier.size(36.dp).pressClick(0.9f) { player.seekTo(player.currentPosition + 10_000) })
             }
+        }
+        // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
+            .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 8.dp else 4.dp)) {
+            val d = detail
+            if (d != null && !landscape) {
+                Row(Modifier.graphicsLayer { alpha = chromeA }.heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(d.source, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color.White.copy(0.16f)).padding(horizontal = 7.dp, vertical = 2.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val seasonTag = remember(d.relatedSeries) {
+                        val ss = d.relatedSeries
+                        val nums = ss.map { app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }
+                        if (ss.size > 1 && nums.toSet().size == ss.size)
+                            "第 " + app.iduanju.core.hongguo.SeasonParser.seasonNo(ss.firstOrNull { it.seriesId == d.seriesId }?.title ?: d.title) + " 季" else null
+                    }
+                    seasonTag?.let { Text("$it · ", color = Color.White.copy(0.72f), fontSize = 13.sp) }
+                    Text("第 ${d.episodes.getOrNull(epIndex)?.ep ?: startEp} 集", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(" / 共 ${maxOf(d.totalEps, d.episodes.size)} 集", color = Color.White.copy(0.72f), fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(d.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, lineHeight = 27.sp, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.7f), blurRadius = 6f)))
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val tStyle = androidx.compose.ui.text.TextStyle(color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    fontFeatureSettings = "tnum", shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.6f), blurRadius = 4f))
+                Text(fmt(pos), style = tStyle)
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered) { if(!locked){player.seekTo(it); showChrome = true} } }
+                Spacer(Modifier.width(10.dp))
+                Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
+                Spacer(Modifier.width(10.dp))
+                Icon(if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (landscape) "退出横屏" else "横屏全屏", tint = Color.White,
+                    modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(!landscape) })
+            }
+            if(landscape) Row(Modifier.fillMaxWidth().padding(top=12.dp).graphicsLayer{alpha=if(locked)0f else chromeA},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                if(pos<15000&&dur>45000) LandChip(Icons.Filled.PlayArrow,"跳过片头",null,false,showChrome&&!locked){player.seekTo(15000)}
+                Spacer(Modifier.weight(1f))
+                LandChip(Icons.Filled.GridView,"选集",null,panel=="episodes",showChrome&&!locked){panel=if(panel=="episodes")null else "episodes"}
+                LandChip(Icons.Filled.Speed,"倍速",if(speed==1f)"1.0×" else "${speed}×",panel=="speed",showChrome&&!locked){panel=if(panel=="speed")null else "speed"}
+                LandChip(Icons.Filled.HighQuality,"画质",quality?:tags.res,panel=="quality",showChrome&&!locked){panel=if(panel=="quality")null else "quality"}
+                LandChip(Icons.Filled.Subtitles,"弹幕",if(danmaku)"开" else "关",danmaku&&seriesId.all{it.isDigit()},showChrome&&!locked){if(seriesId.all{it.isDigit()})danmaku=!danmaku}
+                LandChip(Icons.Filled.ClosedCaption,"音轨字幕",null,panel=="audio",showChrome&&!locked){panel=if(panel=="audio")null else "audio"}
+            } else Row(Modifier.fillMaxWidth().padding(top = 10.dp).graphicsLayer { alpha = chromeA }.padding(horizontal = if (landscape) 120.dp else 0.dp)) {
+                val dmOK = seriesId.all { it.isDigit() }
+                val on = showChrome
+                ActionBtn(Icons.Filled.GridView, "选集", null, panel == "episodes", false, on) { panel = if (panel == "episodes") null else "episodes" }
+                ActionBtn(Icons.Filled.Speed, "倍速", if (speed == 1f) "1.0×" else "${speed}×".replace(".0×", "×"), panel == "speed", speed != 1f, on) { panel = if (panel == "speed") null else "speed" }
+                ActionBtn(Icons.Filled.HighQuality, "画质", quality ?: tags.res, panel == "quality", false, on) { panel = if (panel == "quality") null else "quality" }
+                ActionBtn(Icons.Filled.Subtitles, "弹幕", if (dmOK) (if (danmaku) "开" else "关") else null, false, dmOK && danmaku, on) { if (dmOK) danmaku = !danmaku }
+                ActionBtn(Icons.Filled.ClosedCaption, "音轨字幕", null, panel == "audio", false, on) { panel = if (panel == "audio") null else "audio" }
+            }
+
         }
         // panels: one style for 选集 / 倍速 / 画质 / 音轨字幕, sitting just above the action row
         if (panel != null) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { panel = null } })
@@ -358,53 +453,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 }
             }
         }
-        // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
-            .padding(horizontal = if (landscape) 48.dp else 20.dp).padding(bottom = if (landscape) 8.dp else 4.dp)) {
-            val d = detail
-            if (d != null) {
-                Row(Modifier.graphicsLayer { alpha = chromeA }.heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(d.source, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color.White.copy(0.16f)).padding(horizontal = 7.dp, vertical = 2.dp))
-                    Spacer(Modifier.width(8.dp))
-                    val seasonTag = remember(d.relatedSeries) {
-                        val ss = d.relatedSeries
-                        val nums = ss.map { app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }
-                        if (ss.size > 1 && nums.toSet().size == ss.size)
-                            "第 " + app.iduanju.core.hongguo.SeasonParser.seasonNo(ss.firstOrNull { it.seriesId == d.seriesId }?.title ?: d.title) + " 季" else null
-                    }
-                    seasonTag?.let { Text("$it · ", color = Color.White.copy(0.72f), fontSize = 13.sp) }
-                    Text("第 ${d.episodes.getOrNull(epIndex)?.ep ?: startEp} 集", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(" / 共 ${maxOf(d.totalEps, d.episodes.size)} 集", color = Color.White.copy(0.72f), fontSize = 13.sp)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(d.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, lineHeight = 27.sp, maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.7f), blurRadius = 6f)))
-            }
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val tStyle = androidx.compose.ui.text.TextStyle(color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    fontFeatureSettings = "tnum", shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.6f), blurRadius = 4f))
-                Text(fmt(pos), style = tStyle)
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered) { player.seekTo(it); showChrome = true } }
-                Spacer(Modifier.width(10.dp))
-                Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
-                Spacer(Modifier.width(10.dp))
-                Icon(if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (landscape) "退出横屏" else "横屏全屏", tint = Color.White,
-                    modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(!landscape) })
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp).graphicsLayer { alpha = chromeA }.padding(horizontal = if (landscape) 120.dp else 0.dp)) {
-                val dmOK = seriesId.all { it.isDigit() }
-                val on = showChrome
-                ActionBtn(Icons.Filled.GridView, "选集", null, panel == "episodes", false, on) { panel = if (panel == "episodes") null else "episodes" }
-                ActionBtn(Icons.Filled.Speed, "倍速", if (speed == 1f) "1.0×" else "${speed}×".replace(".0×", "×"), panel == "speed", speed != 1f, on) { panel = if (panel == "speed") null else "speed" }
-                ActionBtn(Icons.Filled.HighQuality, "画质", quality ?: tags.res, panel == "quality", false, on) { panel = if (panel == "quality") null else "quality" }
-                ActionBtn(Icons.Filled.Subtitles, "弹幕", if (dmOK) (if (danmaku) "开" else "关") else null, false, dmOK && danmaku, on) { if (dmOK) danmaku = !danmaku }
-                ActionBtn(Icons.Filled.ClosedCaption, "音轨字幕", null, panel == "audio", false, on) { panel = if (panel == "audio") null else "audio" }
-            }
-        }
+
     }
 }
 
@@ -438,6 +487,17 @@ private fun CircleBtn(icon: ImageVector, label: String, enabled: Boolean = true,
     Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0x6B141418)).border(1.dp, Color.White.copy(0.14f), CircleShape)
         .pressClick(0.92f, enabled = enabled, label = label, onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun LandChip(icon:ImageVector,title:String,value:String?,on:Boolean,enabled:Boolean,onClick:()->Unit){
+    val pc=IdjDarkColors
+    Row(Modifier.height(34.dp).clip(CircleShape).background(if(on)pc.accentSoft else Color(0x75141418))
+        .border(1.dp,if(on)pc.accentLine else Color.White.copy(0.14f),CircleShape).pressClick(enabled=enabled,onClick=onClick).padding(horizontal=13.dp),
+        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)){
+        Icon(icon,null,tint=if(on)pc.accent else Color.White,modifier=Modifier.size(17.dp))
+        Text(title+(value?.let{" $it"}?:""),color=if(on)pc.accent else Color.White.copy(0.8f),fontSize=13.sp,maxLines=1,softWrap=false)
     }
 }
 
