@@ -27,54 +27,21 @@ extension View {
 
 // MARK: Tech strip
 
+/// Spec `.tech`: one small muted line, not a collection of badges. Player stays dark in both themes.
 struct PlayerTechStrip: View {
     let tech: PlayerTech
     var landscape = false
-
     var body: some View {
-        let fs: CGFloat = landscape ? 11 : 10.5
-        HStack(spacing: landscape ? 12 : 10) {
-            if !tech.resolution.isEmpty {
-                Text(tech.resolution).font(.system(size: fs, weight: .heavy)).foregroundStyle(.black)
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 3))
-            }
-            Text(tech.hdr ? "HDR" : "SDR").font(.system(size: fs, weight: .bold))
-            if !tech.codec.isEmpty {
-                Text(tech.codec).font(.system(size: fs - 1.5, weight: .bold))
-                    .padding(.horizontal, 3).padding(.vertical, 0.5)
-                    .overlay { RoundedRectangle(cornerRadius: 3).strokeBorder(.white.opacity(0.8), lineWidth: 0.8) }
-            }
-            if landscape { pair("BIT", "\(tech.bitDepth)", fs) }
-            if !tech.audio.isEmpty {
-                let p = tech.audio.split(separator: " ", maxSplits: 1).map(String.init)
-                pair(p[0], p.count > 1 ? p[1] : "", fs)
-            }
-            if tech.fps > 0 { pair("FPS", "\(tech.fps)", fs) }
-            if landscape, tech.bitrate > 0 { pair("BPS", String(format: "%.1f", tech.bitrate), fs) }
-            if !tech.engine.isEmpty {
-                Text(tech.engine).font(.system(size: fs - 1.5, weight: .semibold)).opacity(0.7)
-                    .accessibilityIdentifier("player.engine")
-            }
-            if tech.network > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "wifi").font(.system(size: fs, weight: .semibold))
-                    Text(PlayerTech.speed(tech.network)).font(.system(size: fs, weight: .medium).monospacedDigit()).opacity(0.75)
-                }
-            }
+        let parts = [tech.resolution, tech.hdr ? "HDR" : "SDR", tech.codec, tech.audio,
+                     tech.fps > 0 ? "\(tech.fps) fps" : ""] .filter { !$0.isEmpty }
+        HStack(spacing: 6) {
+            Text(parts.joined(separator: " · "))
+            if !tech.engine.isEmpty { Text(tech.engine).accessibilityIdentifier("player.engine").opacity(0.7) }
+            if tech.network > 0 { Text(PlayerTech.speed(tech.network)).monospacedDigit() }
         }
-        .foregroundStyle(.white)
-        .lineLimit(1).fixedSize()
-        .shadow(color: .black.opacity(0.4), radius: 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("player.tech")
-    }
-
-    private func pair(_ k: String, _ v: String, _ fs: CGFloat) -> some View {
-        HStack(spacing: 3) {
-            Text(k).font(.system(size: fs, weight: .bold))
-            if !v.isEmpty { Text(v).font(.system(size: fs, weight: .medium).monospacedDigit()).opacity(0.75) }
-        }
+        .font(.system(size: 11, weight: .medium)).tracking(0.3).foregroundStyle(.white.opacity(0.55))
+        .lineLimit(1).fixedSize().shadow(color: .black.opacity(0.4), radius: 2)
+        .accessibilityElement(children: .combine).accessibilityIdentifier("player.tech")
     }
 }
 
@@ -84,12 +51,13 @@ struct PlayerTechStrip: View {
 struct PlayerCenterControls: View {
     let co: PlaybackCoordinator
     let onInteract: () -> Void
+    var spacing: CGFloat = 44
     @State private var spin = false
 
     var body: some View {
         let loading = co.readyIndex == nil || (co.waitingForMedia && !co.paused)
         let buffered = co.duration > 0 ? min(1, co.bufferedUntil / co.duration) : 0
-        HStack(spacing: 44) {
+        HStack(spacing: spacing) {
             Button { co.seek(by: -10); onInteract() } label: {
                 Image(systemName: "gobackward.10").font(.system(size: 29, weight: .regular)).frame(width: 44, height: 44).opacity(0.94)
             }.accessibilityLabel("快退10秒").accessibilityIdentifier("player.back10")
@@ -171,20 +139,22 @@ struct PlayerTimelineV3: View {
     var landscape = false
     /// Portrait redesign: times sit inline either side of the track and the 全屏 button closes the row.
     var onFullscreen: (() -> Void)? = nil
+    /// Landscape redesign: times inline but no 全屏 button (exit lives in the top bar).
+    var inline = false
 
     var body: some View {
-        if let onFullscreen {
+        if inline || onFullscreen != nil {
             let t = co.scrubPreview ?? co.time
             HStack(spacing: 10) {
                 Text(Fmt.clock(Int(t))).accessibilityIdentifier("player.time")
                 PlayerProgressBar(co: co, scrubbing: $scrubbing, onInteract: onInteract)
                 Text("−" + Fmt.clock(Int(max(0, co.duration - t)))).accessibilityIdentifier("player.remaining")
-                Button(action: onFullscreen) {
+                if let onFullscreen { Button(action: onFullscreen) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white).frame(width: 30, height: 30).contentShape(Rectangle())
                 }
                 .buttonStyle(PressScale()).padding(.leading, 2)
-                .accessibilityLabel("横屏全屏").accessibilityIdentifier("player.fullscreen")
+                .accessibilityLabel("横屏全屏").accessibilityIdentifier("player.fullscreen") }
             }
             .font(.system(size: 12, weight: .medium).monospacedDigit())
             .foregroundStyle(.white.opacity(0.8))
@@ -264,6 +234,43 @@ struct PlayerActionButton<Icon: View>: View {
         }
         .buttonStyle(PressScale())
         .accessibilityLabel(a11y).accessibilityIdentifier(id)
+    }
+}
+
+/// Redesign `.pchip`: 34 pt glass capsule, icon + label + current value; `on` turns it accent.
+struct PlayerChip: View {
+    let id: String
+    let a11y: String
+    let symbol: String
+    let title: String
+    var value: String? = nil
+    var on = false
+    var dimmed = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(on ? STVTheme.accent : .white)
+                (Text(title).foregroundColor(on ? STVTheme.accent : .white.opacity(0.8))
+                 + Text(value.map { " " + $0 } ?? "").fontWeight(.semibold).foregroundColor(on ? STVTheme.accent : .white))
+                    .font(.system(size: 13)).lineLimit(1).fixedSize()
+            }
+            .padding(.horizontal, 13).frame(height: 34)
+            .background {
+                Capsule().fill(.ultraThinMaterial)
+                    .overlay(Capsule().fill(on ? STVTheme.accent.opacity(0.16) : Color(red: 20/255, green: 20/255, blue: 24/255).opacity(0.46)))
+            }
+            .overlay { Capsule().strokeBorder(on ? STVTheme.accentLine : .white.opacity(0.14), lineWidth: 1) }
+            .environment(\.colorScheme, .dark)
+            .opacity(dimmed ? 0.45 : 1)
+            .contentShape(Capsule())
+            .animation(DS.select, value: on)
+        }
+        .buttonStyle(PressScale())
+        .accessibilityLabel(a11y).accessibilityIdentifier(id)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

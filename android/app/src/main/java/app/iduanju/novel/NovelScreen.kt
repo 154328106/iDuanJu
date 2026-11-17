@@ -12,6 +12,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.BasicTextField
+import app.iduanju.ui.components.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
@@ -34,6 +41,7 @@ import org.json.JSONObject
 import java.io.File
 
 /** Imported sources and reading progress are private to this installation. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NovelScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -70,6 +78,9 @@ fun NovelScreen(onBack: () -> Unit) {
     var prefetchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var shelf by remember { mutableStateOf(true) }
+    var sourcePage by remember { mutableStateOf(false) }
+    var importResult by remember { mutableStateOf<String?>(null) }
     val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
     val scope = rememberCoroutineScope()
@@ -88,7 +99,7 @@ fun NovelScreen(onBack: () -> Unit) {
         val parsed = NovelSources.import(raw)
         require(parsed.isNotEmpty()) { "没有可用的文本书源" }
         for (s in parsed) { sources.removeAll { it.id == s.id }; sources.add(s) }
-        saveSources(); selected = parsed.first().id; importing = false
+        saveSources(); selected = parsed.first().id; importResult = "已导入 ${parsed.size} 个书源"
     }
     suspend fun read(index: Int, selectedSource: NovelSource? = source, bookToSave: NovelHit? = currentBook) {
         val s = selectedSource ?: return
@@ -195,14 +206,13 @@ fun NovelScreen(onBack: () -> Unit) {
             } finally {switchBusy=false}
         }
     }
-    fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else if(searching) { searching=false;hits=emptyList();category=null;more=false } else onBack() }
+    fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else if(sourcePage) sourcePage=false else if(searching) { searching=false;hits=emptyList();category=null;more=false } else if(!shelf) shelf=true else onBack() }
     androidx.activity.compose.BackHandler { back() }
-    Column(Modifier.fillMaxSize().background(IdjThemeColors.bg).statusBarsPadding().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min=56.dp), horizontalArrangement = Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick = { back() }) { Text("返回") }
-            Text(if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else if(currentBook!=null) "书籍详情" else if(searching) "小说搜索" else "小说榜单", fontSize=17.sp,fontWeight=FontWeight.SemiBold,color = IdjThemeColors.text, modifier = Modifier.weight(1f).padding(12.dp), maxLines = 1)
-            TextButton(onClick = { importing = true }, enabled = !busy) { Text("书源") }
-        }
+    val c=IdjThemeColors
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+        if(!shelf || searching || currentBook!=null || text.isNotEmpty()) DSNavBar(
+            if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else if(currentBook!=null) "书籍详情" else if(searching) "搜书" else "小说榜单",
+            leading={BackButton{back()}},trailing={if(searching)CapsuleButton("书源",Icons.Rounded.Cloud){sourcePage=true} else RoundIconButton(Icons.Rounded.Search,"搜书"){searching=true}})
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize=13.sp, modifier=Modifier.padding(vertical=8.dp)) }
         if (text.isNotEmpty()) {
@@ -239,86 +249,64 @@ fun NovelScreen(onBack: () -> Unit) {
                 items(chapters.size) { i -> Text(chapters[i].title, color = IdjThemeColors.text, modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { work { read(i) } }.padding(14.dp)) }
                 if (!busy && chapters.isEmpty()) item { Text("这本书没有可读目录，可能已下架、受限或书源失效。可换一本书或切换书源后重试。", color = IdjThemeColors.secondary) }
             }
+        } else if(shelf && !searching) {
+            NovelShelf(cache.books().map{it.source to it.book},File(context.filesDir,"novel-local.txt").exists(),
+                onBook={id,book->val saved=cache.books().firstOrNull{it.source==id&&it.book.url==book.url};if(saved!=null){selected=id;currentBook=book;chapters=saved.chapters;cachedCount=cache.count(id,book.url,saved.chapters)}},
+                onLocal={work{text=withContext(Dispatchers.IO){File(context.filesDir,"novel-local.txt").readText()};localBook=true}},
+                onImport={importResult=null;importing=true},onSearch={searching=true;hits=emptyList();more=false;category=null},
+                onRank={shelf=false;searching=false;hits=emptyList()},onSources={sourcePage=true})
         } else {
-            Row {
-                TextButton(onClick = { filePicker.launch(arrayOf("text/*", "application/json", "application/octet-stream")) }, enabled = !busy) { Text("导入 TXT / 书源") }
-                TextButton(onClick = { work {
-                    val last = prefs.getString("last", null)?.let { JSONObject(it) }
-                    if (last == null) { text = withContext(Dispatchers.IO) { File(context.filesDir, "novel-local.txt").readText() }; localBook = true }
-                    else {
-                        val s = sources.firstOrNull { it.id == last.optString("source") } ?: error("续读书源已删除")
-                        val book = NovelHit(last.getString("name"), last.optString("author"), last.getString("url"))
-                        selected = s.id; currentBook = book
-                        chapters = withContext(Dispatchers.IO) { cache.books().firstOrNull{it.source==s.id&&it.book.url==book.url}?.chapters ?: NovelSources.chapters(s,book.url) }
-                        if (chapters.isNotEmpty()) read(last.optInt("chapter").coerceIn(0, chapters.lastIndex), s, book)
-                    }
-                } }, enabled = !busy) { Text("继续阅读") }
-            }
             var expanded by remember { mutableStateOf(false) }
-            Box {
-                TextButton(onClick = { expanded = true }, enabled = !busy) { Text(source?.name ?: "选择书源") }
-                DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-                    sources.filter { it.enabled }.forEach { s -> DropdownMenuItem(text = { Text(s.name) }, onClick = { selected = s.id; expanded = false }) }
+            if(searching) {
+                NovelSearchField(query,{query=it},{if(!busy&&query.isNotBlank())search(true)})
+                Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Text(if(busy)"正在搜索当前书源…" else "共 ${hits.size} 本 · ${source?.name ?: "请先选择书源"}",color=c.secondary,fontSize=12.sp,modifier=Modifier.weight(1f))
+                    if(query.isNotBlank())MiniButton("搜索"){if(!busy)search(true)}
                 }
+                if(busy)DSProgressBar(0.5f,Modifier.padding(horizontal=20.dp))
             }
-            if(searching) Row(Modifier.padding(bottom=12.dp),verticalAlignment=Alignment.CenterVertically) { OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("书名 / 作者") }, singleLine = true)
-                TextButton(onClick = { search(true) }, enabled = !busy && query.isNotBlank()) { Text("搜索") } }
-            else OutlinedButton(onClick={searching=true;hits=emptyList();more=false;category=null},modifier=Modifier.fillMaxWidth().padding(bottom=12.dp)) {Text("搜索书名或作者")}
-            if(!searching && categories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
-                categories.map{it.group}.distinct().forEach { group ->
-                    TextButton(onClick={
-                        selectedGroup=group
-                        val first = categories.firstOrNull { it.group == group && it.action == null && it.url.isNotBlank() }
-                        if (first != null) search(true, first)
-                        else { hits=emptyList();category=null;more=false }
-                    }, enabled=!busy){Text(group,fontWeight=if(group==selectedGroup)FontWeight.Bold else FontWeight.Normal)}
+            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
+                Box {
+                    CapsuleButton(source?.name ?: "选择书源",Icons.Rounded.Cloud,Icons.Rounded.ExpandMore){expanded=true}
+                    DropdownMenu(expanded,{expanded=false}){sources.filter{it.enabled}.forEach{sc->DropdownMenuItem(text={Text(sc.name)},onClick={selected=sc.id;expanded=false})}}
                 }
+                Spacer(Modifier.weight(1f))
+                if(!searching)Text("实时书源榜单",color=c.tertiary,fontSize=11.sp)
             }
+            if(!searching && categories.isNotEmpty()) UnderlineTabs(categories.map{it.group}.distinct(),selectedGroup,{it},small=true,onSelect={group->
+                selectedGroup=group
+                val first=categories.firstOrNull{it.group==group&&it.action==null&&it.url.isNotBlank()}
+                if(first!=null)search(true,first) else {hits=emptyList();category=null;more=false}
+            })
             Row(Modifier.weight(1f)) {
-            if(!searching && categories.isNotEmpty()) LazyColumn(Modifier.width(92.dp).fillMaxHeight().background(IdjThemeColors.bg)) {
-                items(categories.filter{it.group==selectedGroup},key={it.id}) { cat ->
-                    Text(cat.title,color=if(cat==category)IdjThemeColors.accent else IdjThemeColors.text,fontSize=14.sp,
-                        fontWeight=if(cat==category)FontWeight.Bold else FontWeight.Normal,
-                        modifier=Modifier.fillMaxWidth().background(if(cat==category)IdjThemeColors.surface else IdjThemeColors.bg).clickable(enabled=!busy) {
-                            if(cat.action!=null)work{withContext(Dispatchers.IO){NovelSources.categoryAction(source!!,cat)};categories=withContext(Dispatchers.IO){NovelSources.categories(source!!)}}
-                            else search(true,cat)
-                        }.padding(horizontal=10.dp,vertical=18.dp))
-                }
-            }
-            LazyColumn(Modifier.weight(1f).fillMaxHeight().background(IdjThemeColors.surface).padding(horizontal=12.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-                if (hits.isEmpty()) {
-                    item { Text(if(searching)"搜索你的下一本书" else "书源推荐与榜单",fontSize=17.sp,fontWeight=FontWeight.SemiBold, color = IdjThemeColors.text, modifier = Modifier.padding(vertical = 14.dp)) }
-                    item { Text(if(searching)"输入书名或作者，搜索当前书源。" else if(categories.isEmpty())"此书源没有发现栏目，可搜索或导入其他书源。" else "选择左侧栏目，查看书源实时榜单",fontSize=13.sp, color = IdjThemeColors.secondary) }
-                    items(cache.books(),key={it.source+it.book.url}) { saved ->
-                        Text("离线 · ${saved.book.name}",color=IdjThemeColors.text,modifier=Modifier.fillMaxWidth().clickable{
-                            selected=saved.source;currentBook=saved.book;chapters=saved.chapters;cachedCount=cache.count(saved.source,saved.book.url,saved.chapters)
-                        }.padding(vertical=12.dp))
+                if(!searching&&categories.isNotEmpty()) LazyColumn(Modifier.width(86.dp).fillMaxHeight().background(c.rail),contentPadding=PaddingValues(vertical=8.dp)) {
+                    items(categories.filter{it.group==selectedGroup},key={it.id}){cat->
+                        val on=cat==category
+                        Text(cat.title,color=if(on)c.accent else c.secondary,fontSize=13.sp,fontWeight=if(on)FontWeight.SemiBold else FontWeight.Normal,
+                            modifier=Modifier.fillMaxWidth().padding(horizontal=6.dp,vertical=3.dp).clip(RoundedCornerShape(12.dp)).background(if(on)c.accentSoft else androidx.compose.ui.graphics.Color.Transparent)
+                            .pressClick(enabled=!busy){if(cat.action!=null)work{withContext(Dispatchers.IO){NovelSources.categoryAction(source!!,cat)};categories=withContext(Dispatchers.IO){NovelSources.categories(source!!)}} else search(true,cat)}
+                            .padding(horizontal=10.dp,vertical=14.dp))
                     }
-                } else {
-                    item { TextButton(onClick = { hits = emptyList(); more = false }) { Text("返回发现栏目") } }
-                    items(hits, key = { it.url }) { book ->
-                        Column(Modifier.fillMaxWidth().clickable(enabled = !busy) { work {
-                            val s = source ?: error("请先选择书源")
-                            val result = withContext(Dispatchers.IO) { NovelSources.chapters(s, book.url) }
-                            withContext(Dispatchers.IO){cache.saveBook(s.id,book,result)}
-                            currentBook = book; chapters = result;cachedCount=cache.count(s.id,book.url,result)
-                        } }.padding(vertical = 12.dp)) {
-                            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                                coil.compose.AsyncImage(book.cover,null,Modifier.size(58.dp,80.dp).background(IdjThemeColors.elevated),contentScale=ContentScale.Crop)
-                                Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
-                                    Text(if(searching)book.name else "${hits.indexOf(book)+1}. ${book.name}",color=IdjThemeColors.text,fontSize=17.sp,fontWeight=FontWeight.SemiBold,maxLines=2)
-                                    Text(listOf(book.author,book.kind).filter{it.isNotBlank()}.joinToString(" · "),color=IdjThemeColors.secondary,fontSize=12.sp,maxLines=2)
-                                    if(book.latest.isNotBlank())Text(book.latest,color=IdjThemeColors.secondary,fontSize=11.sp,maxLines=1)
-                                }
-                            }
-                        }
-                    }
-                    if (more) item { TextButton(onClick = { search(false) }, enabled = !busy) { Text("加载更多") } }
                 }
-            }
+                LazyColumn(Modifier.weight(1f).fillMaxHeight(),contentPadding=PaddingValues(bottom=32.dp)) {
+                    if(hits.isEmpty())item{EmptyNovel(if(searching)"搜索你的下一本书" else "书源推荐与榜单",if(source==null)"添加书源后，即可搜索和浏览实时榜单。" else if(searching)"输入书名或作者，搜索当前书源。" else "选择左侧栏目，查看书源实时榜单。")}
+                    items(hits,key={it.url}){book->
+                        NovelResult(book,if(searching)null else hits.indexOf(book)+1,source?.name.orEmpty()) {work{
+                            val sc=source?:error("请先选择书源")
+                            val result=withContext(Dispatchers.IO){NovelSources.chapters(sc,book.url)}
+                            withContext(Dispatchers.IO){cache.saveBook(sc.id,book,result)}
+                            currentBook=book;chapters=result;cachedCount=cache.count(sc.id,book.url,result)
+                        }};Hairline(Modifier.padding(start=16.dp))
+                    }
+                    if(more)item{TextButton(onClick={search(false)},enabled=!busy){Text("加载更多")}}
+                }
             }
         }
     }
+    if(sourcePage)NovelSourcesPage(sources.toList(),{sourcePage=false},{importResult=null;importing=true},onToggle={sc,on->
+        val i=sources.indexOfFirst{it.id==sc.id};if(i>=0)sources[i]=NovelSource(JSONObject(sc.json.toString()).put("enabled",on));saveSources()
+    },onDelete={sc->sources.removeAll{it.id==sc.id};saveSources();if(selected==sc.id)selected=sources.firstOrNull()?.id.orEmpty()})
+
     if(showDownload) NovelPage("缓存与下载",{showDownload=false}) {
         NovelPanel {
             Text(currentBook?.name.orEmpty(),fontSize=17.sp,fontWeight=FontWeight.SemiBold)
@@ -359,36 +347,26 @@ fun NovelScreen(onBack: () -> Unit) {
         }}){Text(s.name)}}
         if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
     }},confirmButton={TextButton(onClick={switchJob?.cancel();showSwitch=false}){Text("关闭")}})
-    if (importing) NovelPage("书源配置",{importing=false}) {
-        NovelPanel {
-            Text("导入书源",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
-            Text("粘贴 Legado JSON 或书源订阅网址",fontSize=13.sp,color=IdjThemeColors.secondary)
-            OutlinedTextField(importText, { importText = it }, Modifier.fillMaxWidth(),minLines=3,maxLines=7,label={Text("网址 / JSON")})
-            error?.let { Text(it,color=MaterialTheme.colorScheme.error,fontSize=13.sp) }
-            if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-            Button(onClick = { work {
-            val raw = importText.trim()
-            val data = if (raw.startsWith("https://") || raw.startsWith("http://")) withContext(Dispatchers.IO) { NovelSources.fetch(raw, NovelSource(JSONObject().put("bookSourceUrl", raw))) } else raw
-            addSources(data)
-            } }, enabled = !busy,modifier=Modifier.fillMaxWidth()) { Text("导入") }
-            OutlinedButton(onClick={filePicker.launch(arrayOf("application/json","text/*"))},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("从文件导入")}
-        }
-        NovelPanel {
-            Text("已安装 ${sources.size} 个 · 启用 ${sources.count{it.enabled}} 个",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
-            if(sources.isEmpty())Text("还没有书源，导入后即可搜索和浏览榜单。",fontSize=13.sp,color=IdjThemeColors.secondary)
-            sources.toList().forEach { s ->
-                Row(verticalAlignment=Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.name,fontSize=16.sp)
-                        Text(runCatching{java.net.URI(s.id).host}.getOrNull().orEmpty(),fontSize=12.sp,color=IdjThemeColors.secondary,maxLines=1)
-                    }
-                    Switch(checked=s.enabled,onCheckedChange={on->
-                        val i=sources.indexOfFirst{it.id==s.id};if(i>=0)sources[i]=NovelSource(JSONObject(s.json.toString()).put("enabled",on));saveSources()
-                    })
-                    TextButton(onClick={sources.removeAll{it.id==s.id};saveSources();if(selected==s.id)selected=sources.firstOrNull()?.id.orEmpty()}){Text("删除")}
-                }
-                HorizontalDivider(color=IdjThemeColors.elevated)
-            }
+    if(importing)ModalBottomSheet(onDismissRequest={importing=false},containerColor=c.surface,shape=RoundedCornerShape(topStart=28.dp,topEnd=28.dp),dragHandle=null) {
+        Column(Modifier.fillMaxWidth().padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text("导入书籍与书源",color=c.text,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));RoundIconButton(Icons.Rounded.Close,"关闭"){importing=false}}
+            Text("书籍",color=c.secondary,fontSize=12.sp)
+            Row(Modifier.fillMaxWidth().dsCard(16.dp).pressClick {filePicker.launch(arrayOf("text/*","application/octet-stream"));importing=false}.padding(16.dp),verticalAlignment=Alignment.CenterVertically){IconWell(Icons.Rounded.MenuBook);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("导入本地书籍",color=c.text,fontSize=15.sp,fontWeight=FontWeight.SemiBold);Text("TXT · UTF-8 / GB18030 / UTF-16",color=c.secondary,fontSize=12.sp)};Icon(Icons.Rounded.ChevronRight,null,tint=c.tertiary)}
+            Text("书源",color=c.secondary,fontSize=12.sp)
+            OutlinedTextField(importText,{importText=it},Modifier.fillMaxWidth(),placeholder={Text("粘贴书源网址或 JSON")},shape=RoundedCornerShape(14.dp),maxLines=3,
+                trailingIcon={TextButton(onClick={val clip=context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager;importText=clip.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()}){Text("粘贴")}})
+            PillButton(if(busy)"正在导入…" else "导入书源",Modifier.fillMaxWidth(),Icons.Rounded.Add,enabled=!busy&&importText.isNotBlank()) {work{
+                val raw=importText.trim()
+                val data=if(raw.startsWith("https://")||raw.startsWith("http://"))withContext(Dispatchers.IO){NovelSources.fetch(raw,NovelSource(JSONObject().put("bookSourceUrl",raw)))}else raw
+                addSources(data)
+            }}
+            Row(Modifier.fillMaxWidth().pressClick {val clip=context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager;importText=clip.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()}.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){IconWell(Icons.Rounded.ContentPaste);Spacer(Modifier.width(12.dp));Text("从剪贴板导入",color=c.text,fontSize=15.sp)}
+            Hairline()
+            Row(Modifier.fillMaxWidth().pressClick {filePicker.launch(arrayOf("application/json","text/*"))}.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){IconWell(Icons.Rounded.FolderOpen);Spacer(Modifier.width(12.dp));Text("从文件导入书源",color=c.text,fontSize=15.sp)}
+            importResult?.let{DSStatus(it,StatusTone.Ok)}
+            error?.let{Text(it,color=c.accentWarm,fontSize=13.sp)}
+            Text("支持 Legado 文本书源。书源与阅读记录仅保存在当前设备。",color=c.tertiary,fontSize=12.sp,lineHeight=19.sp)
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

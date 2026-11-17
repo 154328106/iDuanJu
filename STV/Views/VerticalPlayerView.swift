@@ -155,7 +155,7 @@ struct PlayerScreen: View {
                         if locked {
                             if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
                         } else if controlsVisible, !centerSuppressed, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
-                            PlayerCenterControls(co: co, onInteract: flashChrome)
+                            PlayerCenterControls(co: co, onInteract: flashChrome, spacing: landscape ? 72 : 44)
                                 .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
                                 .transition(.opacity)
                         }
@@ -432,66 +432,104 @@ struct PlayerScreen: View {
         .frame(width: full.width, height: full.height)
     }
 
+    /// Redesign 17: title + episode sit beside 返回; tech line, 连播 switch, lock and exit on the right;
+    /// full-width progress row, then 跳过片头 on the left and five labelled glass chips on the right.
+    /// The title block and the progress row never auto-hide.
     private func landscapeControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
+        let side = max(ins.leading, ins.trailing, 48) + 16
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
                 PlayerIconButton(symbol: "chevron.left", label: "返回") { dismiss() }
-                Button { co.autoNext.toggle(); showOSD(co.autoNext ? "连播：开" : "连播：关") } label: {
-                    Image(systemName: "repeat").font(.system(size: 19, weight: .medium))
-                        .opacity(co.autoNext ? 1 : 0.4).frame(width: 44, height: 44).contentShape(Rectangle())
+                    .opacity(dim).modifier(ChromeFade(on: chrome))
+                if let i = co.current, co.episodes.indices.contains(i) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(co.detail?.title ?? series.title)
+                            .font(.system(size: 16, weight: .bold)).lineLimit(1)
+                            .accessibilityIdentifier("player.title")
+                            .accessibilityValue("第\(co.episodes[i].ep)集")
+                        Text(landSubline(i)).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                            .accessibilityIdentifier("player.episodeInfo")
+                            .accessibilityValue("第\(co.episodes[i].ep)集")
+                    }
+                    .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
+                    .opacity(scrubbing ? 0.28 : 1)
+                    .padding(.leading, 4)
+                    .layoutPriority(1)
                 }
-                .buttonStyle(.plain).accessibilityLabel(co.autoNext ? "关闭连播" : "开启连播").accessibilityIdentifier("player.autoNext")
-                Spacer()
-                PlayerIconButton(symbol: "lock.open", label: "锁屏") { locked = true; panel = nil; flashChrome() }
-                    .accessibilityIdentifier("player.lock")
-                PlayerIconButton(symbol: "arrow.down.right.and.arrow.up.left", label: "退出横屏") {
-                    OrientationGate.exitLandscape(); flashChrome()
+                Spacer(minLength: 12)
+                Group {
+                    if showTech, let t = co.tech { PlayerTechStrip(tech: t, landscape: true).padding(.trailing, 4) }
+                    PlayerChip(id: "player.autoNext", a11y: co.autoNext ? "关闭连播" : "开启连播", symbol: "repeat",
+                               title: "连播", value: co.autoNext ? "开" : "关", on: co.autoNext) {
+                        co.autoNext.toggle(); showOSD(co.autoNext ? "连播：开" : "连播：关"); flashChrome()
+                    }
+                    PlayerIconButton(symbol: "lock.open", label: "锁屏") { locked = true; panel = nil; flashChrome() }
+                        .accessibilityIdentifier("player.lock")
+                    PlayerIconButton(symbol: "arrow.down.right.and.arrow.up.left", label: "退出横屏") {
+                        OrientationGate.exitLandscape(); flashChrome()
+                    }
+                    .accessibilityIdentifier("player.exitFullscreen")
                 }
-                .accessibilityIdentifier("player.exitFullscreen")
+                .opacity(dim).modifier(ChromeFade(on: chrome))
             }
-            .overlay { if showTech, let t = co.tech { PlayerTechStrip(tech: t, landscape: true) } }
-            .padding(.horizontal, 60).padding(.top, 18)
-            .opacity(dim)
-            .modifier(ChromeFade(on: chrome))
+            .frame(height: 44)
+            .padding(.horizontal, side - 4).padding(.top, 14)
             Spacer(minLength: 0)
             if let i = co.current, co.episodes.indices.contains(i) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .bottom) {
-                        meta(i, skip: false)
+                VStack(spacing: 12) {
+                    PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome, landscape: true, inline: true).id(i)
+                        .opacity(panel != nil ? 0.35 : 1)
+                        .shadow(color: .black.opacity(chrome ? 0 : 0.6), radius: 2)
+                        .allowsHitTesting(interactive && co.readyIndex == i)
+                    HStack(spacing: 8) {
                         if showSkip {
                             Button { skipIntro() } label: {
                                 HStack(spacing: 4) { Text("跳过片头"); Image(systemName: "play.fill").font(.system(size: 8)) }
-                                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85))
-                            }.buttonStyle(.plain).accessibilityIdentifier("player.skipIntro")
+                                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                                    .padding(.horizontal, 13).frame(height: 34)
+                                    .background(Color(red: 20/255, green: 20/255, blue: 24/255).opacity(0.5), in: Capsule())
+                                    .overlay { Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 1) }
+                                    .contentShape(Capsule())
+                            }.buttonStyle(PressScale()).accessibilityIdentifier("player.skipIntro")
                         }
+                        Spacer(minLength: 8)
+                        landChips(i)
                     }
-                    .opacity(scrubbing ? 0 : 1).opacity(panel != nil ? 0.35 : 1)
-                    .modifier(ChromeFade(on: chrome, keepAccessible: true))
-                    .padding(.bottom, 8)
-                    HStack(spacing: 8) {
-                        Text(co.detail?.title ?? series.title)
-                            .font(.system(size: 22, weight: .bold)).lineLimit(1)
-                            .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
-                            .accessibilityIdentifier("player.title")
-                            .accessibilityValue("第\(co.episodes[i].ep)集")
-                            .opacity(scrubbing ? 0.28 : 1).opacity(panel != nil ? 0.35 : 1)
-                        Spacer(minLength: 12)
-                        iconRow(i).opacity(dim).modifier(ChromeFade(on: chrome))
-                    }
-                    .padding(.bottom, 14)
-                    Group {
-                        PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome, landscape: true).id(i)
-                            .opacity(panel != nil ? 0.35 : 1)
-                            .shadow(color: .black.opacity(chrome ? 0 : 0.6), radius: 2)
-                            .allowsHitTesting(interactive && co.readyIndex == i)
-                    }
+                    .opacity(dim).modifier(ChromeFade(on: chrome))
                 }
-                .padding(.horizontal, 60)
-                .padding(.bottom, max(ins.bottom, 8))
+                .padding(.horizontal, side)
+                .padding(.bottom, max(ins.bottom, 8) + 6)
             }
         }
         .foregroundStyle(.white)
         .frame(width: full.width, height: full.height)
+    }
+
+    private func landSubline(_ i: Int) -> String {
+        let e = co.episodes[i]
+        if series.source.isLongVideo {
+            return co.episodes.count > 1 ? "S1:E\(e.ep)" + (e.title.isEmpty ? "" : " · " + e.title) : (series.subtitle ?? Fmt.meta(series))
+        }
+        return (seasonTag.map { $0 + " · " } ?? "") + "第 \(e.ep) 集 / 共 \(co.episodes.count) 集"
+    }
+
+    private func landChips(_ i: Int) -> some View {
+        let dmOK = series.source == .hongguo
+        let rate = co.playbackRate == 1 ? "1.0×" : SpeedPopover.label(co.playbackRate)
+        return HStack(spacing: 8) {
+            PlayerChip(id: "player.episodes", a11y: "选集", symbol: "square.grid.2x2", title: "选集", on: panel == .episodes) { toggle(.episodes) }
+            PlayerChip(id: "player.rate", a11y: "播放倍速 " + rate, symbol: "gauge.with.dots.needle.33percent", title: "倍速", value: rate,
+                       on: panel == .rates || co.playbackRate != 1) { toggle(.rates) }
+            PlayerChip(id: "player.quality", a11y: "画质与播放源", symbol: "sparkles.tv", title: "画质",
+                       value: qualityTag == "画质" ? nil : qualityTag, on: panel == .quality) { toggle(.quality) }
+            PlayerChip(id: "player.danmaku", a11y: danmaku.enabled ? "关闭弹幕" : "开启弹幕", symbol: "text.bubble", title: "弹幕",
+                       value: dmOK ? (danmaku.enabled ? "开" : "关") : nil, on: dmOK && danmaku.enabled, dimmed: !dmOK) {
+                guard dmOK else { showOSD("当前片源不支持弹幕"); return }
+                danmaku.enabled.toggle(); flashChrome()
+            }
+            PlayerChip(id: "player.audio", a11y: "音轨与字幕", symbol: "captions.bubble", title: "音轨字幕",
+                       on: panel == .audio || panel == .subtitles) { toggle(.audio) }
+        }
     }
 
     private func lockOnly(_ full: CGSize, ins: EdgeInsets) -> some View {
@@ -712,7 +750,7 @@ struct PlayerScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 TrackPopover(title: "音轨", options: co.audioOptions, selected: co.audioSelected, allowsOff: false,
                              emptyText: "当前视频只有一条音轨") { o in if let o { co.selectAudio(o) }; closePanel() }
-                if !landscape {
+                do {
                     Rectangle().fill(.white.opacity(0.10)).frame(height: 1).padding(.horizontal, 14)
                     TrackPopover(title: "字幕", options: co.subtitleOptions, selected: co.subtitleSelected, allowsOff: true,
                                  emptyText: "当前视频没有可选字幕") { o in co.selectSubtitle(o); closePanel() }

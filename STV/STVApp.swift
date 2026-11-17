@@ -116,7 +116,14 @@ enum DebugRoute {
         case "history": return .history
         case "plugins": return .plugins
         case "sitelog": return .siteLog
-        case "fxplay": return .fixturePlay(arg)
+        case "fxplay":
+            // UI tests run in the simulator sandbox: #filePath points at the host checkout and is not readable.
+            // The Debug-only build phase provides this clearly labelled local color-bar fixture, never Release.
+            if !FileManager.default.fileExists(atPath: arg), arg.hasSuffix("player_landscape.mp4"),
+               let local = Bundle.main.url(forResource: "ui_color_bars", withExtension: "mp4") {
+                return .fixturePlay(local.path)
+            }
+            return .fixturePlay(arg)
         case "tgplay": return .tgPlay(arg)
         case "site", "siteplay", "board":
             let a = arg.split(separator: ":", maxSplits: 1).map(String.init)
