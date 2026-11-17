@@ -1,6 +1,4 @@
-// Shared Legado host API, synchronized from LegadoCore.swift.
-
-    (function (h) {
+(function (h) {
             const call = (n, a) => { const r = h(n, JSON.stringify(a === undefined ? null : a)); return r === undefined ? undefined : JSON.parse(r); };
             const str = (v) => v == null ? '' : String(v);
             globalThis.java = {
@@ -62,6 +60,73 @@
                     }; }, ENCRYPT_MODE: 1, DECRYPT_MODE: 2 };
             function SecretKeySpec(k, alg) { return { key: bytesOf(k), alg: str(alg) }; }
             function IvParameterSpec(v) { return { iv: bytesOf(v) }; }
+            // In-memory Java stream compatibility. No file/process/class access is exposed.
+            function ByteArrayOutputStream() {
+                let data = [];
+                return { write: (b, off, len) => {
+                    const a = typeof b === 'number' ? [b] : bytesOf(b).slice(off || 0, len == null ? b.length : (off || 0) + len);
+                    if (data.length + a.length > 16777216) throw new Error('字节流过大');
+                    data = data.concat(a.map(x => (x << 24) >> 24));
+                }, toByteArray: () => data.slice(), size: () => data.length, reset: () => { data = []; }, flush: () => {}, close: () => {} };
+            }
+            function GZIPOutputStream(out) {
+                const buffer = new ByteArrayOutputStream(); let finished = false;
+                const finish = () => { if (!finished) { out.write(call('gzip', { b: buffer.toByteArray(), encode: true })); finished = true; } };
+                return { write: buffer.write, finish, close: finish, flush: () => {} };
+            }
+            function GZIPInputStream(input) {
+                const b = input.bytes || bytesOf(input);
+                // HTTP libraries may have already decoded Content-Encoding while retaining headers.
+                return { bytes: b.length > 2 && (b[0] & 255) === 31 && (b[1] & 255) === 139 ? call('gzip', { b, encode: false }) : b };
+            }
+            function InputStreamReader(input, cs) { return { text: call('bytes.dec', { b: input.bytes || bytesOf(input), cs: cs || 'UTF-8' }) }; }
+            function BufferedReader(input) {
+                const lines = input.text.split(/\r\n|\n|\r/); let i = 0;
+                if (lines[lines.length - 1] === '') lines.pop();
+                return { readLine: () => i < lines.length ? lines[i++] : null, close: () => {} };
+            }
+            function JURL(url) { return { openConnection: () => {
+                let method = 'GET', headers = {}, response = null; const output = new ByteArrayOutputStream();
+                const send = () => response || (response = call('http.bytes', { url: str(url), method, headers, b: output.toByteArray() }));
+                return { setRequestMethod: m => { method = str(m); }, setRequestProperty: (k,v) => { headers[str(k)] = str(v); },
+                    setDoOutput: () => {}, setConnectTimeout: () => {}, setReadTimeout: () => {},
+                    getOutputStream: () => output, getResponseCode: () => send().status,
+                    getHeaderField: k => { const h = send().headers; const n = Object.keys(h).find(x => x.toLowerCase() === str(k).toLowerCase()); return n ? h[n] : null; },
+                    getInputStream: () => ({ bytes: send().b }), getErrorStream: () => ({ bytes: send().b }), disconnect: () => {} };
+            } }; }
+            function SecureRandom() { return { generateSeed: n => call('random.bytes', { n: Number(n) }), nextBytes: out => { const b = call('random.bytes', { n: out.length }); for (let i=0;i<b.length;i++) out[i]=b[i]; } }; }
+            function JBigInteger(a, b) {
+                const B = BigInt, zero = B(0), one = B(1), eight = B(8); let value;
+                if (typeof a === 'number' && b && typeof b.generateSeed === 'function') {
+                    if (a < 0 || a > 8192) throw new Error('大整数长度无效');
+                    const bytes = b.generateSeed(Math.ceil(a / 8)); value = zero;
+                    for (const byte of bytes) value = (value << eight) + B(byte & 255);
+                    if (a) value &= (one << B(a)) - one;
+                } else if (typeof a === 'number' && Array.isArray(b)) {
+                    value = zero; for (const byte of b) value = (value << eight) + B(byte & 255);
+                    if (a < 0) value = -value;
+                } else if (Array.isArray(a)) {
+                    value = zero; for (const byte of a) value = (value << eight) + B(byte & 255);
+                    if (a.length && (a[0] & 128)) value -= one << B(a.length * 8);
+                } else {
+                    const s = str(a); if (s.length > 8192) throw new Error('大整数过大');
+                    value = B(Number(b || 10) === 16 ? (s[0] === '-' ? '-0x' + s.slice(1) : '0x' + s) : s);
+                }
+                const other = x => B(x.toString());
+                const wrap = v => new JBigInteger(v.toString(), 10);
+                const obj = { toString: radix => value.toString(Number(radix || 10)),
+                    subtract: x => wrap(value - other(x)), add: x => wrap(value + other(x)),
+                    mod: x => { const m = other(x); if(m <= zero) throw new Error('模数无效'); return wrap((value % m + m) % m); },
+                    modPow: (x,y) => { let e = other(x), m = other(y), r = one; if(e < zero || m <= zero) throw new Error('模幂参数无效');
+                        if (e.toString(2).length > 8192 || m.toString(2).length > 8192) throw new Error('模幂参数过大');
+                        let v = (value % m + m) % m; while(e > zero) { if(e & one) r = r*v%m; e >>= one; v=v*v%m; } return wrap(r % m); },
+                    toByteArray: () => { let n=1; while(value < -(one << B(n*8-1)) || value >= (one << B(n*8-1))) n++;
+                        let v = value < zero ? (one << B(n*8)) + value : value; const out=new Array(n);
+                        for(let i=n-1;i>=0;i--) { out[i]=Number(v & B(255)); if(out[i]>=128)out[i]-=256; v >>= eight; } return out; } };
+                return obj;
+            }
+            JBigInteger.valueOf = n => new JBigInteger(str(n),10);
+            JBigInteger.ONE = JBigInteger.valueOf(1);
             // Rhino scope helpers: `this.getHeaderMap()` (the request headers) and login state (not supported → empty).
             globalThis.getHeaderMap = () => call('headers', null);
 globalThis.getSource = () => globalThis.source;
@@ -196,7 +261,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     return m;
   };
   globalThis.Packages = {
-                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, nio: { charset: { Charset: { forName: (name) => str(name) }, StandardCharsets: { UTF_8: 'UTF-8' } } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater } }, security: { MessageDigest } },
+                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, nio: { charset: { Charset: { forName: (name) => str(name) }, StandardCharsets: { UTF_8: 'UTF-8' } } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater, GZIPOutputStream, GZIPInputStream } }, security: { MessageDigest, SecureRandom }, io: { ByteArrayOutputStream, InputStreamReader, BufferedReader }, net: { URL: JURL }, math: { BigInteger: JBigInteger } },
                     javax: { crypto: { Cipher, spec: { SecretKeySpec, IvParameterSpec } } },
                     cn: { hutool: { crypto: { digest: { DigestUtil: { md5Hex: (s) => java.md5Encode(s) } } } } },
                 };

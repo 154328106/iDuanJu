@@ -15,7 +15,9 @@ novel = (root / 'STV/Novel/NovelImport.swift').read_text('utf8')
 start = novel.index('    static func normalize(')
 end = novel.index('\n    }', start) + 6
 entities = novel[novel.index('    static func decodeEntities('):novel.index('/// Read-only ZIP')]
-(dest / 'Text.swift').write_text('import Foundation\nenum NovelImport {\n' + novel[start:end] + '\n}\nenum HTMLText {\n' + entities, 'utf8')
+(dest / 'Text.swift').write_text(novel, 'utf8')
+store = (root / 'STV/Novel/NovelStore.swift').read_text('utf8')
+(dest / 'NovelStore.swift').write_text(store[:store.index('/// Reader appearance')], 'utf8')
 (dest / 'UnsupportedBrowser.swift').write_text('''import Foundation
 enum LegadoBrowser {
     static func openBlocking(url: URL?, html: String?, title: String, sourceURL: String) {}

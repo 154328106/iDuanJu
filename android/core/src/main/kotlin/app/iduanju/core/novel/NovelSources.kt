@@ -74,6 +74,35 @@ object NovelSources {
     }
 
     data class PageResponse(val text: String, val url: String, val headers: Map<String,String> = emptyMap())
+    data class ByteResponse(val bytes: ByteArray, val status: Int, val headers: Map<String,String>)
+
+    internal fun fetchBytes(url: String, method: String, headers: JSONObject?, body: ByteArray): ByteResponse {
+        var address = url; var verb = method.uppercase()
+        require(verb in listOf("GET","POST")) { "书源 HTTP 方法不支持" }
+        require(body.size<=16*1024*1024) { "书源请求过大" }
+        val originalHost=URI(address).host
+        repeat(6) {
+            val uri=URI(address)
+            require(uri.scheme in listOf("https","http") && !uri.host.isNullOrEmpty() && !NetGuard.isIPLiteral(uri.host) && !NetGuard.resolvesToBlocked(uri.host)) { "书源地址无效或指向内网" }
+            val req=Request.Builder().url(address).header("User-Agent",userAgent)
+            if(uri.host==originalHost)headers?.let { for(k in it.keys())req.header(k,it.getString(k)) }
+            if(verb=="POST")req.post(body.toRequestBody((headers?.optString("Content-Type")?.takeIf{it.isNotBlank()} ?: "application/octet-stream").toMediaType()))
+            http.newCall(req.build()).execute().use { response ->
+                if(response.isRedirect) {
+                    address=absolute(response.header("Location") ?: error("书源跳转缺少地址"),address)
+                    if(response.code in listOf(301,302,303))verb="GET"
+                } else {
+                    val out=java.io.ByteArrayOutputStream()
+                    response.body?.byteStream()?.use { stream ->
+                        val buffer=ByteArray(8192)
+                        while(true){val n=stream.read(buffer);if(n<0)break;require(out.size()+n<=8*1024*1024){"书源响应过大"};out.write(buffer,0,n)}
+                    }
+                    return ByteResponse(out.toByteArray(),response.code,response.headers.names().associateWith{response.header(it).orEmpty()})
+                }
+            }
+        }
+        error("书源跳转次数过多")
+    }
 
     fun fetch(raw: String, source: NovelSource, key: String = "", page: Int = 1): String = fetchResponse(raw,source,key,page).text
 

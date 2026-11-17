@@ -100,6 +100,24 @@ internal class NovelScript(private val source: NovelSource, private val base: St
             "loginHeader" -> return storage[scope("loginHeader")] ?: "{}"
             "putLoginInfo", "putLoginHeader" -> {put(scope(if(name=="putLoginInfo")"loginInfo" else "loginHeader"),str("v")); return true}
             "ajax" -> return NovelSources.fetch(str("url"), source, key, page)
+            "http.bytes" -> {
+                val response = NovelSources.fetchBytes(str("url"), str("method"), a.optJSONObject("headers"), bytes(a.opt("b")))
+                return JSONObject().put("status",response.status).put("headers",JSONObject(response.headers)).put("b",jsonBytes(response.bytes))
+            }
+            "random.bytes" -> {
+                val n = a.optInt("n",-1); require(n in 0..8192) { "随机字节长度无效" }
+                return jsonBytes(ByteArray(n).also { java.security.SecureRandom().nextBytes(it) })
+            }
+            "gzip" -> {
+                val input = bytes(a.opt("b")); require(input.size<=16*1024*1024) { "压缩输入过大" }
+                val output=java.io.ByteArrayOutputStream()
+                if(a.optBoolean("encode")) java.util.zip.GZIPOutputStream(output).use { it.write(input) }
+                else java.util.zip.GZIPInputStream(input.inputStream()).use { stream ->
+                    val buffer=ByteArray(16384)
+                    while(true) { val n=stream.read(buffer);if(n<0)break;require(output.size()+n<=16*1024*1024){"GZIP 输出过大"};output.write(buffer,0,n) }
+                }
+                return jsonBytes(output.toByteArray())
+            }
             "connect" -> {
                 val opts = JSONObject().put("method", str("method").ifBlank { "GET" }).put("body", str("body"))
                 a.optJSONObject("headers")?.let { opts.put("headers", it) }

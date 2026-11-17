@@ -190,6 +190,8 @@ enum LegadoClient {
             let page = LegadoAnalyzer(resp.text, baseURL: base, ctx: ctx)
             for el in try page.elements(rules["chapterList"] ?? "") {
                 let a = LegadoAnalyzer(el, baseURL: base, ctx: ctx)
+                let isVolume = (try? a.string(rules["isVolume"] ?? "")) ?? ""
+                if isVolume == "true" || isVolume == "1" { continue }
                 let title = ((try? a.string(rules["chapterName"] ?? "")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let cu = (try? a.string(rules["chapterUrl"] ?? "")) ?? ""
                 guard !title.isEmpty else { continue }
@@ -217,7 +219,11 @@ enum LegadoClient {
         while let u = url, seen.count < 30, seen.insert(u).inserted {
             let r = try LegadoURL.request(u, ctx: ctx, base: s.bookSourceUrl)
             let resp = try r.fetch()
-            let base = resp.url.absoluteString
+            // Source rules use URL fragments as chapter IDs; HTTP never sends them to the server.
+            var base = resp.url.absoluteString
+            if let fragment = URL(string: u)?.fragment, !fragment.isEmpty {
+                base = base.components(separatedBy: "#")[0] + "#" + fragment
+            }
             let a = LegadoAnalyzer(resp.text, baseURL: base, ctx: ctx)
             parts.append(try a.strings(rules["content"] ?? "").joined(separator: "\n"))
             url = nil

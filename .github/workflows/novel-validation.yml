@@ -2,7 +2,7 @@ name: novel source validation
 on:
   workflow_dispatch:
   push:
-    branches: [codex/novel-rank-downloads]
+    branches: [codex/novel-rank-downloads, codex/novel-fanqie-shuqi-theme]
 permissions:
   contents: read
 jobs:

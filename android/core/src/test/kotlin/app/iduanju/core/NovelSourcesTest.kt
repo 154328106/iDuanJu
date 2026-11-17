@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NovelSourcesTest {
+    @Test fun boundedStreamsGzipAndBigIntegers() {
+        val s=NovelSource(org.json.JSONObject().put("bookSourceUrl","https://compat.test"))
+        val code="""@js:var B=Packages.java.math.BigInteger;var out=new Packages.java.io.ByteArrayOutputStream();var gzip=new Packages.java.util.zip.GZIPOutputStream(out);gzip.write(new Packages.java.lang.String('中文 stream').getBytes());gzip.close();var reader=new Packages.java.io.BufferedReader(new Packages.java.io.InputStreamReader(new Packages.java.util.zip.GZIPInputStream({bytes:out.toByteArray()}),'UTF-8'));reader.readLine()+'|'+new B('12345678901234567890').modPow(new B('65537'),new B('999999999999999999989')).toString()+'|'+new B('128').toByteArray().join(',');"""
+        assertEquals("中文 stream|578379236927338162488|0,-128",NovelSources.ruleValue("",code,s,s.id))
+        assertThrows(Exception::class.java){NovelSources.ruleValue("","@js:new Packages.java.security.SecureRandom().generateSeed(99999999)",s,s.id)}
+        assertThrows(Exception::class.java){NovelSources.ruleValue("","@js:new Packages.java.net.URL('file:///etc/passwd').openConnection().getResponseCode()",s,s.id)}
+    }
     @After fun cleanup() { NovelSources.fixture = null }
     @Test fun htmlDiscoverySearchAndRead() {
         val source = NovelSources.import("""{"bookSourceUrl":"https://book.example","bookSourceName":"书站","searchUrl":"/search?q={{key}}&page={{page}}","exploreUrl":"热门::/rank?page={{page}}&&最新::/new","ruleSearch":{"bookList":"class.books@tag.li","name":"tag.a@text","bookUrl":"tag.a@href","author":"tag.span@text"},"ruleBookInfo":{"tocUrl":"id.toc@href"},"ruleToc":{"chapterList":"tag.li","chapterName":"tag.a@text","chapterUrl":"tag.a@href"},"ruleContent":{"content":"id.content@html"}}""").single()
