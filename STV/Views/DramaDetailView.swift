@@ -122,7 +122,7 @@ struct DramaDetailView: View {
         if let d = detail, !d.episodes.isEmpty, actionsOut {
             HStack(spacing: 10) {
                 NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
-                    PillButtonLabel(title: playTitle, icon: "play.fill", tone: .white, expand: true)
+                    PillButtonLabel(title: playTitle, icon: "play.fill", tone: .ink, expand: true)
                 }
                 .buttonStyle(PressScale(scale: 0.98))
                 .accessibilityIdentifier("detail.playbar")
@@ -209,7 +209,7 @@ struct DramaDetailView: View {
 
         HStack(spacing: 12) {
             NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
-                PillButtonLabel(title: playTitle, icon: "play.fill", tone: .white, height: 50, expand: true)
+                PillButtonLabel(title: playTitle, icon: "play.fill", tone: .ink, height: 50, expand: true)
             }
             .buttonStyle(PressScale(scale: 0.98))
             .disabled(d.episodes.isEmpty)
@@ -255,8 +255,10 @@ struct DramaDetailView: View {
         if d.rating > 0 { cells.append(("star.fill", String(format: "%.1f", d.rating), "观众评分" + (d.ratingCount.isEmpty ? "" : " · " + DS.spaced(d.ratingCount) + "人"))) }
         if d.favoriteCount > 0 { cells.append((nil, DS.count(d.favoriteCount), "收藏")) }
         if !d.hotText.isEmpty { cells.append(("flame.fill", DS.spaced(d.hotText), "全网热度")) }
-        if cells.isEmpty { cells.append((nil, "\(max(d.totalEps, d.episodes.count))", series.source.isLongVideo ? "播放源" : "集")) }
-        return HStack(spacing: 0) {
+        // Preserve the spec's three-column density when upstream only supplies one/two metrics.
+        // Missing metrics are absent, never fabricated; the card hugs its occupied columns.
+        return GeometryReader { geo in
+          HStack(spacing: 0) {
             ForEach(Array(cells.enumerated()), id: \.offset) { i, c in
                 VStack(spacing: 0) {
                     HStack(spacing: 4) {
@@ -270,8 +272,10 @@ struct DramaDetailView: View {
                 .overlay(alignment: .leading) { if i > 0 { STVTheme.hairline.frame(width: 1) } }
             }
         }
-        .padding(.vertical, 11)
-        .dsCard(16)
+          .frame(width: geo.size.width * CGFloat(min(3, cells.count)) / 3, height: 63)
+          .dsCard(16)
+        }
+        .frame(height: cells.isEmpty ? 0 : 63)
         .padding(.horizontal, 20)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("detail.stats")
@@ -349,7 +353,14 @@ struct DramaDetailView: View {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(cast) { c in
                         let cell = VStack(spacing: 0) {
-                            ActorAvatar(url: c.avatar, size: 56)
+                            Group {
+                                if c.avatar.isEmpty {
+                                    Text(String(c.name.prefix(1)))
+                                        .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+                                        .frame(width: 56, height: 56)
+                                        .background(LinearGradient(colors: [STVTheme.accent, STVTheme.accentWarm], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
+                                } else { ActorAvatar(url: c.avatar, size: 56) }
+                            }
                             Text(c.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 6)
                             if !c.role.isEmpty { Text(c.role).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1) }
                         }.frame(width: 64)

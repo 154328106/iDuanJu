@@ -144,7 +144,14 @@ struct DebugRouteHost: View {
     var body: some View {
         switch route {
         case .root: RootTabView()
-        case .detail(let sid): NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() }
+        case .detail(let sid):
+            #if DEBUG
+            if sid == "ui-detail-sparse" || sid == "ui-detail-full" {
+                NativeDetailEvidence(sparse: sid.hasSuffix("sparse"))
+            } else { NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() } }
+            #else
+            NavigationStack { DramaDetailView(series: HGSeries(seriesId: sid, title: "", cover: "")).routes() }
+            #endif
         case .search(let q): NavigationStack { SearchView(initialQuery: q).routes() }
         case .searchEdit: NavigationStack { SearchView(startEditingHistory: true).routes() }
         case .actorRank: NavigationStack { ActorRankView().routes() }
@@ -205,3 +212,24 @@ struct TGPlayRouteHost: View {
         }
     }
 }
+
+#if DEBUG
+/// Clearly labelled fixtures for verifying the native sparse-data detail layout, never used in Release.
+private struct NativeDetailEvidence: View {
+    let sparse: Bool
+    private var seed: HGSeriesDetail {
+        var d = HGSeriesDetail(seriesId: "ui-detail", title: "详情排版样例 · 非真实片源", cover: "",
+            desc: String(repeating: "本地样例数据，仅验证排版、稀疏统计与滚动吸顶，不代表真实片源服务。", count: 4), author: "界面验证",
+            actors: [], onlineTime: 0, totalEps: 48,
+            episodes: (1...48).map { HGEpisode(ep: $0, vid: "fixture-\($0)", duration: 60, title: "测试第 \($0) 集") })
+        d.favoriteCount = 403000; d.tags = ["本地样例", "排版验证"]
+        if !sparse { d.rating = 8.6; d.ratingCount = "1.2万"; d.hotText = "512万" }
+        d.relatedSeries = (1...3).map { HGSeries(seriesId: $0 == 1 ? "ui-detail" : "sample-\($0)", title: "本地系列样例 \($0)", cover: "", episodeCount: 48) }
+        d.cast = (1...5).map { HGCelebrity(id: "sample-\($0)", name: "样例演员 \($0)", role: "饰 样例") }
+        return d
+    }
+    var body: some View {
+        NavigationStack { DramaDetailView(series: HGSeries(seriesId: "ui-detail", title: seed.title, cover: "", episodeCount: 48), seededDetail: seed).routes() }
+    }
+}
+#endif

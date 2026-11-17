@@ -58,9 +58,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** iOS EpisodeGroups: 30 (≤300), 50 (≤600), 60; ≤60 one group. */
+/** Same as iOS/spec: groups of 30 (≤300), 50 (≤600), 60; ≤30 one group. */
 object EpisodeGroups {
-    fun size(total: Int) = when { total <= 60 -> maxOf(total, 1); total <= 300 -> 30; total <= 600 -> 50; else -> 60 }
+    fun size(total: Int) = when { total <= 30 -> maxOf(total, 1); total <= 300 -> 30; total <= 600 -> 50; else -> 60 }
     fun ranges(total: Int): List<IntRange> {
         if (total <= 0) return emptyList()
         val g = size(total)
@@ -84,10 +84,14 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
     var reload by remember { mutableIntStateOf(0) }
     LaunchedEffect(seriesId, reload) {
         err = null
-        try { d = if(app.iduanju.BuildConfig.DEBUG && seriesId=="ui-color-bars") HGSeriesDetail(
+        try { d = if(app.iduanju.BuildConfig.DEBUG && seriesId in listOf("ui-color-bars", "ui-detail-sparse", "ui-detail-full")) HGSeriesDetail(
             seriesId=seriesId,title="本地界面测试 · 非真实片源",desc="此页面使用明确标注的本地样例数据，用于检查详情页的排版、折叠、选集和滚动吸顶，不代表真实片源服务。".repeat(4),
             author="界面验证",totalEps=48,episodes=(1..48).map{app.iduanju.core.hongguo.HGEpisode(it,"fixture-$it",60,"测试第 $it 集")},
-            tags=listOf("本地样例","界面测试","48 集全"),favoriteCount=132000,rating=9.2,ratingCount="本地样例",hotText="界面测试",source="本地样例")
+            tags=listOf("本地样例","排版验证"),favoriteCount=403000,
+            rating=if(seriesId=="ui-detail-sparse")0.0 else 8.6,ratingCount=if(seriesId=="ui-detail-sparse")"" else "1.2万",
+            hotText=if(seriesId=="ui-detail-sparse")"" else "512万",source="本地样例",
+            relatedSeries=(1..3).map { HGSeries(seriesId=if(it==1)seriesId else "sample-$it",title="本地系列样例 $it",episodeCount=48) },
+            cast=(1..5).map { app.iduanju.core.hongguo.HGCelebrity(id="sample-$it",name="样例演员 $it",role="饰 样例") })
             else withContext(Dispatchers.IO) { app.iduanju.data.Catalog.detail(seriesId) } }
         catch (e: Exception) { err = e.message ?: "加载失败" }
     }
@@ -130,7 +134,7 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
         AnimatedVisibility(d?.episodes?.isNotEmpty() == true && actionsOut, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 4.dp),
             enter = slideInVertically(DS.panel()) { it } + fadeIn(), exit = slideOutVertically(DS.panel()) { it } + fadeOut()) {
             Row(Modifier.fillMaxWidth().dsBar(32.dp).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.White) { onPlay(seriesId, startEp) }
+                PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.Ink) { onPlay(seriesId, startEp) }
                 d?.let { Heart(seriesId, it, 48.dp) }
             }
         }
@@ -191,7 +195,7 @@ private fun DetailBody(
     Stats(d, Modifier.padding(top = 18.dp))
     Row(Modifier.padding(horizontal = 20.dp).padding(top = 16.dp).onGloballyPositioned { onActions(it.boundsInRoot().bottom) },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.White, height = 50.dp, enabled = d.episodes.isNotEmpty()) { onPlay(sid, startEp) }
+        PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.Ink, height = 50.dp, enabled = d.episodes.isNotEmpty()) { onPlay(sid, startEp) }
         Heart(sid, d, 50.dp)
     }
     if (d.tags.isNotEmpty()) {
@@ -262,9 +266,11 @@ private fun Stats(d: HGSeriesDetail, modifier: Modifier = Modifier) {
         if (d.rating > 0) add(Cell(Icons.Filled.Star, String.format("%.1f", d.rating), "观众评分" + if (d.ratingCount.isEmpty()) "" else " · " + DS.spaced(d.ratingCount) + "人"))
         if (d.favoriteCount > 0) add(Cell(null, DS.count(d.favoriteCount), "收藏"))
         if (d.hotText.isNotEmpty()) add(Cell(Icons.Filled.LocalFireDepartment, DS.spaced(d.hotText), "全网热度"))
-        if (isEmpty()) add(Cell(null, "${maxOf(d.totalEps, d.episodes.size)}", "集"))
     }
-    Row(modifier.padding(horizontal = 20.dp).fillMaxWidth().dsCard(16.dp).padding(vertical = 11.dp).height(IntrinsicSize.Min)) {
+    if (cells.isEmpty()) return
+    // A sparse response occupies only its real columns; keep the spec's three-column metric density.
+    BoxWithConstraints(modifier.padding(horizontal = 20.dp).fillMaxWidth()) {
+      Row(Modifier.width(maxWidth * (cells.size.coerceAtMost(3) / 3f)).height(63.dp).dsCard(16.dp).padding(vertical = 11.dp)) {
         cells.forEachIndexed { i, cell ->
             if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -275,6 +281,7 @@ private fun Stats(d: HGSeriesDetail, modifier: Modifier = Modifier) {
                 Text(cell.label, color = c.secondary, fontSize = 11.sp, maxLines = 1)
             }
         }
+      }
     }
 }
 
