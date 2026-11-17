@@ -13,7 +13,7 @@ struct NovelDownloadView: View {
             List {
                 Section {
                     HStack(spacing: 14) {
-                        NovelCover(book: book).frame(width: 48, height: 66)
+                        WebCover(url: book.coverURL, title: book.title).frame(width: 48, height: 66)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(book.title).font(.headline)
                             Text("已缓存 \(store.cachedCount(book)) / \(book.chapters.count) 章").font(.subheadline).foregroundStyle(.secondary)
