@@ -149,21 +149,17 @@ struct PlayerScreen: View {
                         }
                         .foregroundStyle(.white)
                         .position(x: full.width / 2, y: full.height / 2)
-                    } else if locked {
-                        if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
-                    } else if controlsVisible {
-                        if co.current != nil, !scrubbing, panel == nil {
+                    } else {
+                        if locked {
+                            if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
+                        } else if controlsVisible, co.current != nil, !scrubbing, panel == nil {
                             PlayerCenterControls(co: co, onInteract: flashChrome)
                                 .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
                                 .transition(.opacity)
                         }
-                        controls(full, ins: ins).transition(.opacity)
-                    } else if co.readyIndex != nil, !speedMode {
-                        // Chrome hidden: a 2 pt hairline at the bottom edge (played white 90 % / track white 16 %).
-                        PlayerProgressBar(co: co, scrubbing: .constant(false), mini: true)
-                            .frame(width: full.width - (landscape ? 120 : 0))
-                            .position(x: full.width / 2, y: full.height - (landscape ? max(ins.bottom, 6) : 1))
-                            .allowsHitTesting(false).transition(.opacity)
+                        // The series title and the progress bar never auto-hide; everything else follows
+                        // `controlsVisible`. Locked / speed modes keep them on screen but not interactive.
+                        controls(full, ins: ins, chrome: controlsVisible && !locked, interactive: !locked && !speedMode)
                     }
                     if let p = panel, !locked {
                         popover(p, full: full, ins: ins)
@@ -368,11 +364,14 @@ struct PlayerScreen: View {
     /// Dim factor for everything but the progress bar while scrubbing (design: 28 %).
     private var dim: Double { scrubbing ? 0.28 : 1 }
 
-    @ViewBuilder private func controls(_ full: CGSize, ins: EdgeInsets) -> some View {
-        if landscape { landscapeControls(full, ins: ins) } else { portraitControls(full, ins: ins) }
+    /// `chrome`: auto-hiding controls (top bar, meta row, icon row) are shown.
+    /// `interactive`: the always-on progress bar accepts scrubbing.
+    @ViewBuilder private func controls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
+        if landscape { landscapeControls(full, ins: ins, chrome: chrome, interactive: interactive) }
+        else { portraitControls(full, ins: ins, chrome: chrome, interactive: interactive) }
     }
 
-    private func portraitControls(_ full: CGSize, ins: EdgeInsets) -> some View {
+    private func portraitControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 PlayerIconButton(symbol: "chevron.left", label: "返回") { dismiss() }
@@ -388,37 +387,41 @@ struct PlayerScreen: View {
             }
             .padding(.horizontal, 16).padding(.top, ins.top)
             .opacity(dim)
+            .modifier(ChromeFade(on: chrome))
             if showTech, let t = co.tech {
-                PlayerTechStrip(tech: t).padding(.top, 14).opacity(dim)
+                PlayerTechStrip(tech: t).padding(.top, 14).opacity(dim).modifier(ChromeFade(on: chrome))
             }
             Spacer(minLength: 0)
             if let i = co.current, co.episodes.indices.contains(i) {
                 VStack(alignment: .leading, spacing: 0) {
                     Group {
-                        meta(i, skip: true).padding(.bottom, 10)
+                        meta(i, skip: true).padding(.bottom, 10).opacity(scrubbing ? 0 : 1).modifier(ChromeFade(on: chrome, keepAccessible: true))
                         Text(co.detail?.title ?? series.title)
                             .font(.system(size: 23, weight: .bold)).lineLimit(1)
+                            .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
                             .accessibilityIdentifier("player.title")
                             .padding(.bottom, 30)
                     }
-                    .opacity(scrubbing ? 0 : 1)
                     .opacity(panel != nil ? 0.35 : 1)
-                    if co.readyIndex == i {
+                    Group {
                         PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome).id(i)
                             .opacity(panel != nil ? 0.35 : 1)
+                            .shadow(color: .black.opacity(chrome ? 0 : 0.6), radius: 2)
+                            .allowsHitTesting(interactive && co.readyIndex == i)
                     }
                 }
                 .padding(.horizontal, 20)
                 iconRow(i).padding(.horizontal, 5).padding(.top, 6)
                     .padding(.bottom, max(0, ins.bottom - 6))
                     .opacity(dim)
+                    .modifier(ChromeFade(on: chrome))
             }
         }
         .foregroundStyle(.white)
         .frame(width: full.width, height: full.height)
     }
 
-    private func landscapeControls(_ full: CGSize, ins: EdgeInsets) -> some View {
+    private func landscapeControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 PlayerIconButton(symbol: "chevron.left", label: "返回") { dismiss() }
@@ -438,6 +441,7 @@ struct PlayerScreen: View {
             .overlay { if showTech, let t = co.tech { PlayerTechStrip(tech: t, landscape: true) } }
             .padding(.horizontal, 60).padding(.top, 18)
             .opacity(dim)
+            .modifier(ChromeFade(on: chrome))
             Spacer(minLength: 0)
             if let i = co.current, co.episodes.indices.contains(i) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -451,19 +455,23 @@ struct PlayerScreen: View {
                         }
                     }
                     .opacity(scrubbing ? 0 : 1).opacity(panel != nil ? 0.35 : 1)
+                    .modifier(ChromeFade(on: chrome, keepAccessible: true))
                     .padding(.bottom, 8)
                     HStack(spacing: 8) {
                         Text(co.detail?.title ?? series.title)
                             .font(.system(size: 22, weight: .bold)).lineLimit(1)
+                            .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
                             .accessibilityIdentifier("player.title")
                             .opacity(scrubbing ? 0.28 : 1).opacity(panel != nil ? 0.35 : 1)
                         Spacer(minLength: 12)
-                        iconRow(i).opacity(dim)
+                        iconRow(i).opacity(dim).modifier(ChromeFade(on: chrome))
                     }
                     .padding(.bottom, 14)
-                    if co.readyIndex == i {
+                    Group {
                         PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome, landscape: true).id(i)
                             .opacity(panel != nil ? 0.35 : 1)
+                            .shadow(color: .black.opacity(chrome ? 0 : 0.6), radius: 2)
+                            .allowsHitTesting(interactive && co.readyIndex == i)
                     }
                 }
                 .padding(.horizontal, 60)
@@ -1192,3 +1200,12 @@ struct PlayerTouchCatcher: UIViewRepresentable {
     }
 }
 
+/// Auto-hiding player chrome: fades out, stops taking touches and (unless asked) leaves the
+/// accessibility tree, while keeping its layout so the always-on title / progress bar never jump.
+private struct ChromeFade: ViewModifier {
+    let on: Bool
+    var keepAccessible = false
+    func body(content: Content) -> some View {
+        content.opacity(on ? 1 : 0).allowsHitTesting(on).accessibilityHidden(!on && !keepAccessible)
+    }
+}
