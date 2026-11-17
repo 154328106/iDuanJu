@@ -14,6 +14,8 @@ html = (root / 'STV/Plugins/PluginHTML.swift').read_text('utf8')
 shutil.copytree(root / 'STVTests/Fixtures/legado', out / 'Fixtures/legado', dirs_exist_ok=True)
 tests = out / 'Tests'
 tests.mkdir(exist_ok=True)
+(out / 'UITests').mkdir(exist_ok=True)
+shutil.copyfile(root / 'scripts/novel-validation/RankUITests.swift', out / 'UITests/RankUITests.swift')
 for name in ['LegadoTests.swift', 'NovelSourceBundleTests.swift', 'NovelCacheTests.swift']:
     if (root / 'STVTests' / name).exists():
         shutil.copyfile(root / 'STVTests' / name, tests / name)
@@ -56,14 +58,24 @@ targets:
       - target: STV
     settings:
       GENERATE_INFOPLIST_FILE: YES
+  NovelUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: STV
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      TEST_TARGET_NAME: STV
 schemes:
   STV:
     build:
       targets:
         STV: all
         STVTests: [test]
+        NovelUITests: [test]
     test:
-      targets: [STVTests]
+      targets: [STVTests, NovelUITests]
 ''', 'utf8')
 (out / 'PreviewApp.swift').write_text('''import SwiftUI
 @main struct PreviewApp: App {

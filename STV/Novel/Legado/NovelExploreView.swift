@@ -43,7 +43,6 @@ struct NovelExploreView: View {
             .sheet(isPresented: $choosingSource) { sourceSheet }
             .task(id: sources.map(\.id)) { if !sources.contains(where: { $0.id == sourceID }) { sourceID = sources.first?.id ?? "" } }
             .task(id: sourceID) { await refreshCategories() }
-            .task(id: categoryID) { await resetAndLoad() }
             .tint(accent)
         }
     }
@@ -63,12 +62,17 @@ struct NovelExploreView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 24) {
                 ForEach(groups, id: \.self) { title in
-                    Button { group = title; categoryID = categories.first { $0.group == title && !$0.url.isEmpty }?.id ?? "" } label: {
+                    Button {
+                        group = title
+                        categoryID = categories.first { $0.group == title && !$0.url.isEmpty }?.id ?? ""
+                        Task { await resetAndLoad() }
+                    } label: {
                         VStack(spacing: 8) {
                             Text(title).font(.system(size: 17, weight: group == title ? .bold : .regular)).foregroundStyle(group == title ? Color.primary : Color.secondary)
                             Capsule().fill(group == title ? accent : .clear).frame(height: 3)
                         }
                     }.buttonStyle(.plain)
+                    .accessibilityIdentifier("novel.rank.group.\(title)")
                 }
             }.padding(.horizontal, 18).padding(.top, 8)
         }
@@ -84,6 +88,7 @@ struct NovelExploreView: View {
                             .background(category.id == categoryID ? Color(.systemBackground) : .clear)
                             .overlay(alignment: .leading) { if category.id == categoryID { Rectangle().fill(accent).frame(width: 3, height: 22) } }
                     }.buttonStyle(.plain)
+                    .accessibilityIdentifier("novel.rank.category.\(category.title)")
                 }
             }
         }.frame(width: 92).background(Color(.secondarySystemBackground))
@@ -93,6 +98,7 @@ struct NovelExploreView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     NavigationLink { NovelWebDetailView(items: [item], onRead: onRead) } label: { bookRow(item, rank: index + 1) }.buttonStyle(.plain)
+                        .accessibilityIdentifier("novel.rank.book.\(index)")
                     Divider().padding(.leading, 74)
                 }
                 if busy { ProgressView("加载中").frame(maxWidth: .infinity).padding(26) }
@@ -137,7 +143,7 @@ struct NovelExploreView: View {
                 do { try await LegadoClient.run { try LegadoClient.exploreAction(source, category: category) }; await refreshCategories() }
                 catch { self.error = error.localizedDescription }
             }
-        } else { categoryID = category.id }
+        } else { categoryID = category.id; Task { await resetAndLoad() } }
     }
     private func refreshCategories() async {
         generation = UUID(); categories = []; categoryID = ""; items = []; error = nil
@@ -150,10 +156,11 @@ struct NovelExploreView: View {
             if !result.contains(where: { $0.group == group }) { group = result.first?.group ?? "" }
             busy = false; categoryID = result.first { $0.group == group && !$0.url.isEmpty }?.id ?? ""
             if result.isEmpty { error = "书源没有可用的发现配置" }
+            await resetAndLoad()
         } catch { if token == generation { self.error = error.localizedDescription; busy = false } }
     }
     private func resetAndLoad() async {
-        guard !categoryID.isEmpty else { items = []; hasMore = false; return }
+        guard !categoryID.isEmpty else { items = []; hasMore = false; busy = false; return }
         generation = UUID(); items = []; page = 1; hasMore = true; busy = false; error = nil
         await load(generation)
     }
