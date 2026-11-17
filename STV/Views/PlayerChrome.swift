@@ -8,16 +8,17 @@ struct PlayerIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            // Design v3: 44 pt glass circle — black 55 % + blur + white 14 % 0.5 pt stroke.
+            // Redesign: 40 pt glass circle (rgba(20,20,24,.42) + blur 16, white 14 % hairline) in a 44 pt hit area.
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: 44, height: 44)
+                .frame(width: 40, height: 40)
                 .background { Circle().fill(.ultraThinMaterial).overlay(Circle().fill(.black.opacity(0.42))) }
                 .overlay { Circle().strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
                 .environment(\.colorScheme, .dark)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
-        }.buttonStyle(.plain).accessibilityLabel(label)
+        }.buttonStyle(PressScale()).accessibilityLabel(label)
     }
 }
 
@@ -89,7 +90,7 @@ struct PlayerProgressBar: View {
     @State private var dragStart: Double = 0
     @State private var thumb: UIImage?
 
-    private static let thin: CGFloat = 3, thick: CGFloat = 8, miniH: CGFloat = 2
+    private static let thin: CGFloat = 4, thick: CGFloat = 8, miniH: CGFloat = 2
 
     var body: some View {
         let duration = max(0, co.duration)
@@ -109,10 +110,10 @@ struct PlayerProgressBar: View {
                 if !mini {
                     Group {
                         if drag != nil { Circle().fill(.white).frame(width: 20, height: 20) }
-                        else { RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 4, height: 16) }
+                        else { Circle().fill(.white).frame(width: 14, height: 14) }
                     }
                     .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-                    .offset(x: w * shown - (drag != nil ? 10 : 2))
+                    .offset(x: w * shown - (drag != nil ? 10 : 7))
                 }
             }
             .frame(maxHeight: .infinity)

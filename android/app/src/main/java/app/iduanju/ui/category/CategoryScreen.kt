@@ -1,6 +1,25 @@
 package app.iduanju.ui.category
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.LocalFireDepartment
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.graphicsLayer
+import app.iduanju.core.hongguo.HGFilterOption
+import app.iduanju.core.hongguo.HGFilterRow
+import app.iduanju.ui.components.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -40,7 +59,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** iOS CategoryView: 榜单 (pill genre + sub, numbered grid) / 筛选找片 (filter panel). */
+/** ui-redesign 01–03 (iOS CategoryView twin): 榜单 = segmented 剧种 + chips + top-3 posters + ranked rows;
+ *  筛选找片 = card panel that collapses into a sticky glass strip. */
 @Composable
 fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     val c = IdjThemeColors
@@ -51,6 +71,7 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     var panel by remember { mutableStateOf<HGPanel?>(null) }
     var panelErr by remember { mutableStateOf<String?>(null) }
     val selected = remember { mutableStateMapOf<String, String>() }
+    val names = remember { mutableStateMapOf<String, String>() }
     val items = remember { mutableStateListOf<HGSeries>() }
     var nextOffset by remember { mutableIntStateOf(0) }
     var session by remember { mutableStateOf<String?>(null) }
@@ -103,85 +124,181 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     }
     val grid = rememberLazyGridState()
     LaunchedEffect(grid) {
-        snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last -> if (hasMore && !loading && last >= items.size - 3) load(false) }
+        snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+            if (hasMore && !loading && last >= grid.layoutInfo.totalItemsCount - 4) load(false)
+        }
     }
+    val scrolled by remember { derivedStateOf { grid.firstVisibleItemIndex > 0 || grid.firstVisibleItemScrollOffset > 6 } }
+    // The filter card is item 1; once it has scrolled off, the sticky strip takes its place.
+    val collapsed by remember { derivedStateOf { filterMode && panel != null && grid.firstVisibleItemIndex >= 2 } }
 
-    LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().background(c.bg).statusBarsPadding(), state = grid,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 110.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item(span = { GridItemSpan(3) }) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    listOf("榜单" to false, "筛选找片" to true).forEach { (label, f) ->
-                        val on = filterMode == f
-                        Text(label, color = if (on) c.accent else c.secondary, fontSize = if (on) 22.sp else 17.sp,
-                            fontWeight = if (on) FontWeight.Black else FontWeight.Normal, modifier = Modifier.clickable { filterMode = f })
+    fun selectOption(row: HGFilterRow, value: String) {
+        if (row.type == "genre") {
+            selected.clear(); names.clear(); if (value.isNotEmpty()) { selected["genre"] = value; names["genre"] = row.items.firstOrNull { it.id == value }?.name ?: "" }
+            gen++; items.clear(); hasMore = false; panel = null
+            scope.launch { loadPanel(); if (panel != null) load(true) }
+        } else {
+            if (value.isEmpty()) { selected.remove(row.type); names.remove(row.type) }
+            else { selected[row.type] = value; names[row.type] = row.items.firstOrNull { it.id == value }?.name ?: "" }
+            load(true)
+        }
+    }
+    fun resetAll() { selected.clear(); names.clear(); gen++; items.clear(); panel = null; scope.launch { loadPanel(); if (panel != null) load(true) } }
+    val picks = panel?.rows?.mapNotNull { r -> selected[r.type]?.takeIf { it.isNotEmpty() }?.let { id -> r.type to (r.items.firstOrNull { it.id == id }?.name ?: names[r.type] ?: "") } }?.filter { it.second.isNotEmpty() } ?: emptyList()
+
+    DSPage(glow = !scrolled) {
+        LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().statusBarsPadding(), state = grid,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 110.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            item(span = { GridItemSpan(3) }, key = "tabs") {
+                UnderlineTabs(listOf(false, true), filterMode, { if (it) "筛选找片" else "榜单" }, onSelect = { if (it != filterMode) filterMode = it },
+                    modifier = Modifier.padding(start = 4.dp))
+            }
+            if (!filterMode) {
+                item(span = { GridItemSpan(3) }, key = "rankhead") {
+                    Column {
+                        SegmentedTabs(HGRankGenre.entries, genre, { it.label }, { genre = it }, Modifier.padding(top = 22.dp))
+                        ChipRow(genre.subs, sub, { it.label }, { sub = it }, start = 0.dp, modifier = Modifier.padding(top = 12.dp))
+                        Spacer(Modifier.height(18.dp))
                     }
                 }
-                if (!filterMode) {
-                    Pills(HGRankGenre.entries.map { it.label }, HGRankGenre.entries.indexOf(genre)) { genre = HGRankGenre.entries[it] }
-                    Pills(genre.subs.map { it.label }, genre.subs.indexOf(sub)) { sub = genre.subs[it] }
-                } else {
-                    panel?.rows?.forEach { row ->
-                        val opts = listOf("" to "全部") + row.items.map { it.id to it.name }
-                        Pills(opts.map { it.second }, opts.indexOfFirst { it.first == (selected[row.type] ?: "") }.coerceAtLeast(0)) {
-                            if (row.type == "genre") {
-                                val value = opts[it].first
-                                selected.clear(); if (value.isNotEmpty()) selected["genre"] = value
-                                gen++; items.clear(); hasMore = false; panel = null
-                                scope.launch { loadPanel(); if (panel != null) load(true) }
-                            } else { selected[row.type] = opts[it].first; load(true) }
+                itemsIndexed(items.take(3), key = { _, s -> "top" + s.seriesId }) { i, s -> PosterCell(s, i + 1, onOpen = onOpenDetail) }
+                itemsIndexed(items.drop(3), key = { _, s -> s.seriesId }, span = { _, _ -> GridItemSpan(3) }) { i, s ->
+                    Column(Modifier.padding(top = if (i == 0) 12.dp else 0.dp)) {
+                        if (i > 0) Hairline()
+                        RankRow(s, i + 4, onOpenDetail)
+                    }
+                }
+            } else {
+                item(span = { GridItemSpan(3) }, key = "panel") {
+                    Box(Modifier.padding(top = 22.dp, bottom = 16.dp)) {
+                        val p = panel
+                        when {
+                            p != null -> FilterPanel(p, selected, picks, ::selectOption, onRemove = { t -> p.rows.firstOrNull { it.type == t }?.let { selectOption(it, "") } }, onReset = ::resetAll)
+                            panelErr != null -> Text("$panelErr · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { scope.launch { loadPanel(); if (panel != null) load(true) } })
+                            else -> Box(Modifier.fillMaxWidth().height(230.dp).dsCard(20.dp))
                         }
-                    } ?: panelErr?.let { Text("$it · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { scope.launch { loadPanel(); if (panel != null) load(true) } }) }
+                    }
+                }
+                itemsIndexed(items, key = { _, s -> s.seriesId }) { _, s -> PosterCell(s, null, HomeFmt.meta(s), onOpenDetail, Modifier.padding(bottom = 16.dp)) }
+            }
+            item(span = { GridItemSpan(3) }, key = "footer") {
+                Box(Modifier.fillMaxWidth().padding(vertical = 18.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                        err != null -> Text("$err · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { load(items.isEmpty()) })
+                        !hasMore && items.isNotEmpty() -> Text("没有更多了", color = c.tertiary, fontSize = 12.sp)
+                    }
                 }
             }
         }
-        itemsIndexed(items, key = { _, s -> s.seriesId }) { i, s -> NumberedPosterCell(s, if (filterMode) null else i + 1, onOpenDetail) }
-        item(span = { GridItemSpan(3) }) {
-            Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
-                when {
-                    loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
-                    err != null -> Text("$err · 点击重试", color = c.secondary, fontSize = 13.sp, modifier = Modifier.clickable { load(items.isEmpty()) })
-                    !hasMore && items.isNotEmpty() -> Text("没有更多了", color = c.secondary, fontSize = 12.sp)
+        // `.topfade`
+        Box(Modifier.fillMaxWidth().height(if (collapsed) 70.dp else 24.dp).graphicsLayer { alpha = if (scrolled) 1f else 0f }
+            .background(Brush.verticalGradient(0f to c.bg, 0.42f to c.bg, 1f to c.bg.copy(alpha = 0f))).statusBarsPadding())
+        AnimatedVisibility(collapsed, Modifier.statusBarsPadding().padding(horizontal = 12.dp).padding(top = 2.dp),
+            enter = slideInVertically(DS.panel()) { -it } + fadeIn(), exit = slideOutVertically(DS.panel()) { -it } + fadeOut()) {
+            StickyStrip(picks.map { it.second }) { scope.launch { grid.animateScrollToItem(0) } }
+        }
+    }
+}
+
+@Composable
+private fun FilterPanel(p: HGPanel, selected: Map<String, String>, picks: List<Pair<String, String>>, onSelect: (HGFilterRow, String) -> Unit,
+                        onRemove: (String) -> Unit, onReset: () -> Unit) {
+    val c = IdjThemeColors
+    Column(Modifier.fillMaxWidth().dsCard(20.dp).padding(start = 14.dp, top = 14.dp)) {
+        p.rows.firstOrNull { it.type == "genre" }?.let { row ->
+            val opts = listOf(HGFilterOption("", "全部")) + row.items
+            SegmentedTabs(opts, opts.firstOrNull { it.id == (selected["genre"] ?: "") } ?: opts[0], { it.name }, { onSelect(row, it.id) },
+                Modifier.padding(end = 14.dp, bottom = 8.dp))
+        }
+        p.rows.filter { it.type != "genre" }.forEach { row ->
+            val opts = listOf(HGFilterOption("", "全部")) + row.items
+            Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(row.name, color = c.tertiary, fontSize = 13.sp, maxLines = 1, modifier = Modifier.widthIn(min = 36.dp).padding(end = 6.dp))
+                ChipRow(opts, opts.firstOrNull { it.id == (selected[row.type] ?: "") } ?: opts[0], { it.name }, { onSelect(row, it.id) },
+                    neutral = { it.id.isEmpty() }, start = 0.dp)
+            }
+        }
+        Hairline(Modifier.padding(top = 6.dp))
+        Row(Modifier.height(48.dp).padding(end = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("已选", color = c.tertiary, fontSize = 13.sp)
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                if (picks.isEmpty()) Text("全部剧集", color = c.tertiary, fontSize = 13.sp)
+                picks.forEach { (t, name) ->
+                    Row(Modifier.height(24.dp).clip(CircleShape).background(c.glass).pressClick(label = "filter.pick.$name") { onRemove(t) }
+                        .padding(start = 9.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(name, color = c.text, fontSize = 12.sp)
+                        Icon(Icons.Rounded.Close, null, Modifier.size(10.dp), tint = c.tertiary)
+                    }
                 }
+            }
+            Row(Modifier.graphicsLayer { alpha = if (picks.isEmpty()) 0.4f else 1f }.pressClick(enabled = picks.isNotEmpty(), label = "filter.reset", onClick = onReset)
+                .height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Rounded.Refresh, null, Modifier.size(14.dp), tint = c.accent)
+                Text("重置", color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
-/** iOS PillTabs: 15sp, capsule text-on-selected / glass. */
 @Composable
-private fun Pills(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+private fun StickyStrip(names: List<String>, onExpand: () -> Unit) {
     val c = IdjThemeColors
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(labels.size) { i ->
-            val on = i == selected
-            Text(labels[i], color = if (on) c.bg else c.text, fontSize = 15.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) c.text else c.text.copy(0.07f)).clickable { onSelect(i) }
-                    .padding(horizontal = 14.dp, vertical = 6.dp))
+    Row(Modifier.fillMaxWidth().height(46.dp).dsBar(23.dp).padding(start = 14.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Rounded.FilterList, null, Modifier.size(17.dp), tint = c.accent)
+        Text(if (names.isEmpty()) "全部剧集" else names.joinToString(" · "), Modifier.weight(1f, fill = false), color = c.text, fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (names.isNotEmpty()) Box(Modifier.defaultMinSize(18.dp, 18.dp).clip(CircleShape).background(c.accent).padding(horizontal = 5.dp), contentAlignment = Alignment.Center) {
+            Text("${names.size}", color = c.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.height(30.dp).clip(CircleShape).background(c.glass).pressClick(label = "filter.expand", onClick = onExpand).padding(start = 12.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("展开", color = c.secondary, fontSize = 13.sp)
+            Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(16.dp), tint = c.secondary)
         }
     }
 }
 
-private fun rankColor(r: Int): Color = when (r) { 1 -> Color(1f, 0.27f, 0.2f); 2 -> Color(1f, 0.55f, 0.15f); 3 -> Color(1f, 0.78f, 0.2f); else -> Color.Black }
-
-/** iOS NumberedPosterCell: big italic 2-digit rank with coloured offset shadow, 新剧 tag, meta bottom-right. */
+/** Grid / shelf cell (`.cell`): poster + 14 sp title + 12 sp subtitle. */
 @Composable
-internal fun NumberedPosterCell(s: HGSeries, rank: Int?, onOpen: (String) -> Unit) {
+internal fun PosterCell(s: HGSeries, rank: Int?, subtitle: String? = null, onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     val c = IdjThemeColors
-    Column(Modifier.clickable { onOpen(s.seriesId) }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(10.dp)).background(c.elevated)) {
+    Column(modifier.pressClick(0.97f, label = s.title) { onOpen(s.seriesId) }) {
+        PosterArt(s.cover, Modifier.fillMaxWidth().aspectRatio(3f / 4f), rank = rank, badge = HomeFmt.progress(s)?.let { DS.spaced(it) })
+        Text(s.title, color = c.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 7.dp))
+        val sub = subtitle ?: if (s.playCount > 0) DS.count(s.playCount) + "热度" else HomeFmt.meta(s)
+        if (sub.isNotEmpty()) Text(sub, color = c.secondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/** Ranked row from #4 (`.rrow`): numeral · 62×84 poster · title, tags, episodes + heat. */
+@Composable
+internal fun RankRow(s: HGSeries, rank: Int, onOpen: (String) -> Unit) {
+    val c = IdjThemeColors
+    Row(Modifier.fillMaxWidth().pressClick(0.98f, label = s.title) { onOpen(s.seriesId) }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.width(26.dp), contentAlignment = Alignment.Center) { RankNumeral(rank) }
+        Box(Modifier.size(62.dp, 84.dp).clip(RoundedCornerShape(9.dp)).background(c.glass)) {
             AsyncImage(s.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(0.55f))))
-            if (rank != null) Text("%02d".format(rank), modifier = Modifier.padding(start = 4.dp).offset(y = (-4).dp),
-                style = TextStyle(color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic,
-                    shadow = Shadow(rankColor(rank), Offset(5f, 5f), 0f)))
-            if (s.isNew) Text("新剧", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(0.55f)).padding(horizontal = 6.dp, vertical = 2.dp))
-            val m = HomeFmt.metaLine(s)
-            if (m.isNotEmpty()) Text(m, color = Color.White.copy(0.9f), fontSize = 11.sp, maxLines = 1,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(horizontal = 6.dp, vertical = 4.dp))
         }
-        Text(s.title, color = c.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(s.title, color = c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val tags = (s.tags + if (s.isNew) listOf("新剧") else emptyList()).take(3)
+            if (tags.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) { tags.forEach { DSTag(it) } }
+            Row(Modifier.padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                HomeFmt.progress(s)?.let { Text(DS.spaced(it), color = c.secondary, fontSize = 12.sp) }
+                if (s.playCount > 0) {
+                    Icon(Icons.Rounded.LocalFireDepartment, null, Modifier.size(12.dp), tint = c.accentWarm)
+                    Text(DS.count(s.playCount), color = c.accentWarm, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
+
+/** Board grids (BoardScreen) use the same redesigned cell. */
+@Composable
+internal fun NumberedPosterCell(s: HGSeries, rank: Int?, onOpen: (String) -> Unit) = PosterCell(s, rank, null, onOpen, Modifier.padding(bottom = 16.dp))

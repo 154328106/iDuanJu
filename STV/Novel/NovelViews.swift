@@ -44,59 +44,45 @@ struct NovelHomeView: View {
     @State private var managing = false
     @State private var exploring = false
 
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 14), count: 3)
+    @State private var importSheet = false
+    @State private var sourceImport = false
+    private let cols = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3)
 
+    /// ui-redesign 04: 继续阅读 card, four shortcut tiles, then the 3-column shelf.
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("我的书架").font(.system(size: 20, weight: .bold)).foregroundStyle(STVTheme.text)
-                    Spacer()
-                    if busy { ProgressView().padding(.trailing, 6) }
-                    Button { searching = true } label: {
-                        Label("搜书", systemImage: "magnifyingglass").font(.system(size: 15, weight: .medium))
-                    }
-                    .buttonStyle(.plain).foregroundStyle(STVTheme.accent)
-                    .accessibilityIdentifier("novel.search")
-                    Button { managing = true } label: {
-                        Label("书源", systemImage: "books.vertical").font(.system(size: 15, weight: .medium))
-                    }
-                    .buttonStyle(.plain).foregroundStyle(STVTheme.accent)
-                    .accessibilityIdentifier("novel.sources")
-                    Button { importing = true } label: {
-                        Label("导入", systemImage: "plus").font(.system(size: 15, weight: .medium))
-                    }
-                    .buttonStyle(.plain).foregroundStyle(STVTheme.accent)
-                    .accessibilityIdentifier("novel.import")
+            VStack(alignment: .leading, spacing: 0) {
+                if let b = store.shelf.first(where: { store.fraction($0) != nil }) ?? store.shelf.first {
+                    continueCard(b).padding(.top, 24).transition(.opacity)
                 }
-                Button { exploring = true } label: {
-                    Label("发现好书 · 书源推荐与排行榜", systemImage: "sparkles")
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                        .background(STVTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                }.buttonStyle(.plain).foregroundStyle(STVTheme.accent)
+                tiles.padding(.top, store.books.isEmpty ? 24 : 14)
+                DSSectionHeader(title: "我的书架", note: store.books.isEmpty ? nil : "\(store.books.count) 本")
+                    .overlay(alignment: .trailing) { if busy { ProgressView().controlSize(.small).padding(.trailing, 16) } }
+                    .padding(.top, 24)
                 if store.books.isEmpty {
-                    ContentUnavailableView {
-                        Label("书架是空的", systemImage: "books.vertical")
-                    } description: {
-                        Text("「导入」本地 TXT / EPUB（自动识别编码和章节），\n或在「书源」导入「阅读」(Legado) 书源后「搜书」。")
+                    VStack(spacing: 8) {
+                        Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(STVTheme.tertiary)
+                        Text("书架是空的").font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text)
+                        Text("「导入」本地 TXT / EPUB，或导入「阅读」书源后「搜书」。")
+                            .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).multilineTextAlignment(.center)
                     }
-                    .padding(.top, 60)
+                    .frame(maxWidth: .infinity).padding(.vertical, 44).padding(.horizontal, 24)
                 } else {
-                    LazyVGrid(columns: cols, spacing: 18) {
+                    LazyVGrid(columns: cols, spacing: 16) {
                         ForEach(store.shelf) { b in
                             Button { reading = b } label: { bookCell(b) }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                Button("删除", systemImage: "trash", role: .destructive) { deleting = b }
-                            }
-                            .accessibilityIdentifier("novel.book.\(b.title)")
+                                .buttonStyle(PressScale(scale: 0.97))
+                                .contextMenu { Button("删除", systemImage: "trash", role: .destructive) { deleting = b } }
+                                .accessibilityIdentifier("novel.book.\(b.title)")
                         }
                     }
+                    .padding(.horizontal, 16).padding(.top, 12)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 100)
+            .padding(.bottom, 100)
+            .animation(DS.panel, value: store.books.count)
         }
-        .background(STVTheme.bg)
+        .scrollIndicators(.hidden)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub], allowsMultipleSelection: true) { r in
             guard case .success(let urls) = r, !urls.isEmpty else { return }
             busy = true
@@ -109,29 +95,101 @@ struct NovelHomeView: View {
             Button("删除", role: .destructive) { if let b = deleting { store.remove(b) }; deleting = nil }
         } message: { Text("会同时删除阅读进度和本机保存的文件。") }
         .fullScreenCover(item: $reading) { b in NovelReaderView(book: store.book(b.id) ?? b) }
-        .sheet(isPresented: $searching) {
+        .fullScreenCover(isPresented: $searching) {
             NovelSearchView { b in
                 searching = false
-                // open after the sheet is gone
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
             }
         }
-        .sheet(isPresented: $managing) { NovelSourcesView() }
-        .sheet(isPresented: $exploring) {
+        .fullScreenCover(isPresented: $managing) { NovelSourcesView() }
+        .fullScreenCover(isPresented: $exploring) {
             NovelExploreView { b in
                 exploring = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
             }
         }
-        .task { seedFixtureIfNeeded() }
+        .sheet(isPresented: $importSheet) {
+            NovelImportSheet(onLocalFiles: {
+                importSheet = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { importing = true }
+            })
+        }
+        .task {
+            seedFixtureIfNeeded()
+            #if DEBUG
+            // Screenshot hook: `STV_NOVEL_PAGE=search|rank|sources|import` opens that sub-page on launch.
+            switch ProcessInfo.processInfo.environment["STV_NOVEL_PAGE"] {
+            case "search": searching = true
+            case "rank": exploring = true
+            case "sources": managing = true
+            case "import": importSheet = true
+            default: break
+            }
+            #endif
+        }
+    }
+
+    private func continueCard(_ b: NovelBook) -> some View {
+        let f = store.fraction(b)
+        return HStack(spacing: 14) {
+            NovelCover(book: b).frame(width: 88, height: 88 / 0.72)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(f == nil ? "开始阅读" : "继续阅读").font(.system(size: 11, weight: .heavy)).tracking(0.8).foregroundStyle(STVTheme.accentWarm)
+                Text(b.title).font(.system(size: 19, weight: .bold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 4)
+                Text([b.author, b.isWeb ? "书源" : b.format.uppercased()].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 2)
+                HStack(spacing: 8) {
+                    DSProgressBar(value: f ?? 0)
+                    Text(f.map { "读到 \(Int(($0 * 100).rounded()))%" } ?? "未读").font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
+                }
+                .padding(.top, 9)
+                Button { reading = b } label: { PillButtonLabel(title: f == nil ? "开始阅读" : "继续阅读", icon: "play.fill", tone: .ink, small: true) }
+                    .buttonStyle(PressScale()).padding(.top, 11).accessibilityIdentifier("novel.continue")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .dsCard(20)
+        .padding(.horizontal, 16)
+    }
+
+    private var tiles: some View {
+        HStack(spacing: 10) {
+            tile("搜书", "magnifyingglass", id: "novel.search") { searching = true }
+            tile("排行榜", "chart.bar.fill", id: "novel.rank") { exploring = true }
+            tile("书源", "books.vertical", id: "novel.sources") { managing = true }
+            tile("导入", "square.and.arrow.down", id: "novel.import") { importSheet = true }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func tile(_ title: String, _ icon: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                IconWell(systemName: icon, size: 34)
+                Text(title).font(.system(size: 13)).foregroundStyle(STVTheme.text)
+            }
+            .frame(maxWidth: .infinity).frame(height: 78)
+            .dsCard(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale(scale: 0.97))
+        .accessibilityIdentifier(id)
     }
 
     private func bookCell(_ b: NovelBook) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             NovelCover(book: b).aspectRatio(0.72, contentMode: .fit)
-            Text(b.title).font(.system(size: 14, weight: .medium)).foregroundStyle(STVTheme.text).lineLimit(2)
-            Text(store.fraction(b).map { "读到 \(Int(($0 * 100).rounded()))%" } ?? "未读")
-                .font(.caption).foregroundStyle(STVTheme.secondary)
+            Text(b.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 7)
+            if let f = store.fraction(b) {
+                HStack(spacing: 8) {
+                    DSProgressBar(value: f)
+                    Text("\(Int((f * 100).rounded()))%").font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
+                }
+                .padding(.top, 5)
+            } else {
+                Text("未读").font(.system(size: 12)).foregroundStyle(STVTheme.secondary).padding(.top, 2)
+            }
         }
     }
 
@@ -190,7 +248,11 @@ struct NovelCover: View {
                 }.padding(10)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+        .overlay {
+            LinearGradient(stops: [.init(color: .white.opacity(0.16), location: 0), .init(color: .white.opacity(0), location: 0.07)],
+                           startPoint: .leading, endPoint: .trailing).allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: .black.opacity(0.22), radius: 5, y: 4)
     }
 }

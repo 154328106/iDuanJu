@@ -1,6 +1,24 @@
 package app.iduanju.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import app.iduanju.ui.components.*
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -55,6 +73,8 @@ object EpisodeGroups {
     }
 }
 
+/** ui-redesign 12 / 13: blurred poster hero + poster card, stats card, actions, tags, folding intro, 选集 → 系列 → 演员;
+ *  a pinned nav once the hero scrolls away and a floating play bar once the main button leaves the screen. */
 @Composable
 fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> Unit, onOpenSeries: (String) -> Unit = {}) {
     val c = IdjThemeColors
@@ -71,118 +91,200 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
     var group by remember(d) {
         mutableIntStateOf(d?.let { dd -> EpisodeGroups.ranges(dd.episodes.size).indexOfFirst { resume != null && resume.episodeIndex in it }.coerceAtLeast(0) } ?: 0)
     }
+    val scroll = rememberScrollState()
+    val density = LocalDensity.current
+    val pinned by remember { derivedStateOf { scroll.value > with(density) { 236.dp.toPx() } } }
+    var actionsBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    val actionsOut = actionsBottom < with(density) { 100.dp.toPx() }
+    val startEp = resume?.episodeNumber ?: d?.episodes?.firstOrNull()?.ep ?: 1
+    val playTitle = if (resume != null) "继续第 ${resume.episodeNumber} 集" else "开始播放"
+
     Box(Modifier.fillMaxSize().background(c.bg)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // hero: 440 poster, scrim, centred white title + meta
-            Box(Modifier.fillMaxWidth().height(440.dp), contentAlignment = Alignment.BottomCenter) {
-                AsyncImage(d?.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                    // iOS DramaDetailView: dark scrim behind the white title / meta, then a short fade into the page colour
-                    0f to Color.Black.copy(0.25f), 0.3f to Color.Transparent, 0.9f to Color.Black.copy(0.62f), 1f to c.bg)))
-                Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(d?.title ?: "", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 41.sp)
-                    d?.let { dd ->
-                        Text(
-                            listOfNotNull(dd.source, dd.episodeLabel.ifEmpty { "共${maxOf(dd.totalEps, dd.episodes.size)}集" },
-                                if (dd.favoriteCount > 0) HomeFmt.count(dd.favoriteCount) + "收藏" else null, dd.author.ifEmpty { null })
-                                .joinToString(" · "),
-                            color = Color.White.copy(0.75f), fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 20.sp,
-                        )
-                    }
-                }
-            }
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).navigationBarsPadding().padding(bottom = 110.dp)) {
+            DetailHero(d, seriesId)
             val dd = d
             when {
-                dd != null -> DetailBody(dd, seriesId, resume, group, { group = it }, onPlay, onOpenSeries)
+                dd != null -> DetailBody(dd, seriesId, resume, group, { group = it }, onPlay, onOpenSeries, playTitle, startEp) { actionsBottom = it }
                 err != null -> Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(err!!, color = c.secondary, fontSize = 14.sp, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(12.dp))
-                    Text("重试", color = c.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { reload++ }.padding(8.dp))
+                    MiniButton("重试") { reload++ }
                 }
-                else -> Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    repeat(4) { Box(Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(4.dp)).background(c.elevated.copy(0.6f))) }
+                else -> Column(Modifier.padding(horizontal = 20.dp).padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.fillMaxWidth().height(66.dp).clip(RoundedCornerShape(16.dp)).background(c.glass))
+                    repeat(3) { Box(Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(4.dp)).background(c.glass)) }
                 }
             }
-            Spacer(Modifier.height(30.dp))
         }
-        Box(Modifier.statusBarsPadding().padding(8.dp).size(40.dp).clip(CircleShape).background(Color.Black.copy(0.28f)).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Color.White, modifier = Modifier.size(22.dp))
+        // pinned nav (`.pin` + `.nav`)
+        Box(Modifier.fillMaxWidth().dsPinned(pinned)) {
+            DSNavBar(d?.title ?: "", Modifier.statusBarsPadding().padding(bottom = 6.dp), titleAlpha = animateFloatAsState(if (pinned) 1f else 0f, label = "t").value,
+                leading = { BackButton(if (pinned) Tone.Glass else Tone.Overlay, onBack) })
         }
+        // floating play bar (`.playbar`)
+        AnimatedVisibility(d?.episodes?.isNotEmpty() == true && actionsOut, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 4.dp),
+            enter = slideInVertically(DS.panel()) { it } + fadeIn(), exit = slideOutVertically(DS.panel()) { it } + fadeOut()) {
+            Row(Modifier.fillMaxWidth().dsBar(32.dp).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.White) { onPlay(seriesId, startEp) }
+                d?.let { Heart(seriesId, it, 48.dp) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailHero(d: HGSeriesDetail?, sid: String) {
+    val c = IdjThemeColors
+    Box(Modifier.fillMaxWidth().height(300.dp)) {
+        // `.bd`: the poster blurred 30 dp past the edges; API < 31 falls back to a tiny upscaled thumbnail.
+        Box(Modifier.fillMaxSize().clipToBounds()) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) AsyncImage(d?.cover, null, Modifier.fillMaxSize().scale(1.35f).blur(30.dp), contentScale = ContentScale.Crop)
+            else {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                val req = remember(d?.cover) { coil.request.ImageRequest.Builder(ctx).data(d?.cover).size(16, 22).build() }
+                AsyncImage(req, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            }
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(0.30f), 0.34f to Color.Black.copy(0.08f), 0.76f to c.bg.copy(0.74f), 1f to c.bg)))
+        Row(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp).padding(bottom = 2.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            val eps = d?.let { "全 ${maxOf(it.totalEps, it.episodes.size)} 集" }
+            Box(Modifier.size(116.dp, 155.dp).shadow(15.dp, RoundedCornerShape(12.dp), ambientColor = Color.Black.copy(0.4f), spotColor = Color.Black.copy(0.4f))) {
+                PosterArt(d?.cover ?: "", Modifier.fillMaxSize(), corner = 12.dp)
+                if (eps != null) Text(eps, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp), color = Color.White.copy(0.8f), fontSize = 10.sp)
+            }
+            Column(Modifier.weight(1f).padding(bottom = 2.dp)) {
+                DSStatus(d?.source ?: "红果短剧", StatusTone.Accent)
+                Text(d?.title ?: "", color = c.text, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    lineHeight = 29.sp, modifier = Modifier.padding(top = 8.dp))
+                val meta = listOfNotNull(d?.let { if (it.episodeLabel.isEmpty()) eps else DS.spaced(it.episodeLabel) }, d?.author?.ifEmpty { null }).joinToString(" · ")
+                Text(meta, color = c.secondary, fontSize = 13.sp, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Heart(sid: String, d: HGSeriesDetail, size: androidx.compose.ui.unit.Dp) {
+    val c = IdjThemeColors
+    val lib = IdjApp.instance.library
+    val fav = lib.isFavorite(sid)
+    val s by animateFloatAsState(if (fav) 1f else 0.9f, DS.press(), label = "heart")
+    Box(Modifier.size(size).clip(CircleShape).background(c.glass).border(1.dp, c.hairline, CircleShape)
+        .pressClick(label = if (fav) "取消收藏" else "收藏") { lib.toggleFavorite(sid, d.title, d.cover) }, contentAlignment = Alignment.Center) {
+        Icon(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null, Modifier.size(22.dp).scale(s / 0.95f), tint = if (fav) c.accent else c.text)
     }
 }
 
 @Composable
 private fun DetailBody(
     d: HGSeriesDetail, sid: String, resume: app.iduanju.data.WatchProgress?, group: Int, setGroup: (Int) -> Unit,
-    onPlay: (String, Int) -> Unit, onOpenSeries: (String) -> Unit,
+    onPlay: (String, Int) -> Unit, onOpenSeries: (String) -> Unit, playTitle: String, startEp: Int, onActions: (Float) -> Unit,
 ) {
     val c = IdjThemeColors
-    val lib = IdjApp.instance.library
-    val glass = c.text.copy(0.07f)
     val ranges = EpisodeGroups.ranges(d.episodes.size)
     val g = if (group in ranges.indices) group else 0
-    Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        val startEp = resume?.episodeNumber ?: d.episodes.firstOrNull()?.ep ?: 1
-        Row(
-            Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(50)).background(c.text)
-                .clickable(enabled = d.episodes.isNotEmpty()) { onPlay(sid, startEp) },
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(Icons.Filled.PlayArrow, null, tint = c.bg, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(if (resume != null) "继续第${resume.episodeNumber}集" else "开始播放", color = c.bg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        }
-        val fav = lib.isFavorite(sid)
-        Box(Modifier.size(50.dp).clip(CircleShape).background(c.elevated).clickable { lib.toggleFavorite(sid, d.title, d.cover) }, contentAlignment = Alignment.Center) {
-            Icon(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", tint = if (fav) c.accent else c.text)
-        }
+    Stats(d, Modifier.padding(top = 18.dp))
+    Row(Modifier.padding(horizontal = 20.dp).padding(top = 16.dp).onGloballyPositioned { onActions(it.boundsInRoot().bottom) },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        PillButton(playTitle, Modifier.weight(1f), icon = Icons.Filled.PlayArrow, tone = PillTone.White, height = 50.dp, enabled = d.episodes.isNotEmpty()) { onPlay(sid, startEp) }
+        Heart(sid, d, 50.dp)
     }
     if (d.tags.isNotEmpty()) {
-        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyRow(Modifier.padding(top = 16.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(d.tags) { t ->
-                Text(t, color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(glass).padding(horizontal = 10.dp, vertical = 5.dp))
+                Box(Modifier.height(26.dp).clip(CircleShape).background(c.glass).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                    Text(t, color = c.secondary, fontSize = 12.sp)
+                }
             }
         }
     }
     if (d.cast.isEmpty() && d.actors.isNotEmpty()) {
-        Text("主演：" + d.actors.joinToString(" / "), color = c.secondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
+        Text("主演：" + d.actors.joinToString(" / "), color = c.secondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp).padding(top = 12.dp))
     }
-    if (d.desc.isNotEmpty()) {
-        Text(d.desc, color = c.secondary, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(horizontal = 20.dp))
-    }
-    if (d.relatedSeries.size > 1) RelatedShelf(d.relatedSeries, d.seriesId, onOpenSeries)
+    if (d.desc.isNotEmpty()) Intro(d.desc)
 
-    SectionHeader("选集", Modifier.padding(top = 4.dp))
+    // 选集 (moved up, right after the intro)
+    SectionHeader2("选集", "共 ${maxOf(d.totalEps, d.episodes.size)} 集", inset = 20.dp, modifier = Modifier.padding(top = 22.dp))
     if (ranges.size > 1) {
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(ranges) { i, r ->
-                val on = i == g
-                Text(EpisodeGroups.label(r, d.episodes), color = if (on) c.text else c.secondary, fontSize = 15.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(c.text.copy(if (on) 0.14f else 0.06f))
-                        .clickable { setGroup(i) }.padding(horizontal = 14.dp, vertical = 7.dp))
-            }
+        LazyRow(Modifier.padding(top = 12.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(ranges) { i, r -> ToneChip(EpisodeGroups.label(r, d.episodes), i == g, neutral = true, small = true) { setGroup(i) } }
         }
     }
     ranges.getOrNull(g)?.let { r ->
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            r.chunked(6).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { i ->
-                        val ep = d.episodes[i]
-                        val cur = resume?.episodeIndex == i
-                        Box(
-                            Modifier.weight(1f).heightIn(min = 42.dp).clip(RoundedCornerShape(10.dp))
-                                .background(if (cur) c.accent.copy(0.17f) else glass).clickable { onPlay(sid, ep.ep) },
-                            contentAlignment = Alignment.Center,
-                        ) { Text("${ep.ep}", color = if (cur) c.accent else c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+        androidx.compose.animation.AnimatedContent(r, label = "eps", transitionSpec = { fadeIn() togetherWith fadeOut() }) { rr ->
+            Column(Modifier.padding(horizontal = 20.dp).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                rr.chunked(6).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { i ->
+                            val ep = d.episodes[i]
+                            val cur = resume?.episodeIndex == i
+                            Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (cur) c.accentSoft else c.glass)
+                                .then(if (cur) Modifier.border(1.dp, c.accentLine, RoundedCornerShape(12.dp)) else Modifier)
+                                .pressClick(0.94f, label = "第${ep.ep}集") { onPlay(sid, ep.ep) }, contentAlignment = Alignment.Center) {
+                                Text("${ep.ep}", color = if (cur) c.accent else c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                if (cur) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(5.dp).clip(CircleShape).background(c.accent))
+                            }
+                        }
+                        repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
+    }
+    if (d.relatedSeries.size > 1) RelatedShelf(d.relatedSeries, d.seriesId, onOpenSeries)
+    if (d.cast.isNotEmpty()) {
+        SectionHeader2("演员", inset = 20.dp, modifier = Modifier.padding(top = 24.dp))
+        LazyRow(Modifier.padding(top = 12.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            items(d.cast) { p ->
+                Column(Modifier.width(64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(56.dp).clip(CircleShape).background(Brush.linearGradient(listOf(c.accent.copy(0.5f), c.accentWarm.copy(0.5f)))), contentAlignment = Alignment.Center) {
+                        Text(p.name.take(1), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        if (p.avatar.isNotEmpty()) AsyncImage(p.avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    Text(p.name, color = c.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    if (p.role.isNotEmpty()) Text(p.role, color = c.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Stats(d: HGSeriesDetail, modifier: Modifier = Modifier) {
+    val c = IdjThemeColors
+    data class Cell(val icon: androidx.compose.ui.graphics.vector.ImageVector?, val value: String, val label: String)
+    val cells = buildList {
+        if (d.rating > 0) add(Cell(Icons.Filled.Star, String.format("%.1f", d.rating), "观众评分" + if (d.ratingCount.isEmpty()) "" else " · " + DS.spaced(d.ratingCount) + "人"))
+        if (d.favoriteCount > 0) add(Cell(null, DS.count(d.favoriteCount), "收藏"))
+        if (d.hotText.isNotEmpty()) add(Cell(Icons.Filled.LocalFireDepartment, DS.spaced(d.hotText), "全网热度"))
+        if (isEmpty()) add(Cell(null, "${maxOf(d.totalEps, d.episodes.size)}", "集"))
+    }
+    Row(modifier.padding(horizontal = 20.dp).fillMaxWidth().dsCard(16.dp).padding(vertical = 11.dp).height(IntrinsicSize.Min)) {
+        cells.forEachIndexed { i, cell ->
+            if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.height(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (cell.icon != null) Icon(cell.icon, null, Modifier.size(14.dp), tint = c.accentWarm)
+                    Text(cell.value, color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+                Text(cell.label, color = c.secondary, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** `.intro`: three lines, 展开 over a fade; tap toggles. */
+@Composable
+private fun Intro(text: String) {
+    val c = IdjThemeColors
+    var open by remember { mutableStateOf(false) }
+    var clamped by remember { mutableStateOf(false) }
+    Box(Modifier.padding(horizontal = 20.dp).padding(top = 14.dp).fillMaxWidth().animateContentSize(DS.panel())
+        .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null, enabled = clamped || open) { open = !open }) {
+        Text(text, color = c.secondary, fontSize = 14.sp, lineHeight = 22.sp, maxLines = if (open) Int.MAX_VALUE else 3, overflow = TextOverflow.Clip,
+            onTextLayout = { if (!open) clamped = it.hasVisualOverflow })
+        if (clamped && !open) Text("展开", Modifier.align(Alignment.BottomEnd).background(Brush.horizontalGradient(0f to c.bg.copy(0f), 0.42f to c.bg)).padding(start = 36.dp),
+            color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp)
     }
 }
 
@@ -199,27 +301,22 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, trailing: (@Comp
 @Composable
 private fun RelatedShelf(items: List<HGSeries>, currentId: String, onOpen: (String) -> Unit) {
     val c = IdjThemeColors
-    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionHeader("系列 · 共${items.size}季") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Search, null, tint = c.secondary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp)); Text("搜全系列", color = c.secondary, fontSize = 15.sp)
-            }
-        }
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(items) { s ->
-                val on = s.seriesId == currentId
-                Column(Modifier.width(104.dp).clickable(enabled = !on) { onOpen(s.seriesId) }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(104.dp, 139.dp).clip(RoundedCornerShape(10.dp)).background(c.elevated)
-                        .border(if (on) 2.5.dp else 0.8.dp, if (on) c.accent else c.text.copy(0.12f), RoundedCornerShape(10.dp))) {
-                        AsyncImage(s.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        if (on) Text("当前", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(6.dp).clip(RoundedCornerShape(50)).background(c.bg.copy(0.85f)).padding(horizontal = 6.dp, vertical = 3.dp))
-                        if (s.episodeCount > 0) Text("${s.episodeCount}集", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(0.55f)).padding(horizontal = 6.dp, vertical = 3.dp))
+    val go = app.iduanju.ui.LocalNavigate.current
+    SectionHeader2("系列", "共 ${items.size} 季", inset = 20.dp, modifier = Modifier.padding(top = 26.dp)) {
+        MoreLink("搜全系列", Icons.Filled.Search) { go("actorSearch/" + android.net.Uri.encode(items.firstOrNull { it.seriesId == currentId }?.title ?: "")) }
+    }
+    LazyRow(Modifier.padding(top = 12.dp), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(items) { s ->
+            val on = s.seriesId == currentId
+            Column(Modifier.width(104.dp).pressClick(0.97f, enabled = !on, label = s.title) { onOpen(s.seriesId) }) {
+                Box(Modifier.size(104.dp, 139.dp).then(if (on) Modifier.border(2.dp, c.accent, RoundedCornerShape(16.dp)).padding(4.dp) else Modifier)) {
+                    PosterArt(s.cover, Modifier.fillMaxSize(), corner = 12.dp)
+                    if (on) Box(Modifier.padding(6.dp).height(18.dp).clip(RoundedCornerShape(5.dp)).background(c.accent).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                        Text("当前", color = c.onAccent, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(s.title, color = if (on) c.text else c.secondary, fontSize = 12.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
+                Text(s.title, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                if (s.episodeCount > 0) Text("${s.episodeCount} 集", color = c.secondary, fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
             }
         }
     }

@@ -179,8 +179,8 @@ final class PlayerUITests: XCTestCase {
 
     // MARK: v3 popovers & orientation (4-part test-pattern long video, chrome pinned)
 
-    static let icons = ["player.rate", "player.quality", "player.audio", "player.subtitles",
-                        "player.danmaku", "player.episodes", "player.fullscreen"]
+    static let icons = ["player.episodes", "player.rate", "player.quality", "player.danmaku",
+                        "player.audio"]
 
     func launchV3() {
         launch(["STV_FX_EPISODES": "4", "STV_FX_TITLE": "测试图案合集", "STV_KEEP_CHROME": "1"])
@@ -289,7 +289,9 @@ final class PlayerUITests: XCTestCase {
     func testV3IconsAndPopoversPortrait() {
         launchV3()
         XCTAssertTrue(waitOrientation(landscape: false))
-        // Seven equally spaced icons in one row.
+        // Five equally spaced labelled actions in one row; 全屏 closes the progress row.
+        XCTAssertTrue(el("player.fullscreen").waitForExistence(timeout: 4))
+        XCTAssertLessThan(abs(el("player.fullscreen").frame.midY - el("player.remaining").frame.midY), 4, "全屏 not on the progress row")
         let frames = Self.icons.map { id -> CGRect in XCTAssertTrue(el(id).waitForExistence(timeout: 4), id); return el(id).frame }
         let ys = frames.map(\.midY), xs = frames.map(\.midX)
         XCTAssertLessThan((ys.max()! - ys.min()!), 2, "icons not on one row")

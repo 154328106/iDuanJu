@@ -28,6 +28,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -46,6 +48,12 @@ import app.iduanju.IdjApp
 import app.iduanju.core.hongguo.HGSeriesDetail
 import app.iduanju.data.WatchProgress
 import app.iduanju.ui.theme.IdjThemeColors
+import app.iduanju.ui.theme.IdjDarkColors
+import app.iduanju.ui.theme.IdjColors
+import app.iduanju.ui.components.DS
+import app.iduanju.ui.components.pressClick
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -54,7 +62,6 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSeries: (String) -> Unit = {}) {
-    val c = IdjThemeColors
     val ctx = LocalContext.current
     val lib = IdjApp.instance.library
     var detail by remember { mutableStateOf<HGSeriesDetail?>(null) }
@@ -69,8 +76,8 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     var speed by remember { mutableFloatStateOf(1f) }
     var holdSpeed by remember { mutableStateOf(false) }
     var seekHint by remember { mutableStateOf<String?>(null) }
-    var showEpisodes by remember { mutableStateOf(false) }
-    var showSpeed by remember { mutableStateOf(false) }
+    /** "episodes" · "speed" · "quality" · "audio"; one panel at a time. */
+    var panel by remember { mutableStateOf<String?>(null) }
     var danmaku by remember { mutableStateOf(true) }
     var quality by remember { mutableStateOf<String?>(null) }
     var fillMode by remember { mutableStateOf(false) }
@@ -167,7 +174,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             delay(250)
         }
     }
-    LaunchedEffect(showChrome, playing) { if (showChrome && playing) { delay(4000); showChrome = false } }
+    LaunchedEffect(showChrome, playing, panel) { if (showChrome && playing && panel == null) { delay(4000); showChrome = false } }
     LaunchedEffect(seekHint) { if (seekHint != null) { delay(700); seekHint = null } }
     DisposableEffect(Unit) {
         onDispose {
@@ -204,7 +211,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             Modifier.fillMaxSize()
                 .pointerInput(Unit) {
                     detectTapGestures(
-                        onTap = { showChrome = !showChrome },
+                        onTap = { if (panel != null) panel = null else showChrome = !showChrome },
                         onDoubleTap = { o ->
                             val w = size.width
                             when {
@@ -269,126 +276,133 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 modifier = Modifier.align(Alignment.Center).offset(y = (-90).dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(0.55f)).padding(horizontal = 16.dp, vertical = 8.dp))
         }
 
-        AnimatedVisibility(showChrome, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize()) {
-                // top bar: back · PiP · favourite · more
-                Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", onBack)
-                        Spacer(Modifier.weight(1f))
-                        CircleBtn(Icons.Filled.PictureInPictureAlt, "画中画") {}
-                        Spacer(Modifier.width(12.dp))
-                        val fav = lib.isFavorite(seriesId)
-                        CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏") {
-                            detail?.let { lib.toggleFavorite(seriesId, it.title, it.cover) }
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        CircleBtn(Icons.Filled.MoreHoriz, "更多") { fillMode = !fillMode }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    TechTagRow(tags)
+        // ── Chrome (redesign 14–17) ─────────────────────────────────────────────────────────────────────
+        // Title + progress row are always on screen; the rest fades with `showChrome`. The centre transport
+        // only appears once the current episode is actually playable, so switching episodes never flashes it.
+        val pc = IdjDarkColors
+        val chromeA by androidx.compose.animation.core.animateFloatAsState(if (showChrome || panel != null) 1f else 0f, DS.panel(), label = "chrome")
+        val ready = status.isEmpty() && error == null && dur > 0
+        Box(Modifier.fillMaxWidth().height(170.dp).graphicsLayer { alpha = chromeA }
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(0.62f), Color.Transparent))))
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(330.dp).graphicsLayer { alpha = 0.35f + 0.65f * chromeA }
+            .background(Brush.verticalGradient(0f to Color.Transparent, 0.55f to Color.Black.copy(0.6f), 1f to Color.Black.copy(0.88f))))
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp).padding(top = 6.dp).graphicsLayer { alpha = chromeA }) {
+            Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", showChrome, onBack)
+                Spacer(Modifier.weight(1f))
+                CircleBtn(Icons.Filled.PictureInPictureAlt, "画中画", showChrome) {}
+                Spacer(Modifier.width(10.dp))
+                val fav = lib.isFavorite(seriesId)
+                CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", showChrome) {
+                    detail?.let { lib.toggleFavorite(seriesId, it.title, it.cover) }
                 }
-                // centre transport: -10 · play/pause · +10
-                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-                    Icon(Icons.Filled.Replay10, "后退10秒", tint = Color.White, modifier = Modifier.size(34.dp).clickable { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) })
-                    Box(Modifier.size(80.dp).clip(CircleShape).background(Color.Black.copy(0.45f)).clickable { if (player.isPlaying) player.pause() else player.play() },
-                        contentAlignment = Alignment.Center) {
-                        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(44.dp))
+                Spacer(Modifier.width(10.dp))
+                CircleBtn(Icons.Filled.MoreHoriz, "更多", showChrome) { fillMode = !fillMode }
+            }
+            if (!landscape) TechLine(tags, Modifier.fillMaxWidth().padding(top = 6.dp))
+        }
+        androidx.compose.animation.AnimatedVisibility(showChrome && ready && panel == null, Modifier.align(Alignment.Center),
+            enter = fadeIn(DS.panel()) + androidx.compose.animation.scaleIn(DS.panel(), initialScale = 0.92f),
+            exit = fadeOut(DS.panel()) + androidx.compose.animation.scaleOut(DS.panel(), targetScale = 0.92f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(44.dp)) {
+                Icon(Icons.Filled.Replay10, "后退10秒", tint = Color.White, modifier = Modifier.size(36.dp).pressClick(0.9f) { player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0)) })
+                Box(Modifier.size(68.dp).clip(CircleShape).background(Color(0x7514141A)).border(1.dp, Color.White.copy(0.18f), CircleShape)
+                    .pressClick(0.92f, label = if (playing) "暂停" else "播放") { if (player.isPlaying) player.pause() else player.play() },
+                    contentAlignment = Alignment.Center) {
+                    androidx.compose.animation.Crossfade(playing, label = "pp") { p ->
+                        Icon(if (p) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     }
-                    Icon(Icons.Filled.Forward10, "前进10秒", tint = Color.White, modifier = Modifier.size(34.dp).clickable { player.seekTo(player.currentPosition + 10_000) })
                 }
-                // bottom: caption, title, progress, toolbar
-                Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp).padding(bottom = 8.dp)) {
-                    val d = detail
-                    if (d != null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(d.source, color = Color.White.copy(0.85f), fontSize = 12.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White.copy(0.18f)).padding(horizontal = 8.dp, vertical = 3.dp))
-                            Spacer(Modifier.width(10.dp))
-                            // iOS seasonTag: "S8 · " when sibling seasons are numbered distinctly
-                            val seasonTag = remember(d.relatedSeries) {
-                                val ss = d.relatedSeries
-                                val nums = ss.map { app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }
-                                if (ss.size > 1 && nums.toSet().size == ss.size)
-                                    "S" + app.iduanju.core.hongguo.SeasonParser.seasonNo(ss.firstOrNull { it.seriesId == d.seriesId }?.title ?: d.title) else null
+                Icon(Icons.Filled.Forward10, "前进10秒", tint = Color.White, modifier = Modifier.size(36.dp).pressClick(0.9f) { player.seekTo(player.currentPosition + 10_000) })
+            }
+        }
+        // panels: one style for 选集 / 倍速 / 画质 / 音轨字幕, sitting just above the action row
+        if (panel != null) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { panel = null } })
+        androidx.compose.animation.AnimatedVisibility(panel != null, Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+            .padding(horizontal = 12.dp).padding(bottom = if (landscape) 16.dp else 78.dp),
+            enter = fadeIn(DS.panel()) + androidx.compose.animation.slideInVertically(DS.panel()) { it / 6 },
+            exit = fadeOut(DS.panel()) + androidx.compose.animation.slideOutVertically(DS.panel()) { it / 6 }) {
+            val last = remember { arrayOfNulls<String>(1) }
+            if (panel != null) last[0] = panel
+            val shown = last[0]
+            Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xD61C1E24))
+                .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(24.dp)).pointerInput(Unit) { detectTapGestures { } }
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp)) {
+                when (shown) {
+                    "episodes" -> detail?.let { d -> EpisodesPanel(d, epIndex, pc, onPick = { epIndex = it; panel = null },
+                        onSeason = { id -> panel = null; onSwitchSeries(id) }) }
+                    "speed" -> {
+                        PanelTitle("倍速", "长按画面临时 2×")
+                        Spacer(Modifier.height(8.dp))
+                        listOf(0.75f, 1f, 1.25f, 1.5f, 2f, 3f).forEach { s ->
+                            PanelRow(if (s == 1f) "1.0× 正常速度" else "${s}×".replace(".0×", "×"), "", s == speed, pc) {
+                                speed = s; player.setPlaybackSpeed(s); panel = null
                             }
-                            seasonTag?.let { Text("$it · ", color = Color.White.copy(0.6f), fontSize = 15.sp) }
-                            Text("第${d.episodes.getOrNull(epIndex)?.ep ?: startEp}集", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text(" / 共${maxOf(d.totalEps, d.episodes.size)}集", color = Color.White.copy(0.6f), fontSize = 15.sp)
                         }
-                        Spacer(Modifier.height(10.dp))
-                        Text(d.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp, maxLines = 2)
                     }
-                    Spacer(Modifier.height(18.dp))
-                    ProgressBar(pos, dur, buffered) { player.seekTo(it) }
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(fmt(pos), color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text(if (dur > 0) "−" + fmt(dur - pos) else "", color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    "quality" -> {
+                        PanelTitle("画质", null)
+                        Spacer(Modifier.height(8.dp))
+                        val q = quality ?: tags.res ?: "自动"
+                        PanelRow(q, player.videoFormat?.let { "${it.width}×${it.height}" } ?: "", true, pc) { panel = null }
+                        Text("播放源", color = Color.White.copy(0.55f), fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp, top = 14.dp, bottom = 8.dp))
+                        PanelRow(detail?.source ?: "当前片源", "当前", true, pc) { panel = null }
                     }
-                    Spacer(Modifier.height(14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        ToolIcon(Icons.Filled.Speed, "倍速") { showSpeed = true }
-                        BoxedTag(quality ?: tags.res ?: "自动", filled = false)
-                        ToolIcon(Icons.Filled.GraphicEq, "音轨") {}
-                        ToolIcon(Icons.AutoMirrored.Filled.Chat, "字幕") {}
-                        Box(Modifier.clickable { danmaku = !danmaku }) { BoxedTag("弹", filled = danmaku) }
-                        ToolIcon(Icons.Filled.GridView, "选集") { showEpisodes = true }
-                        if (landscape) ToolIcon(Icons.Filled.FullscreenExit, "退出横屏") { setLandscape(false) } else ToolIcon(Icons.Filled.Fullscreen, "横屏全屏") { setLandscape(true) }
+                    else -> {
+                        PanelTitle("音轨字幕", null)
+                        Text("音轨", color = Color.White.copy(0.55f), fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp, top = 14.dp, bottom = 8.dp))
+                        PanelRow(tags.audio ?: "默认音轨", "", true, pc) { panel = null }
+                        Text("字幕", color = Color.White.copy(0.55f), fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp, top = 14.dp, bottom = 8.dp))
+                        PanelRow("关闭", "当前视频没有可选字幕", true, pc) { panel = null }
                     }
                 }
             }
         }
-
-        if (showEpisodes) detail?.let { d ->
-            ModalBottomSheet(onDismissRequest = { showEpisodes = false }, containerColor = c.surface) {
-                // iOS EpisodePickerSheet: title + 更新至, season chips (newest first), 30-episode range chips, 6-column grid
-                val total = d.episodes.size
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("选集 · 共${maxOf(total, d.totalEps)}集", color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Text("更新至 ${d.episodes.lastOrNull()?.ep ?: total} 集", color = c.secondary, fontSize = 14.sp)
-                }
-                val seasons = remember(d.relatedSeries) {
-                    d.relatedSeries.map { it to app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }.distinctBy { it.second }.sortedByDescending { it.second }
-                }
-                val chip: @Composable (String, Boolean, () -> Unit) -> Unit = { t, on, f ->
-                    Box(Modifier.clip(RoundedCornerShape(50)).background(if (on) c.text.copy(0.92f) else c.text.copy(0.08f)).clickable(onClick = f).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        Text(t, color = if (on) c.surface else c.text, fontSize = 15.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
+        // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
+            .padding(horizontal = if (landscape) 48.dp else 20.dp).padding(bottom = if (landscape) 8.dp else 4.dp)) {
+            val d = detail
+            if (d != null) {
+                Row(Modifier.graphicsLayer { alpha = chromeA }.heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(d.source, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color.White.copy(0.16f)).padding(horizontal = 7.dp, vertical = 2.dp))
+                    Spacer(Modifier.width(8.dp))
+                    val seasonTag = remember(d.relatedSeries) {
+                        val ss = d.relatedSeries
+                        val nums = ss.map { app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }
+                        if (ss.size > 1 && nums.toSet().size == ss.size)
+                            "第 " + app.iduanju.core.hongguo.SeasonParser.seasonNo(ss.firstOrNull { it.seriesId == d.seriesId }?.title ?: d.title) + " 季" else null
                     }
+                    seasonTag?.let { Text("$it · ", color = Color.White.copy(0.72f), fontSize = 13.sp) }
+                    Text("第 ${d.episodes.getOrNull(epIndex)?.ep ?: startEp} 集", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(" / 共 ${maxOf(d.totalEps, d.episodes.size)} 集", color = Color.White.copy(0.72f), fontSize = 13.sp)
                 }
-                if (seasons.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    seasons.forEach { (s, n) -> chip("第${n}季", s.seriesId == d.seriesId) { if (s.seriesId != d.seriesId) { showEpisodes = false; onSwitchSeries(s.seriesId) } } }
-                }
-                var range by remember { mutableStateOf(epIndex / 30) }
-                if (total > 30) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    (0..(total - 1) / 30).forEach { r -> chip("${d.episodes[r * 30].ep}-${d.episodes[minOf(total - 1, r * 30 + 29)].ep}", r == range) { range = r } }
-                }
-                val slice = d.episodes.withIndex().toList().drop(range * 30).take(30)
-                LazyVerticalGrid(GridCells.Fixed(6), Modifier.heightIn(max = 420.dp).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(slice.size) { k ->
-                        val (i, ep) = slice[k]
-                        val on = i == epIndex
-                        Box(Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).background(if (on) c.accent.copy(0.17f) else c.text.copy(0.07f))
-                            .then(if (on) Modifier.border(1.5.dp, c.accent.copy(0.8f), RoundedCornerShape(10.dp)) else Modifier)
-                            .clickable { epIndex = i; showEpisodes = false }, contentAlignment = Alignment.Center) {
-                            Text("${ep.ep}", color = if (on) c.accent else c.text, fontSize = 17.sp)
-                        }
-                    }
-                }
+                Spacer(Modifier.height(8.dp))
+                Text(d.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, lineHeight = 27.sp, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.7f), blurRadius = 6f)))
             }
-        }
-        if (showSpeed) {
-            ModalBottomSheet(onDismissRequest = { showSpeed = false }, containerColor = c.surface) {
-                Text("倍速", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp))
-                Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(0.75f, 1f, 1.25f, 1.5f, 2f, 3f).forEach { s ->
-                        val on = s == speed
-                        Box(Modifier.weight(1f).height(42.dp).clip(RoundedCornerShape(10.dp)).background(if (on) c.accent.copy(0.17f) else c.text.copy(0.07f))
-                            .clickable { speed = s; player.setPlaybackSpeed(s); showSpeed = false }, contentAlignment = Alignment.Center) {
-                            Text("${s}×".replace(".0×", "×"), color = if (on) c.accent else c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val tStyle = androidx.compose.ui.text.TextStyle(color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    fontFeatureSettings = "tnum", shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.6f), blurRadius = 4f))
+                Text(fmt(pos), style = tStyle)
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered) { player.seekTo(it); showChrome = true } }
+                Spacer(Modifier.width(10.dp))
+                Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
+                Spacer(Modifier.width(10.dp))
+                Icon(if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (landscape) "退出横屏" else "横屏全屏", tint = Color.White,
+                    modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(!landscape) })
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp).graphicsLayer { alpha = chromeA }.padding(horizontal = if (landscape) 120.dp else 0.dp)) {
+                val dmOK = seriesId.all { it.isDigit() }
+                val on = showChrome
+                ActionBtn(Icons.Filled.GridView, "选集", null, panel == "episodes", false, on) { panel = if (panel == "episodes") null else "episodes" }
+                ActionBtn(Icons.Filled.Speed, "倍速", if (speed == 1f) "1.0×" else "${speed}×".replace(".0×", "×"), panel == "speed", speed != 1f, on) { panel = if (panel == "speed") null else "speed" }
+                ActionBtn(Icons.Filled.HighQuality, "画质", quality ?: tags.res, panel == "quality", false, on) { panel = if (panel == "quality") null else "quality" }
+                ActionBtn(Icons.Filled.Subtitles, "弹幕", if (dmOK) (if (danmaku) "开" else "关") else null, false, dmOK && danmaku, on) { if (dmOK) danmaku = !danmaku }
+                ActionBtn(Icons.Filled.ClosedCaption, "音轨字幕", null, panel == "audio", false, on) { panel = if (panel == "audio") null else "audio" }
             }
         }
     }
@@ -409,48 +423,108 @@ data class TechTags(val res: String? = null, val range: String? = null, val code
     }
 }
 
+/** spec `.tech`: one small centred line instead of a row of badges. */
 @Composable
-private fun TechTagRow(t: TechTags) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        val items = mutableListOf<@Composable () -> Unit>()
-        t.res?.let { items += { BoxedTag(it, filled = true) } }
-        t.range?.let { items += { Text(it, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) } }
-        t.codec?.let { items += { BoxedTag(it, filled = false) } }
-        t.audio?.let { a -> items += { val p = a.split(" "); Row { Text(p[0], color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold); if (p.size > 1) Text(" " + p[1], color = Color.White.copy(0.7f), fontSize = 12.sp) } } }
-        t.fps?.let { f -> items += { Row { Text("FPS", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold); Text(" $f", color = Color.White.copy(0.7f), fontSize = 12.sp) } } }
-        items.forEachIndexed { i, f -> if (i > 0) Spacer(Modifier.width(12.dp)); f() }
-    }
+private fun TechLine(t: TechTags, modifier: Modifier = Modifier) {
+    val parts = listOfNotNull(t.res, t.range, t.codec, t.audio, t.fps?.let { "$it fps" })
+    if (parts.isEmpty()) return
+    Text(parts.joinToString(" · "), modifier = modifier, color = Color.White.copy(0.55f), fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        letterSpacing = 0.3.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
 }
 
 @Composable
-private fun BoxedTag(text: String, filled: Boolean) {
-    val shape = RoundedCornerShape(4.dp)
-    Text(text, color = if (filled) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.clip(shape).then(if (filled) Modifier.background(Color.White) else Modifier.border(1.dp, Color.White.copy(0.85f), shape))
-            .padding(horizontal = 5.dp, vertical = 1.dp))
-}
-
-@Composable
-private fun CircleBtn(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(0.12f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+private fun CircleBtn(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    // spec `.pbtn`: 40 dp, rgba(20,20,24,.42) + white 14 % hairline
+    Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0x6B141418)).border(1.dp, Color.White.copy(0.14f), CircleShape)
+        .pressClick(0.92f, enabled = enabled, label = label, onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
+/** spec `.pact`: 23 dp icon over an 11 sp caption that carries the current value. */
 @Composable
-private fun ToolIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(36.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
+private fun RowScope.ActionBtn(icon: ImageVector, title: String, value: String?, active: Boolean, accent: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val pc = IdjDarkColors
+    val bg by androidx.compose.animation.animateColorAsState(if (active) Color.White.copy(0.15f) else Color.Transparent, DS.select(), label = "pact")
+    Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(bg).pressClick(enabled = enabled, label = title, onClick = onClick)
+        .padding(top = 7.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, title, tint = if (accent) pc.accent else Color.White, modifier = Modifier.size(23.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(androidx.compose.ui.text.buildAnnotatedString {
+            append(title)
+            if (value != null) {
+                append(" ")
+                pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = if (accent) pc.accent else Color.White)); append(value); pop()
+            }
+        }, color = Color.White.copy(0.72f), fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, softWrap = false)
     }
 }
 
-/** iOS PlayerProgressBar: 3dp track, buffered 40% white, 4x16 thumb; tap/drag to seek. */
+@Composable
+private fun PanelTitle(title: String, trailing: String?) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        trailing?.let { Text(it, color = Color.White.copy(0.6f), fontSize = 12.sp) }
+    }
+}
+
+/** spec `.prow`: 46 dp, value right-aligned; current row accent-soft with accent text and ✓. */
+@Composable
+private fun PanelRow(title: String, detail: String, on: Boolean, pc: IdjColors, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(12.dp)).background(if (on) pc.accentSoft else Color.Transparent)
+        .pressClick(0.98f, onClick = onClick).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = if (on) pc.accent else Color.White, fontSize = 15.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+        if (detail.isNotEmpty()) Text(detail, color = if (on) pc.accent.copy(0.8f) else Color.White.copy(0.55f), fontSize = 12.sp)
+        if (on) { Spacer(Modifier.width(10.dp)); Icon(Icons.Filled.Check, null, tint = pc.accent, modifier = Modifier.size(18.dp)) }
+    }
+}
+
+@Composable
+private fun EpisodesPanel(d: HGSeriesDetail, epIndex: Int, pc: IdjColors, onPick: (Int) -> Unit, onSeason: (String) -> Unit) {
+    val total = d.episodes.size
+    PanelTitle("选集", "共 ${maxOf(total, d.totalEps)} 集 · 更新至 ${d.episodes.lastOrNull()?.ep ?: total} 集")
+    val seasons = remember(d.relatedSeries) {
+        d.relatedSeries.map { it to app.iduanju.core.hongguo.SeasonParser.seasonNo(it.title) }.distinctBy { it.second }.sortedByDescending { it.second }
+    }
+    val chip: @Composable (String, Boolean, Boolean, () -> Unit) -> Unit = { t, on, sm, f ->
+        Box(Modifier.height(if (sm) 28.dp else 32.dp).clip(RoundedCornerShape(50)).background(if (on) pc.thumb else pc.glass)
+            .pressClick(onClick = f).padding(horizontal = if (sm) 12.dp else 14.dp), contentAlignment = Alignment.Center) {
+            Text(t, color = if (on) pc.text else pc.secondary, fontSize = if (sm) 13.sp else 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
+        }
+    }
+    if (seasons.size > 1) Row(Modifier.fillMaxWidth().padding(top = 14.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        seasons.forEach { (s, n) -> chip("第 $n 季", s.seriesId == d.seriesId, false) { if (s.seriesId != d.seriesId) onSeason(s.seriesId) } }
+    }
+    var range by remember { mutableIntStateOf((epIndex / 30).coerceAtLeast(0)) }
+    if (total > 30) Row(Modifier.fillMaxWidth().padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        (0..(total - 1) / 30).forEach { r -> chip("${d.episodes[r * 30].ep}-${d.episodes[minOf(total - 1, r * 30 + 29)].ep}", r == range, true) { range = r } }
+    }
+    val slice = d.episodes.withIndex().toList().drop(range * 30).take(30)
+    androidx.compose.animation.AnimatedContent(slice, label = "eps", transitionSpec = { fadeIn(DS.select()) togetherWith fadeOut(DS.select()) }) { sl ->
+        LazyVerticalGrid(GridCells.Fixed(6), Modifier.heightIn(max = 300.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(sl.size) { k ->
+                val (i, ep) = sl[k]
+                val on = i == epIndex
+                Box(Modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (on) pc.accentSoft else pc.glass)
+                    .then(if (on) Modifier.border(1.dp, pc.accentLine, RoundedCornerShape(12.dp)) else Modifier)
+                    .pressClick { onPick(i) }, contentAlignment = Alignment.Center) {
+                    Text("${ep.ep}", color = if (on) pc.accent else Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    if (on) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(5.dp).clip(CircleShape).background(pc.accent))
+                }
+            }
+        }
+    }
+}
+
+/** spec `.ptrack`: 4 dp track, buffered white 30 %, 14 dp round knob; grows while dragging. Tap/drag to seek. */
 @Composable
 private fun ProgressBar(pos: Long, dur: Long, buffered: Long, onSeek: (Long) -> Unit) {
     var drag by remember { mutableStateOf<Float?>(null) }
     val frac = drag ?: if (dur > 0) pos.toFloat() / dur else 0f
     val buf = if (dur > 0) buffered.toFloat() / dur else 0f
-    BoxWithConstraints(Modifier.fillMaxWidth().height(24.dp)
+    val h by androidx.compose.animation.core.animateDpAsState(if (drag != null) 8.dp else 4.dp, DS.press(), label = "trk")
+    val knob by androidx.compose.animation.core.animateDpAsState(if (drag != null) 20.dp else 14.dp, DS.press(), label = "knob")
+    BoxWithConstraints(Modifier.fillMaxWidth().height(28.dp)
         .pointerInput(dur) { detectTapGestures { o -> if (dur > 0) onSeek((o.x / size.width * dur).toLong()) } }
         .pointerInput(dur) {
             detectHorizontalDragGestures(onDragEnd = { drag?.let { if (dur > 0) onSeek((it * dur).toLong()) }; drag = null }) { ch, _ ->
@@ -458,12 +532,11 @@ private fun ProgressBar(pos: Long, dur: Long, buffered: Long, onSeek: (Long) -> 
             }
         }, contentAlignment = Alignment.CenterStart) {
         val w = maxWidth
-        Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(0.25f)))
-        Box(Modifier.width(w * buf.coerceIn(0f, 1f)).height(3.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(0.40f)))
-        Box(Modifier.width(w * frac.coerceIn(0f, 1f)).height(3.dp).clip(RoundedCornerShape(50)).background(Color.White))
-        val thumb = if (drag != null) 20.dp else 4.dp
-        Box(Modifier.offset(x = (w * frac.coerceIn(0f, 1f)) - thumb / 2).size(thumb, if (drag != null) 20.dp else 16.dp)
-            .clip(if (drag != null) CircleShape else RoundedCornerShape(2.dp)).background(Color.White))
+        Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(50)).background(Color.White.copy(0.24f)))
+        Box(Modifier.width(w * buf.coerceIn(0f, 1f)).height(h).clip(RoundedCornerShape(50)).background(Color.White.copy(0.30f)))
+        Box(Modifier.width(w * frac.coerceIn(0f, 1f)).height(h).clip(RoundedCornerShape(50)).background(Color.White))
+        Box(Modifier.offset(x = (w * frac.coerceIn(0f, 1f)) - knob / 2).size(knob)
+            .shadow(3.dp, CircleShape).clip(CircleShape).background(Color.White))
     }
 }
 

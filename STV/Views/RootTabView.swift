@@ -5,7 +5,7 @@ import SwiftUI
 struct RootTabView: View {
     @State private var tab = Int(ProcessInfo.processInfo.environment["STV_TAB"] ?? "") ?? 0
     @State private var paths = [NavigationPath(), NavigationPath(), NavigationPath(), NavigationPath()]
-    static let items: [(String, String)] = [("首页", "play.house.fill"), ("搜索", "magnifyingglass"),
+    static let items: [(String, String)] = [("首页", "house.fill"), ("搜索", "magnifyingglass"),
                                             ("找剧", "square.grid.2x2.fill"), ("我的", "person.crop.circle.fill")]
     var body: some View {
         TabView(selection: $tab) {
@@ -63,13 +63,13 @@ struct GlassTabBar: View {
                     if on { onReselect(i) } else { withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { selection = i } }
                 } label: {
                     VStack(spacing: 2) {
-                        Image(systemName: items[i].1).font(.system(size: 18, weight: on ? .semibold : .regular))
+                        Image(systemName: items[i].1).font(.system(size: 17, weight: on ? .semibold : .regular)).frame(height: 20)
                         Text(items[i].0).font(.system(size: 11, weight: on ? .semibold : .medium))
                     }
                     .foregroundStyle(on ? STVTheme.text : STVTheme.secondary)
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background {
-                        if on { Capsule().fill(STVTheme.text.opacity(0.1)).matchedGeometryEffect(id: "pill", in: ns) }
+                        if on { Capsule().fill(STVTheme.glassBorder).matchedGeometryEffect(id: "pill", in: ns) }
                     }
                     .contentShape(Capsule())
                 }
@@ -81,14 +81,9 @@ struct GlassTabBar: View {
         }
         .padding(6)
         .frame(maxWidth: 400)
-        .background(.ultraThinMaterial, in: Capsule())
-        .background(STVTheme.surface.opacity(0.55), in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(LinearGradient(colors: [STVTheme.text.opacity(0.18), STVTheme.text.opacity(0.05)],
-                                                  startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
+        // ui-redesign `.tabbar`: 60 pt glass capsule, 16 pt from the sides, 26 pt above the screen edge.
+        .dsBar(30)
         .padding(.horizontal, 16)
-        .padding(.bottom, 4)
+        .padding(.bottom, -8)
     }
 }

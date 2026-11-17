@@ -1,5 +1,10 @@
 package app.iduanju.ui.home
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import app.iduanju.ui.components.*
+
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
@@ -155,25 +160,26 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
             // header: search + filter capsule
             Column(Modifier.padding(top = 6.dp)) {
                 Row(
-                    Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(44.dp)
+                    Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(46.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(ink.copy(if (onPoster) 0.18f else 0.07f))
-                        .border(1.dp, ink.copy(0.14f), RoundedCornerShape(50)),
+                        .background(if (onPoster) Color.White.copy(0.16f) else c.glass)
+                        .border(1.dp, if (onPoster) Color.White.copy(0.18f) else c.glassBorder, RoundedCornerShape(50)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(Modifier.weight(1f).fillMaxHeight().clickable(onClick = onSearch).padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Search, null, tint = ink, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("搜索你想看的作品", color = ink.copy(0.8f), fontSize = 16.sp, maxLines = 1)
+                    Row(Modifier.weight(1f).fillMaxHeight().clickable(onClick = onSearch).padding(start = 16.dp).semantics { contentDescription = "home.search" },
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Search, null, tint = if (onPoster) ink.copy(0.85f) else c.secondary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("搜索你想看的作品", color = if (onPoster) ink.copy(0.8f) else c.secondary, fontSize = 16.sp, maxLines = 1)
                     }
-                    Row(Modifier.fillMaxHeight().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxHeight().clickable { HomeChannelSheetOpen.value = true }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.FilterList, null, tint = ink, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text("筛选", color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
-                Spacer(Modifier.height(2.dp))
-                var sheet by remember { mutableStateOf(false) }
+                Spacer(Modifier.height(12.dp))
+                var sheet by HomeChannelSheetOpen
                 ChannelBar(labels, pager.currentPage, ink, onMore = { sheet = true }) { scope.launch { pager.animateScrollToPage(it) } }
                 if (sheet) ChannelSheet(pages, labels, pager.currentPage, onDismiss = { sheet = false }) { page, sub ->
                     sheet = false
@@ -242,6 +248,9 @@ private fun BlurBackdrop(url: String?, modifier: Modifier, radius: androidx.comp
     }
 }
 
+/** 「筛选」 and the channel chevron open the same 频道 sheet. */
+private val HomeChannelSheetOpen = mutableStateOf(false)
+
 /** Sub-tab chosen from the 频道 sheet, per home page label. */
 object HomeSubSel { val map = androidx.compose.runtime.mutableStateMapOf<String, Int>() }
 /** One-shot request from another tab (我的 → Telegram 频道 / 漫画) to show a home source page. */
@@ -305,19 +314,23 @@ private fun ChannelBar(items: List<String>, selected: Int, ink: Color, onMore: (
             state.animateScrollBy((item.offset + item.size / 2 - center).toFloat())
         } else state.animateScrollToItem(selected)
     }
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp, start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        LazyRow(state = state, modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 14.dp, start = 20.dp), verticalAlignment = Alignment.Bottom) {
+        LazyRow(state = state, modifier = Modifier.weight(1f).fadeEnd(0.9f), horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.Bottom) {
             itemsIndexed(items) { i, label ->
                 val on = i == selected
-                Box(Modifier.heightIn(min = 44.dp).clickable { onSelect(i) }, contentAlignment = Alignment.Center) {
-                    Text(label, color = if (on) ink else ink.copy(0.62f), fontSize = if (on) 20.sp else 17.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
-                    if (on) Box(Modifier.align(Alignment.BottomCenter).offset(y = (-2).dp).size(18.dp, 3.dp).clip(RoundedCornerShape(50)).background(c.accent))
+                // `.ttabs`: selected 24 sp heavy with a 26×4 accent bar under its leading edge.
+                Box(Modifier.height(40.dp).clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { onSelect(i) }
+                    .semantics { contentDescription = "home.channel.$label" }, contentAlignment = Alignment.BottomStart) {
+                    Text(label, color = if (on) ink else (if (ink == Color.White) Color.White.copy(0.66f) else c.secondary),
+                        fontSize = if (on) 24.sp else 17.sp, fontWeight = if (on) FontWeight.ExtraBold else FontWeight.Normal,
+                        modifier = Modifier.padding(bottom = 6.dp), maxLines = 1)
+                    if (on) Box(Modifier.offset(x = 1.dp).size(26.dp, 4.dp).clip(RoundedCornerShape(50)).background(c.accent))
                 }
             }
             item { Spacer(Modifier.width(12.dp)) }
         }
-        Box(Modifier.size(44.dp).clickable(onClick = onMore), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.KeyboardArrowDown, "展开全部频道", tint = ink.copy(0.85f))
+        Box(Modifier.size(44.dp, 40.dp).clickable(onClick = onMore), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.KeyboardArrowDown, "展开全部频道", tint = if (ink == Color.White) ink.copy(0.85f) else c.secondary)
         }
     }
 }
@@ -337,25 +350,14 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (Stri
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp + 72.dp)) {
         if (subs.size > 1) {
-            Row(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                subs.forEach { t ->
-                    val on = t == tab
-                    Box(
-                        Modifier.height(30.dp).clip(RoundedCornerShape(50)).background(if (on) c.text else c.text.copy(0.1f))
-                            .clickable { tab = t }.padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(t.subLabel, color = if (on) c.bg else c.text.copy(0.8f), fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
-                    }
-                }
-            }
+            SegmentedTabs(subs, tab, { it.subLabel }, { tab = it }, Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
         }
         if (tab == HomeTab.ActorRank) {
             val go = app.iduanju.ui.LocalNavigate.current
             Box(Modifier.fillMaxWidth().padding(40.dp).clickable { go("actorRank") }, contentAlignment = Alignment.Center) { Text("查看剧星榜 →", color = c.accent) }
             return@Column
         }
-        Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+        Column(Modifier.padding(top = 0.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
             if (heroPicks.isNotEmpty()) {
                 PosterHero(boards.first().title, heroPicks, heroIndex, { heroIndex = it }, onOpen)
             } else HeroSkeleton()
@@ -367,7 +369,7 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (Stri
                 LaunchedEffect(b.id) { BoardCache.load(b) }
                 val items = BoardCache.items[b.id]
                 val rest = if (n == 0) items?.filter { it.seriesId !in heroIds } else items
-                HomeSection(b.title, if (BoardCache.failed.containsKey(b.id) && items == null) "加载失败，下拉重试" else null, rest?.take(6), onOpen) { go("board/${b.genre.name}/${b.sub.name}") }
+                HomeSection(b.title, if (BoardCache.failed.containsKey(b.id) && items == null) "加载失败，下拉重试" else null, rest?.take(12), onOpen) { go("board/${b.genre.name}/${b.sub.name}") }
             }
         }
     }
@@ -379,7 +381,7 @@ private fun HeroSkeleton() {
     Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(228.dp).clip(RoundedCornerShape(22.dp)).background(c.surface))
 }
 
-/** iOS PosterHero: 228 high, radius 22, blurred backdrop, 147x196 poster, auto-advance 6s, dots bottom-right. */
+/** ui-redesign 10 `.hero`: radius 22, blurred current cover, 112 pt 3:4 poster, kicker / title / meta, white 查看详情, dots. */
 @Composable
 private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setIndex: (Int) -> Unit, onOpen: (String) -> Unit) {
     val c = IdjThemeColors
@@ -390,71 +392,39 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
     }
     val cur = picks.getOrNull(index)
     Box(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(228.dp)
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(177.dp)
+            .shadow(15.dp, RoundedCornerShape(22.dp), ambientColor = Color.Black.copy(0.22f), spotColor = Color.Black.copy(0.22f))
             .clip(RoundedCornerShape(22.dp))
-            .background(c.surface)
-            .border(1.dp, c.text.copy(0.12f), RoundedCornerShape(22.dp)),
+            .background(Color(0xFF241A1A)),
     ) {
-        BlurBackdrop(cur?.cover, Modifier.fillMaxSize().scale(1.3f), 36.dp, 0.7f)
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(0.15f), Color.Black.copy(0.55f)))))
-        // Each page fades with its distance from centre (iOS TabView page style shows one card at a time;
-        // without this the neighbouring page's title / chips slide into view inside the card while swiping).
+        androidx.compose.animation.Crossfade(cur?.cover, label = "heroBg") { url ->
+            BlurBackdrop(url, Modifier.fillMaxSize().scale(1.5f), 40.dp, 0.85f)
+        }
+        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color.Black.copy(0.18f), Color.Black.copy(0.62f)))))
         HorizontalPager(pager, Modifier.fillMaxSize()) { i ->
             val s = picks[i]
-            Row(Modifier.fillMaxSize().graphicsLayer { alpha = 1f - kotlin.math.abs(pager.getOffsetDistanceInPages(i)).coerceIn(0f, 1f) * 1.6f }.clickable { onOpen(s.seriesId) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(147.dp, 196.dp).shadow(12.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(c.elevated)) {
-                    AsyncImage(s.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    HomeFmt.progress(s)?.let { HomeBadge(it, Modifier.align(Alignment.BottomEnd).padding(6.dp)) }
-                }
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 2.dp)) {
-                    Column(Modifier.weight(1f).fillMaxWidth()) {
-                        Text(if (board.isEmpty()) "TOP ${i + 1}" else "$board · TOP ${i + 1}", color = c.accentWarm, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 0.6.sp)
-                        Spacer(Modifier.height(6.dp))
-                        Text(s.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 23.sp)
-                        val chips = s.tags.take(3)
-                        if (chips.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                chips.forEach {
-                                    Box(Modifier.height(20.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(0.14f)).padding(horizontal = 7.dp), contentAlignment = Alignment.Center) {
-                                        Text(it, color = Color.White.copy(0.9f), fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                                    }
-                                }
-                            }
-                        }
-                        val line = HomeFmt.metaLine(s)
-                        if (line.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Text(line, color = Color.White.copy(0.72f), fontSize = 12.sp, maxLines = 1) }
-                        val blurb = s.subtitle?.trim()
-                        if (!blurb.isNullOrEmpty() && blurb != HomeFmt.progress(s)) {
-                            Spacer(Modifier.height(6.dp))
-                            // blurb yields height first so the CTA never gets clipped on long titles
-                            var fitsOneLine by remember(blurb) { mutableStateOf(true) }
-                            Text(blurb, color = Color.White.copy(if (fitsOneLine) 0.66f else 0f), fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                                // hide instead of showing a half-clipped line when the title wraps to two lines
-                                onTextLayout = { r -> fitsOneLine = r.lineCount > 0 && r.getLineBottom(0) <= r.size.height + 0.5f })
-                        }
+            Row(Modifier.fillMaxSize().graphicsLayer { alpha = 1f - kotlin.math.abs(pager.getOffsetDistanceInPages(i)).coerceIn(0f, 1f) * 1.6f }
+                .pressClick(0.98f, label = "home.hero.page.$i") { onOpen(s.seriesId) }.padding(14.dp), verticalAlignment = Alignment.Top) {
+                PosterArt(s.cover, Modifier.size(112.dp, 149.dp), badge = HomeFmt.progress(s)?.let { DS.spaced(it) })
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f).fillMaxHeight().padding(top = 3.dp, bottom = 1.dp)) {
+                    Text(if (board.isEmpty()) "TOP ${i + 1}" else "$board · TOP ${i + 1}", color = Color(0xFFF2B55C), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp, maxLines = 1)
+                    Text(s.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 25.sp, modifier = Modifier.padding(top = 6.dp))
+                    val line1 = listOfNotNull(s.tags.take(2).joinToString(" · ").ifEmpty { null }, if (s.episodeCount > 0) "${s.episodeCount} 集" else null).joinToString(" · ")
+                    val line2 = if (s.playCount > 0) DS.count(s.playCount) + "热度" else ""
+                    Column(Modifier.padding(top = 7.dp)) {
+                        if (line1.isNotEmpty()) Text(line1, color = Color.White.copy(0.74f), fontSize = 12.sp, maxLines = 1, lineHeight = 17.sp)
+                        if (line2.isNotEmpty()) Text(line2, color = Color.White.copy(0.74f), fontSize = 12.sp, maxLines = 1, lineHeight = 17.sp)
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        Modifier.height(32.dp).clip(RoundedCornerShape(50)).background(Color.White).padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.PlayArrow, null, tint = Color(0xFF111318), modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("查看详情", color = Color(0xFF111318), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Spacer(Modifier.weight(1f))
+                    PillButton("查看详情", icon = Icons.Filled.PlayArrow, tone = PillTone.White, small = true) { onOpen(s.seriesId) }
                 }
             }
         }
         if (picks.size > 1) {
-            Row(
-                Modifier.align(Alignment.BottomEnd).padding(12.dp).height(20.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(0.28f)).padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Row(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 28.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 picks.indices.forEach { i ->
-                    val w by animateDpAsState(if (i == index) 14.dp else 5.dp, label = "dot")
+                    val w by animateDpAsState(if (i == index) 14.dp else 5.dp, DS.select(), label = "dot")
                     Box(Modifier.size(w, 5.dp).clip(RoundedCornerShape(50)).background(if (i == index) Color.White else Color.White.copy(0.4f)))
                 }
             }
@@ -469,41 +439,29 @@ fun HomeBadge(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** iOS HomeSection: 17 bold title + 「全部 >」, 3 flexible columns (spacing 10 / 16), max 6 cards. */
+/** ui-redesign 10/11 `.hs`: section header + one horizontal row of 112 dp cells. */
 @Composable
-private fun HomeSection(title: String, note: String?, items: List<HGSeries>?, onOpen: (String) -> Unit, onMore: () -> Unit) {
+private fun HomeSection(title: String, note: String?, list: List<HGSeries>?, onOpen: (String) -> Unit, onMore: () -> Unit) {
     val c = IdjThemeColors
-    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(title, color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            if (note != null) { Spacer(Modifier.width(12.dp)); Text(note, color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
-            Spacer(Modifier.weight(1f))
-            Row(Modifier.clickable(onClick = onMore).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("全部", color = c.secondary, fontSize = 13.sp)
-                Icon(Icons.Filled.KeyboardArrowRight, null, tint = c.secondary, modifier = Modifier.size(14.dp))
-            }
-        }
-        val list = items
-        if (list == null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                repeat(3) {
-                    Column(Modifier.weight(1f)) {
-                        Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(12.dp)).background(c.elevated.copy(0.6f)))
-                        Spacer(Modifier.height(8.dp))
-                        Box(Modifier.width(90.dp).height(12.dp).clip(RoundedCornerShape(4.dp)).background(c.elevated.copy(0.6f)))
-                    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeader2(title, note) { MoreLink(onClick = onMore) }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (list == null) items(4) {
+                Column(Modifier.width(112.dp)) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(12.dp)).background(c.glass))
+                    Box(Modifier.padding(top = 8.dp).width(80.dp).height(12.dp).clip(RoundedCornerShape(4.dp)).background(c.glass))
                 }
-            }
-        } else {
-            list.chunked(3).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { s -> Box(Modifier.weight(1f)) { HomePosterCard(s, onOpen) } }
-                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-                Spacer(Modifier.height(4.dp))
+            } else items(list, key = { it.seriesId }) { s ->
+                app.iduanju.ui.category.PosterCell(s, null, homeShelfMeta(s), onOpen, Modifier.width(112.dp))
             }
         }
     }
+}
+
+/** "悬疑 · 96 集". */
+private fun homeShelfMeta(s: HGSeries): String {
+    val parts = listOfNotNull(s.tags.firstOrNull(), if (s.episodeCount > 0) "${s.episodeCount} 集" else null)
+    return if (parts.isEmpty()) (if (s.playCount > 0) DS.count(s.playCount) + "热度" else HomeFmt.meta(s)) else parts.joinToString(" · ")
 }
 
 /** iOS HomePosterCard: 3:4 poster r10 + 0.6 border, 13 semibold 2 lines, 11 meta. */
@@ -525,33 +483,30 @@ fun HomePosterCard(s: HGSeries, onOpen: (String) -> Unit) {
 @Composable
 fun PosterCard(s: HGSeries, onOpen: (String) -> Unit) = HomePosterCard(s, onOpen)
 
-/** iOS ContinueRow: 112x150 covers, 「看到第N集」 + accent progress capsule. */
+/** ui-redesign 10 `.cw`: 296 dp cards — cover, title, 看到第 N 集 · 共 M 集, progress, round play button. */
 @Composable
-internal fun ContinueRow(items: List<app.iduanju.data.WatchProgress>, onOpen: (String) -> Unit) {
+internal fun ContinueRow(list: List<app.iduanju.data.WatchProgress>, onOpen: (String) -> Unit, onPlay: ((app.iduanju.data.WatchProgress) -> Unit)? = null) {
     val c = IdjThemeColors
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("继续观看", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            val go = app.iduanju.ui.LocalNavigate.current
-            Text("全部", color = c.secondary, fontSize = 15.sp, modifier = Modifier.clickable { go("library/history") })
-        }
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(items.take(10).size) { i ->
-                val p = items[i]
-                Column(Modifier.width(112.dp).clickable { onOpen(p.seriesId) }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(112.dp, 150.dp).clip(RoundedCornerShape(10.dp)).background(c.elevated)) {
+    val go = app.iduanju.ui.LocalNavigate.current
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeader2("继续观看") { MoreLink { go("library/history") } }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(list.take(10), key = { it.seriesId }) { p ->
+                Row(Modifier.width(296.dp).dsCard(18.dp).pressClick(0.98f, label = p.title) { onOpen(p.seriesId) }
+                    .padding(start = 10.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.size(52.dp, 69.dp).clip(RoundedCornerShape(8.dp)).background(c.glass)) {
                         AsyncImage(p.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(0.7f))))
-                        Column(Modifier.align(Alignment.BottomCenter).padding(horizontal = 8.dp).padding(bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(p.resumeLabel, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(4.dp))
-                            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(0.25f))) {
-                                Box(Modifier.fillMaxHeight().fillMaxWidth(p.fraction).background(c.accent))
-                            }
-                        }
                     }
-                    Text(p.title, color = c.text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.weight(1f)) {
+                        Text(p.title, color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(DS.spaced(p.resumeLabel), color = c.secondary, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+                        DSProgressBar(p.fraction, Modifier.padding(top = 9.dp))
+                    }
+                    Box(Modifier.size(38.dp).clip(CircleShape).background(c.text).pressClick(label = "继续播放 ${p.title}") { if (onPlay != null) onPlay(p) else go("player/${p.seriesId}/${p.episodeIndex}") },
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp).offset(x = 1.dp), tint = c.bg)
+                    }
                 }
             }
         }

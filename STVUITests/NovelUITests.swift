@@ -182,9 +182,9 @@ final class NovelUITests: XCTestCase {
         el("novel.sources").tap()
         XCTAssertTrue(app.staticTexts["测试书站"].waitForExistence(timeout: 5), "imported source not listed")
         shot("legado_01_sources")
-        app.buttons["完成"].tap()
+        el("nav.back").tap()
         el("novel.search").tap()
-        let field = app.searchFields.firstMatch
+        let field = app.textFields["search.field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("wu\n")
@@ -248,13 +248,14 @@ final class NovelUITests: XCTestCase {
         app.launchEnvironment["STV_LEGADO_IMPORT"] = file
         app.launch()
         el("novel.search").tap()
-        let field = app.searchFields.firstMatch
+        let field = app.textFields["search.field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("斗破苍穹\n")
-        let done = NSPredicate(format: "label BEGINSWITH '共 '")
-        let header = app.staticTexts.matching(done).firstMatch
-        XCTAssertTrue(header.waitForExistence(timeout: 90), "search did not finish")
+        let header = el("search.progress")
+        XCTAssertTrue(header.waitForExistence(timeout: 10), "search did not start")
+        let finished = expectation(for: NSPredicate(format: "label BEGINSWITH '共 '"), evaluatedWith: header)
+        wait(for: [finished], timeout: 90)
         XCTAssertEqual(app.state, .runningForeground, "app crashed")
         print("[ui-search] \(header.label)")
         shot("legado_07_collection_search")

@@ -13,9 +13,10 @@ struct PlayerGlass: ViewModifier {
         content
             .background {
                 RoundedRectangle(cornerRadius: corner, style: .continuous).fill(.ultraThinMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color(white: 0.09).opacity(strong ? 0.62 : 0.45)))
+                    .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(strong ? Color(red: 28/255, green: 30/255, blue: 36/255).opacity(0.84) : Color(white: 0.09).opacity(0.45)))
             }
-            .overlay { RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
+            .overlay { RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(.white.opacity(strong ? 0.12 : 0.14), lineWidth: strong ? 1 : 0.5) }
+            .shadow(color: .black.opacity(strong ? 0.5 : 0), radius: 25, y: 20)
             .environment(\.colorScheme, .dark)
     }
 }
@@ -88,15 +89,15 @@ struct PlayerCenterControls: View {
     var body: some View {
         let loading = co.readyIndex == nil || (co.waitingForMedia && !co.paused)
         let buffered = co.duration > 0 ? min(1, co.bufferedUntil / co.duration) : 0
-        HStack(spacing: 46) {
+        HStack(spacing: 44) {
             Button { co.seek(by: -10); onInteract() } label: {
-                Image(systemName: "gobackward.10").font(.system(size: 26, weight: .regular)).frame(width: 44, height: 44)
+                Image(systemName: "gobackward.10").font(.system(size: 29, weight: .regular)).frame(width: 44, height: 44).opacity(0.94)
             }.accessibilityLabel("快退10秒").accessibilityIdentifier("player.back10")
             Button { co.togglePause(); onInteract() } label: {
                 ZStack {
                     Circle().fill(.ultraThinMaterial).environment(\.colorScheme, .dark)
-                    Circle().fill(.black.opacity(0.32))
-                    Circle().stroke(.white.opacity(0.22), lineWidth: 2)
+                    Circle().fill(Color(red: 20/255, green: 20/255, blue: 24/255).opacity(0.46))
+                    Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1)
                     if loading {
                         Circle().trim(from: 0, to: 0.28).stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .rotationEffect(.degrees(spin ? 360 : 0))
@@ -106,17 +107,18 @@ struct PlayerCenterControls: View {
                         Circle().trim(from: 0, to: buffered).stroke(.white.opacity(0.75), style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .rotationEffect(.degrees(-90))
                     }
-                    Image(systemName: co.paused ? "play.fill" : "pause.fill").font(.system(size: 30, weight: .regular))
+                    Image(systemName: co.paused ? "play.fill" : "pause.fill").font(.system(size: 26, weight: .regular))
                         .offset(x: co.paused ? 2 : 0)
+                        .contentTransition(.symbolEffect(.replace))
                 }
-                .frame(width: 76, height: 76)
+                .frame(width: 68, height: 68)
             }
             .accessibilityLabel(co.paused ? "播放" : "暂停").accessibilityIdentifier("player.playPause")
             Button { co.seek(by: 10); onInteract() } label: {
-                Image(systemName: "goforward.10").font(.system(size: 26, weight: .regular)).frame(width: 44, height: 44)
+                Image(systemName: "goforward.10").font(.system(size: 29, weight: .regular)).frame(width: 44, height: 44).opacity(0.94)
             }.accessibilityLabel("快进10秒").accessibilityIdentifier("player.fwd10")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressScale(scale: 0.92))
         .foregroundStyle(.white)
         .shadow(color: .black.opacity(0.35), radius: 6)
     }
@@ -136,17 +138,21 @@ struct PlayerMetaRow: View {
         HStack(spacing: 8) {
             if let source {
                 Text(source).font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2.5)
-                    .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+                    .padding(.horizontal, 7).frame(height: 20)
+                    .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
-            (Text(line).foregroundColor(.white.opacity(0.85)) + Text(lineStrong).foregroundColor(.white).bold() + Text(rest).foregroundColor(.white.opacity(0.55)))
+            (Text(line).foregroundColor(.white.opacity(0.72)) + Text(lineStrong).foregroundColor(.white).fontWeight(.semibold) + Text(rest).foregroundColor(.white.opacity(0.72)))
                 .font(.system(size: 13)).lineLimit(1)
             Spacer(minLength: 8)
             if showSkip {
                 Button(action: onSkip) {
                     HStack(spacing: 4) { Text("跳过片头"); Image(systemName: "play.fill").font(.system(size: 8)) }
-                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85)).frame(minHeight: 28).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityIdentifier("player.skipIntro")
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 11).frame(height: 28)
+                        .background(Color(red: 20/255, green: 20/255, blue: 24/255).opacity(0.5), in: Capsule())
+                        .overlay { Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 1) }
+                        .contentShape(Capsule())
+                }.buttonStyle(PressScale()).accessibilityIdentifier("player.skipIntro")
             }
         }
         .foregroundStyle(.white)
@@ -163,8 +169,31 @@ struct PlayerTimelineV3: View {
     var onInteract: () -> Void = {}
     /// Max width of the bubble positioning area (screen coordinates).
     var landscape = false
+    /// Portrait redesign: times sit inline either side of the track and the 全屏 button closes the row.
+    var onFullscreen: (() -> Void)? = nil
 
     var body: some View {
+        if let onFullscreen {
+            let t = co.scrubPreview ?? co.time
+            HStack(spacing: 10) {
+                Text(Fmt.clock(Int(t))).accessibilityIdentifier("player.time")
+                PlayerProgressBar(co: co, scrubbing: $scrubbing, onInteract: onInteract)
+                Text("−" + Fmt.clock(Int(max(0, co.duration - t)))).accessibilityIdentifier("player.remaining")
+                Button(action: onFullscreen) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white).frame(width: 30, height: 30).contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale()).padding(.leading, 2)
+                .accessibilityLabel("横屏全屏").accessibilityIdentifier("player.fullscreen")
+            }
+            .font(.system(size: 12, weight: .medium).monospacedDigit())
+            .foregroundStyle(.white.opacity(0.8))
+        } else {
+            stacked
+        }
+    }
+
+    private var stacked: some View {
         VStack(spacing: 2) {
             PlayerProgressBar(co: co, scrubbing: $scrubbing, onInteract: onInteract)
             HStack {
@@ -206,6 +235,38 @@ struct PlayerRowIcon<Label: View>: View {
     }
 }
 
+/// Redesign `.pact`: 23 pt icon over an 11 pt caption that shows the current value (`倍速 1.0×`).
+struct PlayerActionButton<Icon: View>: View {
+    let id: String
+    let a11y: String
+    let title: String
+    var value: String? = nil
+    var active = false
+    var accent = false
+    var dimmed = false
+    let action: () -> Void
+    @ViewBuilder var icon: Icon
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                icon.font(.system(size: 20, weight: .regular)).frame(height: 23)
+                    .foregroundStyle(accent ? STVTheme.accent : .white)
+                (Text(title).foregroundColor(.white.opacity(0.72))
+                 + Text(value.map { " " + $0 } ?? "").fontWeight(.semibold).foregroundColor(accent ? STVTheme.accent : .white))
+                    .font(.system(size: 11)).lineLimit(1).fixedSize()
+            }
+            .opacity(dimmed ? 0.45 : 1)
+            .frame(maxWidth: .infinity).padding(.top, 7).padding(.bottom, 6)
+            .background(active ? Color.white.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+            .animation(DS.select, value: active)
+        }
+        .buttonStyle(PressScale())
+        .accessibilityLabel(a11y).accessibilityIdentifier(id)
+    }
+}
+
 struct OutlinedTag: View {
     let text: String
     var body: some View {
@@ -239,18 +300,23 @@ struct PlayerPopoverRow: View {
 
     var body: some View {
         Button(action: action) {
+            // Redesign `.prow`: 46 pt, value on the right; the current row is accent-soft with an accent ✓.
             HStack(spacing: 10) {
-                Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).opacity(selected ? 1 : 0).frame(width: 14)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.system(size: 15, weight: selected ? .semibold : .regular))
                     if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(.white.opacity(0.55)) }
                 }
                 Spacer(minLength: 8)
-                if !detail.isEmpty { Text(detail).font(.system(size: 12)).foregroundStyle(.white.opacity(0.6)).lineLimit(1) }
+                if !detail.isEmpty {
+                    Text(detail).font(.system(size: 12, weight: selected ? .semibold : .regular).monospacedDigit())
+                        .foregroundStyle(selected ? STVTheme.accent.opacity(0.8) : .white.opacity(0.55)).lineLimit(1)
+                }
+                if selected { Image(systemName: "checkmark").font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.accent) }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12).frame(minHeight: subtitle == nil ? rowHeight : 54)
-            .background(selected ? Color.white.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .foregroundStyle(selected ? STVTheme.accent : .white)
+            .padding(.horizontal, 12).frame(minHeight: subtitle == nil ? (rowHeight == 44 ? 46 : rowHeight) : 54)
+            .background(selected ? STVTheme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .animation(DS.select, value: selected)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -261,8 +327,20 @@ struct PlayerPopoverRow: View {
 
 struct PlayerSectionTitle: View {
     let text: String
+    /// `.psheet h3`: the sheet's own title (17 pt bold) rather than a group label (`.lbl`, 12 pt).
+    var heading = false
+    var trailing: String? = nil
     var body: some View {
-        Text(text).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6)).padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 2)
+        if heading {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(text).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                Spacer(minLength: 8)
+                if let trailing { Text(trailing).font(.system(size: 12)).foregroundStyle(.white.opacity(0.6)) }
+            }
+            .padding(.horizontal, 5).padding(.top, 7).padding(.bottom, 6)
+        } else {
+            Text(text).font(.system(size: 12)).foregroundStyle(.white.opacity(0.55)).padding(.horizontal, 5).padding(.top, 14).padding(.bottom, 8)
+        }
     }
 }
 
@@ -276,16 +354,12 @@ struct SpeedPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            if !landscape { PlayerSectionTitle(text: "播放速度") }
+            if !landscape { PlayerSectionTitle(text: "倍速", heading: true, trailing: "长按画面临时 2×") }
             ForEach((landscape ? Array(Self.portraitSteps.prefix(6)) : Self.portraitSteps).filter { $0 <= maxRate + 0.001 }, id: \.self) { r in
                 PlayerPopoverRow(title: Self.label(r), selected: abs(r - current) < 0.01, id: "player.rate.\(r)", rowHeight: landscape ? 37 : 44) { onPick(r) }
             }
-            if !landscape {
-                Text("长按画面可临时 2× 加速").font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
-                    .padding(.horizontal, 12).padding(.top, 4)
-            }
         }
-        .padding(7)
+        .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 8)
     }
 
     static func label(_ r: Double) -> String {
@@ -303,12 +377,11 @@ struct QualityPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            PlayerSectionTitle(text: streamsTitle)
+            PlayerSectionTitle(text: streamsTitle, heading: true)
             ForEach(streams) { s in
                 PlayerPopoverRow(title: s.quality ?? "自动", detail: Self.detail(s), selected: s == chosen, id: "player.stream") { onPick(s) }
             }
             if !sources.isEmpty {
-                Divider().overlay(.white.opacity(0.12)).padding(.horizontal, 12).padding(.vertical, 6)
                 PlayerSectionTitle(text: "播放源")
                 ForEach(sources.indices, id: \.self) { i in
                     let s = sources[i]
@@ -316,7 +389,7 @@ struct QualityPopover: View {
                 }
             }
         }
-        .padding(7)
+        .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 8)
     }
 
     static func detail(_ s: HGStream) -> String {
@@ -339,7 +412,7 @@ struct TrackPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            PlayerSectionTitle(text: title)
+            PlayerSectionTitle(text: title, heading: true)
             if options.isEmpty {
                 Text(emptyText).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).padding(.horizontal, 12).frame(minHeight: 44)
             } else {
@@ -349,7 +422,7 @@ struct TrackPopover: View {
                 }
             }
         }
-        .padding(7)
+        .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 8)
     }
 }
 
@@ -371,13 +444,13 @@ struct EpisodesPopover: View {
             if episodes.isEmpty {
                 Text("分集还在加载").font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).frame(minHeight: 44)
             } else if !listStyle {
-                HStack {
-                    Text("选集 · 共\(episodes.count)集").font(.system(size: 17, weight: .bold))
+                HStack(alignment: .firstTextBaseline) {
+                    Text("选集").font(.system(size: 17, weight: .bold))
                     Spacer()
-                    Text("更新至 \(episodes.last?.ep ?? episodes.count) 集").font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                    Text("共 \(episodes.count) 集 · 更新至 \(episodes.last?.ep ?? episodes.count) 集").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
                 }
                 if seasons.count > 1 {
-                    chips(seasons.map(\.title), selected: seasons.firstIndex { $0.id == currentSeason }, height: 34, font: 14, id: "player.season") { i in
+                    chips(seasons.map(\.title), selected: seasons.firstIndex { $0.id == currentSeason }, height: 32, font: 14, id: "player.season") { i in
                         onSeason(seasons[i].id)
                     }
                 }
@@ -388,17 +461,18 @@ struct EpisodesPopover: View {
                 }
                 let r = ranges.indices.contains(group) ? ranges[group] : EpisodeRange(0, max(0, episodes.count - 1))
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 10) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
                         ForEach(Array(r.start...min(r.end, episodes.count - 1)), id: \.self) { i in
                             let on = i == current
                             Button { onPick(i) } label: {
-                                Text("\(episodes[i].ep)").font(.system(size: 16, weight: on ? .semibold : .regular))
-                                    .frame(maxWidth: .infinity, minHeight: 40)
-                                    .background(on ? STVTheme.accent.opacity(0.2) : Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                                    .overlay { if on { RoundedRectangle(cornerRadius: 10).strokeBorder(STVTheme.accent, lineWidth: 1) } }
+                                Text("\(episodes[i].ep)").font(.system(size: 15, weight: .semibold).monospacedDigit())
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
+                                    .overlay(alignment: .topTrailing) { if on { Circle().fill(STVTheme.accent).frame(width: 5, height: 5).padding(6) } }
                                     .foregroundStyle(on ? STVTheme.accent : .white)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressScale())
                             .accessibilityIdentifier("player.ep.\(episodes[i].ep)")
                         }
                     }
@@ -423,7 +497,7 @@ struct EpisodesPopover: View {
             }
         }
         .foregroundStyle(.white)
-        .padding(listStyle ? 7 : 16)
+        .padding(listStyle ? 9 : 16)
         .onAppear { if let i = ranges.firstIndex(where: { current >= $0.start && current <= $0.end }) { group = i } }
     }
 
@@ -435,11 +509,11 @@ struct EpisodesPopover: View {
                         let on = i == selected
                         Button { onTap(i) } label: {
                             Text(titles[i]).font(.system(size: font, weight: on ? .semibold : .regular))
-                                .padding(.horizontal, 12).frame(height: height)
-                                .background(on ? Color(red: 0.933, green: 0.941, blue: 0.953) : Color.white.opacity(0.1), in: Capsule())
-                                .foregroundStyle(on ? .black : .white)
+                                .padding(.horizontal, height > 30 ? 14 : 12).frame(height: height)
+                                .background(on ? STVTheme.thumb : STVTheme.glass, in: Capsule())
+                                .foregroundStyle(on ? STVTheme.text : STVTheme.secondary)
                         }
-                        .buttonStyle(.plain).id(i)
+                        .buttonStyle(PressScale()).id(i)
                         .accessibilityIdentifier("\(id).\(i)")
                     }
                 }

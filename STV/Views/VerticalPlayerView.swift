@@ -152,7 +152,7 @@ struct PlayerScreen: View {
                     } else {
                         if locked {
                             if controlsVisible { lockOnly(full, ins: ins).transition(.opacity) }
-                        } else if controlsVisible, co.current != nil, !scrubbing, panel == nil {
+                        } else if controlsVisible, co.current != nil, co.readyIndex == co.current, !scrubbing, panel == nil {
                             PlayerCenterControls(co: co, onInteract: flashChrome)
                                 .position(x: landscape ? full.width / 2 : rect.midX, y: landscape ? full.height / 2 : rect.midY)
                                 .transition(.opacity)
@@ -229,8 +229,8 @@ struct PlayerScreen: View {
         } message: { Text(co.pipError ?? "") }
         .onAppear { OrientationGate.unlock() }
         .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
-        .onChange(of: co.current) { _, _ in scrubbing = false; flashChrome() }
-        .onChange(of: co.readyIndex) { _, index in if index != nil { flashChrome() } }
+        .onChange(of: co.current) { _, _ in scrubbing = false }
+        
         .onChange(of: landscape) { _, l in if !l { locked = false }; panel = nil }
         .sheet(item: $verifyTarget) { t in SiteVerifySheet(target: t) { if let c = co.current { co.activate(c) } } }
         .sheet(isPresented: $danmakuSheet, onDismiss: flashChrome) {
@@ -356,7 +356,7 @@ struct PlayerScreen: View {
     }
 
     private var controlsVisible: Bool {
-        !speedMode && (showChrome || co.readyIndex == nil || scrubbing || panel != nil || voiceOver)
+        !speedMode && (showChrome || scrubbing || panel != nil || voiceOver)
     }
 
     // MARK: Chrome
@@ -395,23 +395,24 @@ struct PlayerScreen: View {
             if let i = co.current, co.episodes.indices.contains(i) {
                 VStack(alignment: .leading, spacing: 0) {
                     Group {
-                        meta(i, skip: true).padding(.bottom, 10).opacity(scrubbing ? 0 : 1).modifier(ChromeFade(on: chrome, keepAccessible: true))
+                        meta(i, skip: true).padding(.bottom, 8).opacity(scrubbing ? 0 : 1).modifier(ChromeFade(on: chrome, keepAccessible: true))
                         Text(co.detail?.title ?? series.title)
-                            .font(.system(size: 23, weight: .bold)).lineLimit(1)
+                            .font(.system(size: 21, weight: .bold)).lineLimit(1)
                             .shadow(color: .black.opacity(chrome ? 0 : 0.7), radius: 3)
                             .accessibilityIdentifier("player.title")
-                            .padding(.bottom, 30)
+                            .padding(.bottom, 10)
                     }
                     .opacity(panel != nil ? 0.35 : 1)
                     Group {
-                        PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome).id(i)
+                        PlayerTimelineV3(co: co, scrubbing: $scrubbing, onInteract: flashChrome,
+                                         onFullscreen: { OrientationGate.enterLandscape(); flashChrome() }).id(i)
                             .opacity(panel != nil ? 0.35 : 1)
                             .shadow(color: .black.opacity(chrome ? 0 : 0.6), radius: 2)
                             .allowsHitTesting(interactive && co.readyIndex == i)
                     }
                 }
                 .padding(.horizontal, 20)
-                iconRow(i).padding(.horizontal, 5).padding(.top, 6)
+                actionRow(i).padding(.horizontal, 12).padding(.top, 10)
                     .padding(.bottom, max(0, ins.bottom - 6))
                     .opacity(dim)
                     .modifier(ChromeFade(on: chrome))
@@ -605,6 +606,38 @@ struct PlayerScreen: View {
         items.frame(maxWidth: landscape ? nil : .infinity)
     }
 
+    /// Portrait redesign: five labelled actions that show their current value; 音轨 + 字幕 share one entry.
+    private func actionRow(_ i: Int) -> some View {
+        let dmOK = series.source == .hongguo
+        let rate = SpeedPopover.label(co.playbackRate)
+        return HStack(spacing: 0) {
+            PlayerActionButton(id: "player.episodes", a11y: "选集", title: "选集", active: panel == .episodes, action: { toggle(.episodes) }) {
+                Image(systemName: "square.grid.2x2")
+            }
+            PlayerActionButton(id: "player.rate", a11y: "播放倍速 " + rate, title: "倍速",
+                               value: co.playbackRate == 1 ? "1.0×" : rate,
+                               active: panel == .rates, accent: co.playbackRate != 1, action: { toggle(.rates) }) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+            }
+            PlayerActionButton(id: "player.quality", a11y: "画质与播放源", title: "画质", value: qualityTag == "画质" ? nil : qualityTag,
+                               active: panel == .quality, action: { toggle(.quality) }) {
+                Image(systemName: "sparkles.tv")
+            }
+            PlayerActionButton(id: "player.danmaku", a11y: danmaku.enabled ? "关闭弹幕" : "开启弹幕", title: "弹幕",
+                               value: dmOK ? (danmaku.enabled ? "开" : "关") : nil,
+                               accent: dmOK && danmaku.enabled, dimmed: !dmOK, action: {
+                guard dmOK else { showOSD("当前片源不支持弹幕"); return }
+                danmaku.enabled.toggle(); flashChrome()
+            }) {
+                Image(systemName: "text.bubble")
+            }
+            PlayerActionButton(id: "player.audio", a11y: "音轨与字幕", title: "音轨字幕",
+                               active: panel == .audio || panel == .subtitles, action: { toggle(.audio) }) {
+                Image(systemName: "captions.bubble")
+            }
+        }
+    }
+
     @ViewBuilder private func slot<C: View>(@ViewBuilder _ c: () -> C) -> some View {
         if landscape { c() } else { c().frame(maxWidth: .infinity) }
     }
@@ -626,8 +659,8 @@ struct PlayerScreen: View {
         let width: CGFloat = {
             switch p {
             case .episodes: return landscape ? 380 : full.width - 24
-            case .rates: return landscape ? 230 : 220
-            default: return 270
+            case .rates: return landscape ? 230 : full.width - 24
+            default: return landscape ? 270 : full.width - 24
             }
         }()
         let maxH: CGFloat = landscape ? (p == .episodes ? 270 : full.height - 44 - 110)
@@ -636,7 +669,7 @@ struct PlayerScreen: View {
             .frame(width: width)
             .frame(maxHeight: maxH, alignment: .top)
             .fixedSize(horizontal: false, vertical: p != .episodes)
-            .playerGlass(20, strong: true)
+            .playerGlass(landscape ? 20 : 24, strong: true)
             .gesture(DragGesture(minimumDistance: 24).onEnded { v in if v.translation.height > 60 { closePanel() } })
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("player.popover.\(p.rawValue)")
@@ -647,7 +680,7 @@ struct PlayerScreen: View {
                 .frame(width: full.width, height: full.height)
         } else {
             VStack { Spacer(); HStack { body; Spacer(minLength: 0) } }
-                .padding(.horizontal, 12).padding(.bottom, max(0, ins.bottom - 6) + 44 + 12)
+                .padding(.horizontal, 12).padding(.bottom, max(0, ins.bottom - 6) + 62 + 8)
                 .frame(width: full.width, height: full.height)
         }
     }
@@ -665,8 +698,15 @@ struct PlayerScreen: View {
                 }
             }.scrollIndicators(.hidden)
         case .audio:
-            TrackPopover(title: "音轨", options: co.audioOptions, selected: co.audioSelected, allowsOff: false,
-                         emptyText: "当前视频只有一条音轨") { o in if let o { co.selectAudio(o) }; closePanel() }
+            VStack(alignment: .leading, spacing: 0) {
+                TrackPopover(title: "音轨", options: co.audioOptions, selected: co.audioSelected, allowsOff: false,
+                             emptyText: "当前视频只有一条音轨") { o in if let o { co.selectAudio(o) }; closePanel() }
+                if !landscape {
+                    Rectangle().fill(.white.opacity(0.10)).frame(height: 1).padding(.horizontal, 14)
+                    TrackPopover(title: "字幕", options: co.subtitleOptions, selected: co.subtitleSelected, allowsOff: true,
+                                 emptyText: "当前视频没有可选字幕") { o in co.selectSubtitle(o); closePanel() }
+                }
+            }
         case .subtitles:
             TrackPopover(title: "字幕", options: co.subtitleOptions, selected: co.subtitleSelected, allowsOff: true,
                          emptyText: "当前视频没有可选字幕") { o in co.selectSubtitle(o); closePanel() }

@@ -50,25 +50,42 @@ struct DramaDetailView: View {
     private let library = LibraryStore.shared
 
 
+    @State private var scrollY: CGFloat = 0
+    @State private var actionsOut = false
+    @State private var introOpen = false
+    @State private var introClamped = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var pinned: Bool { scrollY > 236 }
+    private var title: String { detail?.title ?? series.title }
+
+    /// ui-redesign 12 / 13: blurred poster-colour hero with a poster card, stats card, actions, tags, folding intro,
+    /// 选集 before 系列 / 演员; a pinned nav once the hero scrolls away and a floating play bar once the main button does.
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
                 hero
                 if let d = detail { detailBody(d) }
-                else if let error { ErrorStateView(error: error) { Task { await load() } } }
+                else if let error { ErrorStateView(error: error) { Task { await load() } }.padding(.top, 24) }
                 else {
                     VStack(spacing: 10) {
-                        ForEach(0..<4, id: \.self) { _ in ShimmerBlock().frame(height: 16) }
-                    }.padding(.horizontal, 20)
+                        ShimmerBlock().frame(height: 66).clipShape(RoundedRectangle(cornerRadius: 16))
+                        ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 16) }
+                    }.padding(.horizontal, 20).padding(.top, 18)
                 }
             }
+            .padding(.bottom, 110)
         }
+        .coordinateSpace(.named("detail"))
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, y in scrollY = y }
+        .scrollIndicators(.hidden)
         .defaultScrollAnchor(DebugScroll.anchor)
         .accessibilityIdentifier("screen.detail")
         .ignoresSafeArea(edges: .top)
         .background(STVTheme.bg.ignoresSafeArea())
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .top) { navBar }
+        .overlay(alignment: .bottom) { playBar }
+        .toolbar(.hidden, for: .navigationBar)
         .zoomDestination(series.id, ns)
         .task {
             if let seededDetail { detail = seededDetail; selectResumeGroup() }
@@ -83,131 +100,269 @@ struct DramaDetailView: View {
                 seasons = await SeasonStore.seasons(for: d, series: series)
             }
         }
-
     }
 
-    private var hero: some View {
-        ZStack(alignment: .bottom) {
-            CoverView(url: DetailCover.pick(detail: detail?.cover ?? "", list: series.cover), corner: 0, fallback: series.cover, a11yID: "detail.poster")
-                .frame(height: 440)
-                // White title / meta sit on the poster in both schemes: a dark scrim under them, then a short fade
-                // into the page background so the hero blends into the light or dark page below.
-                .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.25), location: 0), .init(color: .clear, location: 0.3),
-                           .init(color: .black.opacity(0.62), location: 0.9), .init(color: STVTheme.bg, location: 1)],
-                          startPoint: .top, endPoint: .bottom))
-            VStack(spacing: 8) {
-                Text(detail?.title ?? series.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white).multilineTextAlignment(.center).lineLimit(2)
-                    .contextMenu {
-                        Button("复制剧名", systemImage: "doc.on.doc") { UIPasteboard.general.string = detail?.title ?? series.title }
-                    }
-                Text([series.source.label,
-                      detail.map { $0.episodeLabel.isEmpty ? "共\(max($0.totalEps, $0.episodes.count))集" : $0.episodeLabel },
-                      detail.flatMap { $0.favoriteCount > 0 ? Fmt.count($0.favoriteCount) + "收藏" : nil },
-                      detail?.author].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.75))
-                if let d = detail, d.rating > 0 || !d.hotText.isEmpty { SocialStats(detail: d) }
-            }.padding(.horizontal, 20).padding(.bottom, 44)
+    // MARK: nav + play bar
+
+    private var navBar: some View {
+        HStack(spacing: 0) {
+            DSBackButton(tone: pinned ? .glass : .overlay) { dismiss() }.frame(width: 96, alignment: .leading)
+            Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .opacity(pinned ? 1 : 0).offset(y: pinned ? 0 : 6)
+            Color.clear.frame(width: 96, height: 1)
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 16).padding(.bottom, 6)
+        .dsPinned(pinned)
+        .animation(.easeOut(duration: 0.2), value: pinned)
+    }
+
+    @ViewBuilder private var playBar: some View {
+        if let d = detail, !d.episodes.isEmpty, actionsOut {
+            HStack(spacing: 10) {
+                NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
+                    PillButtonLabel(title: playTitle, icon: "play.fill", tone: .white, expand: true)
+                }
+                .buttonStyle(PressScale(scale: 0.98))
+                .accessibilityIdentifier("detail.playbar")
+                heart(48)
+            }
+            .padding(8)
+            .dsBar(32)
+            .padding(.horizontal, 16).padding(.bottom, -8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
+    private var playTitle: String {
+        guard let r = library.progress(for: series) else { return "开始播放" }
+        return series.source.isLongVideo ? "继续 " + Fmt.clock(Int(r.seconds)) : "继续第 \(r.episodeNumber) 集"
+    }
+
+    private func heart(_ size: CGFloat) -> some View {
+        let on = library.isFavorite(series)
+        return Button { withAnimation(DS.press) { library.toggleFavorite(series) } } label: {
+            Image(systemName: on ? "heart.fill" : "heart")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: size, height: size)
+                .background(Circle().fill(STVTheme.glass))
+                .overlay(Circle().strokeBorder(STVTheme.hairline, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .accessibilityLabel(on ? "取消收藏" : "收藏")
+        .accessibilityIdentifier("detail.favorite")
+    }
+
+    // MARK: hero
+
+    private var cover: String { DetailCover.pick(detail: detail?.cover ?? "", list: series.cover) }
+
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            // `.bd`: the poster itself, blurred 30 pt and saturated, bleeding past the hero edges.
+            CoverView(url: cover, corner: 0, fallback: series.cover)
+                .frame(maxWidth: .infinity).frame(height: 400)
+                .blur(radius: 30, opaque: true).saturation(1.15)
+                .frame(height: 300).clipped()
+                .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.30), location: 0), .init(color: .black.opacity(0.08), location: 0.34),
+                                               .init(color: STVTheme.bg.opacity(0.74), location: 0.76), .init(color: STVTheme.bg, location: 1)],
+                                        startPoint: .top, endPoint: .bottom))
+                .allowsHitTesting(false)
+            HStack(alignment: .bottom, spacing: 16) {
+                CoverView(url: cover, corner: 12, fallback: series.cover, a11yID: "detail.poster")
+                    .frame(width: 116, height: 155)
+                    .overlay(alignment: .bottom) {
+                        if let e = DS.episodes(series) ?? detail.map({ "全 \(max($0.totalEps, $0.episodes.count)) 集" }) {
+                            Text(e).font(.system(size: 10)).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 8)
+                                .shadow(color: .black.opacity(0.5), radius: 2)
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.4), radius: 15, y: 14)
+                VStack(alignment: .leading, spacing: 0) {
+                    DSStatus(text: series.source.label, tone: .accent)
+                    Text(title).font(.system(size: 23, weight: .heavy)).foregroundStyle(STVTheme.text).lineLimit(2)
+                        .padding(.top, 8)
+                        .contextMenu { Button("复制剧名", systemImage: "doc.on.doc") { UIPasteboard.general.string = title } }
+                    Text(heroMeta).font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 6)
+                }
+                .padding(.bottom, 2)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20).padding(.bottom, 2)
+        }
+        .frame(height: 300)
+    }
+
+    private var heroMeta: String {
+        let eps = detail.map { $0.episodeLabel.isEmpty ? "全 \(max($0.totalEps, $0.episodes.count)) 集" : DS.spaced($0.episodeLabel) }
+        return [eps, detail?.author].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    // MARK: body
+
     @ViewBuilder private func detailBody(_ d: HGSeriesDetail) -> some View {
-        let resume = library.progress(for: series)
-        let ranges = EpisodeGroups.ranges(total: d.episodes.count)
-        let g = ranges.indices.contains(group) ? group : 0
-        let range = ranges.isEmpty ? EpisodeRange(0, -1) : ranges[g]
+        stats(d).padding(.top, 18)
 
         HStack(spacing: 12) {
-            NavigationLink(value: Route.play(series, resume?.episodeIndex)) {
-                Label(resume.map { series.source.isLongVideo ? "继续 " + Fmt.clock(Int($0.seconds)) : "继续第\($0.episodeNumber)集" } ?? "开始播放", systemImage: "play.fill")
-                    .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(STVTheme.text, in: Capsule()).foregroundStyle(STVTheme.bg)
-            }.disabled(d.episodes.isEmpty)
-            Button { withAnimation(.spring) { library.toggleFavorite(series) } } label: {
-                Image(systemName: library.isFavorite(series) ? "heart.fill" : "heart")
-                    .font(.title3).frame(width: 50, height: 50)
-                    .foregroundStyle(library.isFavorite(series) ? STVTheme.accent : STVTheme.text)
-                    .background(STVTheme.elevated, in: Circle())
-                    .contentTransition(.symbolEffect(.replace))
+            NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
+                PillButtonLabel(title: playTitle, icon: "play.fill", tone: .white, height: 50, expand: true)
             }
-        }.padding(.horizontal, 20)
+            .buttonStyle(PressScale(scale: 0.98))
+            .disabled(d.episodes.isEmpty)
+            .accessibilityIdentifier("detail.play")
+            heart(50)
+        }
+        .padding(.horizontal, 20).padding(.top, 16)
+        .onGeometryChange(for: Bool.self) { $0.frame(in: .named("detail")).maxY < 60 } action: { out in
+            withAnimation(DS.panel) { actionsOut = out }
+        }
 
         if !d.tags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(d.tags, id: \.self) { t in
-                        Text(t).font(.caption.weight(.medium)).foregroundStyle(STVTheme.secondary)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(STVTheme.glass, in: Capsule())
+                        Text(t).font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
+                            .padding(.horizontal, 10).frame(height: 26)
+                            .background(Capsule().fill(STVTheme.glass))
                     }
                 }.padding(.horizontal, 20)
             }
+            .padding(.top, 16)
         }
         if d.cast.isEmpty && !d.actors.isEmpty {
             Text("主演：" + d.actors.joined(separator: " / "))
-                .font(.caption).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20)
+                .font(.system(size: 12)).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20).padding(.top, 12)
         }
-        if !d.desc.isEmpty {
-            Text(d.desc).font(.subheadline).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20)
-                .textSelection(.enabled)
+        if !d.desc.isEmpty { intro(d.desc).padding(.top, 14) }
+
+        if series.source.isLongVideo {
+            VStack(alignment: .leading, spacing: 0) { sourcesSection }.padding(.top, 22)
+        } else {
+            VStack(alignment: .leading, spacing: 0) { episodes(d) }.padding(.top, 22)
         }
 
         let shelf = d.relatedSeries.count > 1 ? d.relatedSeries : seasons
-        if shelf.count > 1 {
-            relatedShelf(shelf, currentId: d.seriesId)
+        if shelf.count > 1 { relatedShelf(shelf, currentId: d.seriesId).padding(.top, 26) }
+        if !d.cast.isEmpty { castRow(d.cast).padding(.top, 24) }
+    }
+
+    private func stats(_ d: HGSeriesDetail) -> some View {
+        var cells: [(icon: String?, value: String, label: String)] = []
+        if d.rating > 0 { cells.append(("star.fill", String(format: "%.1f", d.rating), "观众评分" + (d.ratingCount.isEmpty ? "" : " · " + DS.spaced(d.ratingCount) + "人"))) }
+        if d.favoriteCount > 0 { cells.append((nil, DS.count(d.favoriteCount), "收藏")) }
+        if !d.hotText.isEmpty { cells.append(("flame.fill", DS.spaced(d.hotText), "全网热度")) }
+        if cells.isEmpty { cells.append((nil, "\(max(d.totalEps, d.episodes.count))", series.source.isLongVideo ? "播放源" : "集")) }
+        return HStack(spacing: 0) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { i, c in
+                VStack(spacing: 0) {
+                    HStack(spacing: 4) {
+                        if let icon = c.icon { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(STVTheme.accentWarm) }
+                        Text(c.value).font(.system(size: 17, weight: .bold)).foregroundStyle(STVTheme.text).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .frame(height: 22)
+                    Text(c.label).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) { if i > 0 { STVTheme.hairline.frame(width: 1) } }
+            }
         }
+        .padding(.vertical, 11)
+        .dsCard(16)
+        .padding(.horizontal, 20)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("detail.stats")
+    }
 
-        if !d.cast.isEmpty {
-            CastShelf(cast: d.cast)
-        }
+    private func intro(_ text: String) -> some View {
+        Text(text).font(.system(size: 14)).foregroundStyle(STVTheme.secondary).lineSpacing(5)
+            .lineLimit(introOpen ? nil : 3)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                // Measure the full height once to know whether 展开 is needed.
+                Text(text).font(.system(size: 14)).lineSpacing(5).fixedSize(horizontal: false, vertical: true).hidden()
+                    .onGeometryChange(for: Bool.self) { $0.size.height > 70 } action: { introClamped = $0 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if introClamped && !introOpen {
+                    Text("展开").font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                        .padding(.leading, 36)
+                        .background(LinearGradient(stops: [.init(color: STVTheme.bg.opacity(0), location: 0), .init(color: STVTheme.bg, location: 0.42)],
+                                                   startPoint: .leading, endPoint: .trailing))
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { if introClamped { withAnimation(DS.panel) { introOpen.toggle() } } }
+            .padding(.horizontal, 20)
+            .accessibilityIdentifier("detail.intro")
+    }
 
-        if series.source.isLongVideo {
-            sourcesSection
-        } else {
-        SectionHeader(title: "选集").padding(.top, 4)
-
+    @ViewBuilder private func episodes(_ d: HGSeriesDetail) -> some View {
+        let resume = library.progress(for: series)
+        let ranges = EpisodeGroups.ranges(total: d.episodes.count)
+        let g = ranges.indices.contains(group) ? group : 0
+        let range = ranges.isEmpty ? EpisodeRange(0, -1) : ranges[g]
+        DSSectionHeader(title: "选集", note: "共 \(max(d.totalEps, d.episodes.count)) 集", inset: 20)
         if ranges.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(ranges.indices, id: \.self) { i in
-                        let on = i == g
-                        Button {
-                            withAnimation(.snappy) { group = i }
-                        } label: {
-                            Text(EpisodeGroups.label(ranges[i], episodes: d.episodes))
-                                .font(.subheadline.weight(on ? .semibold : .regular))
-                                .foregroundStyle(on ? STVTheme.text : STVTheme.secondary)
-                                .padding(.horizontal, 14).padding(.vertical, 7)
-                                .background(on ? STVTheme.text.opacity(0.14) : STVTheme.text.opacity(0.06), in: Capsule())
-                        }.buttonStyle(.plain)
+                        Button { withAnimation(DS.select) { group = i } } label: { Text(EpisodeGroups.label(ranges[i], episodes: d.episodes)) }
+                            .buttonStyle(ToneChipStyle(on: i == g, neutral: true, small: true))
+                            .accessibilityIdentifier("detail.range.\(i)")
                     }
-                }.padding(.horizontal, 16)
+                }.padding(.horizontal, 20)
             }
+            .padding(.top, 12)
         }
-
         if range.end >= range.start {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
                 ForEach(range.start...range.end, id: \.self) { i in
-                    let ep = d.episodes[i]
+                    let on = resume?.episodeIndex == i
                     NavigationLink(value: Route.play(series, i)) {
-                        Text("\(ep.ep)")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 42)
-                            .background(resume?.episodeIndex == i ? STVTheme.accent.opacity(0.17) : STVTheme.glass,
-                                        in: RoundedRectangle(cornerRadius: 10))
-                            .foregroundStyle(resume?.episodeIndex == i ? STVTheme.accent : STVTheme.text)
-                    }.buttonStyle(.plain)
+                        Text("\(d.episodes[i].ep)")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
+                            .overlay(alignment: .topTrailing) { if on { Circle().fill(STVTheme.accent).frame(width: 5, height: 5).padding(6) } }
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(PressScale(scale: 0.94))
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 30)
+            .padding(.horizontal, 20).padding(.top, 12)
             .id(g)
+            .transition(.opacity)
         }
+    }
+
+    private func castRow(_ cast: [HGCelebrity]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DSSectionHeader(title: "演员", inset: 20)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(cast) { c in
+                        let cell = VStack(spacing: 0) {
+                            ActorAvatar(url: c.avatar, size: 56)
+                            Text(c.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 6)
+                            if !c.role.isEmpty { Text(c.role).font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1) }
+                        }.frame(width: 64)
+                        if c.id.isEmpty { cell } else { NavigationLink(value: Route.actor(c)) { cell }.buttonStyle(PressScale()) }
+                    }
+                }.padding(.horizontal, 20)
+            }
         }
     }
 
     /// 播放源 — same look as the 选集 buttons, 3 columns, small status line under the name.
     @ViewBuilder private var sourcesSection: some View {
-        SectionHeader(title: series.source.streamSectionTitle).padding(.top, 4)
+        DSSectionHeader(title: series.source.streamSectionTitle, inset: 20).padding(.bottom, 12)
         if sources.isEmpty {
             if let sourcesError {
                 Text(sourcesError).font(.caption).foregroundStyle(STVTheme.secondary).padding(.horizontal, 20)
@@ -233,7 +388,8 @@ struct DramaDetailView: View {
                                 .foregroundStyle(on ? STVTheme.accent.opacity(0.8) : STVTheme.secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(on ? STVTheme.accent.opacity(0.17) : STVTheme.glass, in: RoundedRectangle(cornerRadius: 10))
+                        .background(on ? STVTheme.accentSoft : STVTheme.glass, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay { if on { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(STVTheme.accentLine, lineWidth: 1) } }
                         .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
                     }
                     .buttonStyle(.plain)
@@ -242,7 +398,6 @@ struct DramaDetailView: View {
             }
             .padding(.horizontal, 20)
         }
-        Spacer(minLength: 30)
     }
 
     private func retrySources() {
@@ -262,71 +417,54 @@ struct DramaDetailView: View {
         } catch { sourcesError = error.localizedDescription; sourcesVerify = error.verifyTarget }
     }
 
-    /// Apple TV+ style horizontal franchise shelf.
+    /// `系列` shelf: 104 pt posters, the current season ringed in accent with a 当前 badge.
     @ViewBuilder private func relatedShelf(_ items: [HGSeries], currentId: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "系列 · 共\(items.count)季", trailing: AnyView(
+        VStack(alignment: .leading, spacing: 12) {
+            DSSectionHeader(title: "系列", note: "共 \(items.count) 季", inset: 20) {
                 NavigationLink(value: Route.searchFor(SeasonParser.parse(detail?.title ?? series.title).base)) {
-                    Label("搜全系列", systemImage: "magnifyingglass").font(.subheadline).foregroundStyle(STVTheme.secondary)
-                }))
+                    MoreLabel(title: "搜全系列", icon: "magnifyingglass")
+                }
+                .accessibilityIdentifier("detail.series.search")
+            }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(items) { s in
                         let on = s.seriesId == currentId
-                        Group {
-                            if on {
-                                relatedPoster(s, current: true, label: SeasonStore.label(s, in: items))
-                            } else {
-                                NavigationLink(value: Route.series(s)) {
-                                    relatedPoster(s, current: false, label: SeasonStore.label(s, in: items))
-                                }
-                                .buttonStyle(.plain)
-                            }
+                        if on { relatedPoster(s, current: true, label: SeasonStore.label(s, in: items)) }
+                        else {
+                            NavigationLink(value: Route.series(s)) { relatedPoster(s, current: false, label: SeasonStore.label(s, in: items)) }
+                                .buttonStyle(PressScale(scale: 0.97))
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20).padding(.top, 4)
             }
         }
-        .padding(.top, 4)
     }
 
     private func relatedPoster(_ s: HGSeries, current: Bool, label: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            CoverView(url: s.cover, corner: 10)
+        VStack(alignment: .leading, spacing: 0) {
+            CoverView(url: s.cover, corner: 12)
                 .frame(width: 104, height: 139)
                 .zoomSource(s.id, ns)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(current ? STVTheme.accent : STVTheme.text.opacity(0.12), lineWidth: current ? 2.5 : 0.8)
-                }
                 .overlay(alignment: .topLeading) {
-                    if current || label != nil {
-                        Text(current ? (label.map { $0 + " · 当前" } ?? "当前") : label!)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(STVTheme.bg.opacity(0.85), in: Capsule())
+                    if current {
+                        Text("当前").font(.system(size: 10.5, weight: .bold)).foregroundStyle(STVTheme.onAccent)
+                            .padding(.horizontal, 6).frame(height: 18)
+                            .background(STVTheme.accent, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .padding(6)
                     }
                 }
-                .overlay(alignment: .bottomTrailing) {
-                    if s.episodeCount > 0 {
-                        Text("\(s.episodeCount)集")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .padding(6)
+                .background {
+                    if current {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(STVTheme.accent, lineWidth: 2).padding(-4)
                     }
                 }
-            Text(s.title)
-                .font(.caption.weight(current ? .semibold : .regular))
-                .foregroundStyle(current ? STVTheme.text : STVTheme.secondary)
-                .lineLimit(2)
-                .frame(width: 104, alignment: .leading)
+            Text(s.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1).padding(.top, 8)
+            Text([label, s.episodeCount > 0 ? "\(s.episodeCount) 集" : nil].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 2)
         }
-        .opacity(current ? 1 : 0.92)
+        .frame(width: 104, alignment: .leading)
     }
 
     private func selectResumeGroup() {
