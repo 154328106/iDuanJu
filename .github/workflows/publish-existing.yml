@@ -18,6 +18,10 @@ on:
       notes_file:
         description: Optional committed release notes under docs/releases/
         required: false
+      replace_draft:
+        description: Replace assets and tags only for existing unpublished draft releases
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -34,6 +38,7 @@ jobs:
       SUFFIX: ${{ inputs.suffix }}
       RELEASE_LABEL: ${{ inputs.release_label }}
       NOTES_FILE: ${{ inputs.notes_file }}
+      REPLACE_DRAFT: ${{ inputs.replace_draft }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,6 +109,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Validate both destinations before changing either. Public releases are never overwritten.
+          for tag in "$ANDROID_TAG" "$IOS_TAG"; do
+            if gh release view "$tag" --json isDraft > existing.json 2>/dev/null; then
+              [ "$REPLACE_DRAFT" = true ]
+              python3 -c 'import json; assert json.load(open("existing.json"))["isDraft"], "Refusing to replace a public release"'
+            else
+              [ "$REPLACE_DRAFT" != true ] || { echo "Expected draft $tag is missing" >&2; exit 1; }
+            fi
+          done
           for platform in android ios; do
             if [ "$platform" = android ]; then
               tag="$ANDROID_TAG"
@@ -113,10 +127,6 @@ jobs:
               tag="$IOS_TAG"
               title="i短剧 iOS ${IOS_VERSION}b${IOS_BUILD} · $RELEASE_LABEL"
               install="包内版本为 $IOS_VERSION build $IOS_BUILD，直接发布已验证产物。IPA 未签名，最低 iOS 18，请自行重签侧载。"
-            fi
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "Release $tag already exists; refusing to overwrite" >&2
-              exit 1
             fi
             cat > "$platform-notes.md" <<EOF
           $title
@@ -141,6 +151,27 @@ jobs:
               cp -- "$NOTES_FILE" "$platform-notes.md"
               printf '\n%s\n\n构建源码：%s\n构建：https://github.com/%s/actions/runs/%s\n' "$install" "$BUILD_SHA" "$GH_REPO" "$BUILD_RUN" >> "$platform-notes.md"
             fi
-            gh release create "$tag" dist/"$platform"/* --target "$BUILD_SHA" --title "$title" --notes-file "$platform-notes.md" --prerelease --draft
+            if [ "$REPLACE_DRAFT" = true ]; then
+              gh release upload "$tag" dist/"$platform"/* --clobber
+              gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$BUILD_SHA" -F force=true >/dev/null
+              gh release edit "$tag" --target "$BUILD_SHA" --title "$title" --notes-file "$platform-notes.md" --prerelease --draft=true
+            else
+              gh release create "$tag" dist/"$platform"/* --target "$BUILD_SHA" --title "$title" --notes-file "$platform-notes.md" --prerelease --draft
+            fi
+            gh release view "$tag" --json assets > "$platform-assets.json"
+            PLATFORM="$platform" python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          platform = os.environ['PLATFORM']
+          assets = {a['name']: a for a in json.load(open(platform + '-assets.json'))['assets']}
+          for file in pathlib.Path('dist', platform).iterdir():
+              asset = assets[file.name]
+              assert asset['size'] == file.stat().st_size
+              digest = asset.get('digest')
+              if digest:
+                  assert digest == 'sha256:' + hashlib.sha256(file.read_bytes()).hexdigest()
+          PY
+          done
+          # Both platforms are staged and verified before making either visible.
+          for tag in "$ANDROID_TAG" "$IOS_TAG"; do
             gh release edit "$tag" --draft=false --prerelease
           done
