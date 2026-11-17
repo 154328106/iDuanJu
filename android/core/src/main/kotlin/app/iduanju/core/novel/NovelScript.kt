@@ -39,6 +39,8 @@ internal class NovelScript(private val source: NovelSource, private val base: St
             put(scope, value)
         }
         private val prelude by lazy { NovelScript::class.java.getResourceAsStream("/novel-prelude.js")!!.bufferedReader().use { it.readText() } }
+        // JSONObject.valueToString exists on desktop org.json but not Android's framework class.
+        private fun jsonValue(value: Any?): String = JSONArray().put(value ?: JSONObject.NULL).toString().let { it.substring(1,it.length-1) }
     }
     private val deadline = System.nanoTime() + 25_000_000_000L
     private val factory = object : ContextFactory() {
@@ -61,7 +63,7 @@ internal class NovelScript(private val source: NovelSource, private val base: St
                 val a = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
                 try {
                     val value = invoke(method, a)
-                    return JSONObject.valueToString(value ?: JSONObject.NULL)
+                    return jsonValue(value)
                 } catch (e: Exception) {
                     throw Context.reportRuntimeError(e.message ?: "书源宿主调用失败")
                 }
@@ -69,7 +71,7 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         }
         ScriptableObject.putProperty(scope, "__host", host)
         cx.evaluateString(scope, "var globalThis=this;\n" + compatible(prelude), "novel-host", 1, null)
-        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${JSONObject.valueToString(result ?: JSONObject.NULL)};"
+        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${jsonValue(result)};"
         cx.evaluateString(scope, globals, "novel-context", 1, null)
         val lib = source.json.optString("jsLib")
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)

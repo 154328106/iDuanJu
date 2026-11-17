@@ -65,8 +65,9 @@ class NovelThemeTest {
         ui.onAllNodesWithText("雾港",substring=false).onLast().performClick()
         ui.waitUntil(10000){ui.onAllNodesWithText("缓存 / 下载").fetchSemanticsNodes().isNotEmpty()}
         ui.onNodeWithText("缓存 / 下载").performClick()
-        ui.onNodeWithText("缓存与下载").assertIsDisplayed()
+        ui.waitUntil(5000){ui.onAllNodesWithText("缓存与下载").fetchSemanticsNodes().isNotEmpty()}
         screenshot("$style-download")
+        ui.onNodeWithText("缓存与下载").assertIsDisplayed()
         ui.onNodeWithText("缓存后 50 章").performClick()
         ui.waitUntil(15000){ui.onAllNodesWithText("已缓存 50 / 200 章").fetchSemanticsNodes().isNotEmpty()}
     }

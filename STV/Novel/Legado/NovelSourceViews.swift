@@ -27,7 +27,8 @@ struct NovelSourcesView: View {
                         .onDelete { idx in store.remove(Set(idx.map { store.sources[$0].id })) }
                 } footer: {
                     if !store.sources.isEmpty {
-                        Text("共 \(store.sources.count) 个，启用 \(store.enabled.count) 个。需要登录的书源（带 👤 图标）长按或右滑选「登录」。支持「阅读」3.x 的文本书源（JSoup / CSS / XPath / JSONPath / 正则 / JS 规则）；需要网页渲染、登录的书源和有声书源暂不支持。")
+                        Text("共 \(store.sources.count) 个，启用 \(store.enabled.count) 个。长按书源可配置登录；左滑可删除。仅支持部分 Legado 文本规则，来源不可用时可换源重试。")
+                            .font(.caption).foregroundStyle(STVTheme.secondary)
                     }
                 }
             }

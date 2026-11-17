@@ -11,7 +11,6 @@ enum NovelStyle {
 private struct NovelScreenStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .foregroundStyle(STVTheme.text)
             .tint(STVTheme.accent)
             .scrollContentBackground(.hidden)
             .background(STVTheme.bg.ignoresSafeArea())
