@@ -9,12 +9,32 @@ import java.nio.file.StandardCopyOption
 
 /** Source + book + chapter URL keys survive TOC reordering without mixing books or sources. */
 class NovelCache(private val root: File) {
-    data class Saved(val source: String, val book: NovelHit, val chapters: List<NovelChapter>)
-    private fun hash(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+    data class Saved(val source: String, val book: NovelHit, val chapters: List<NovelChapter>, val details: NovelBookDetails? = null)
+    // Fixed stripes bound memory while sharing foreground/download/speculative fetches.
+    private val chapterLocks = Array(64) { java.util.concurrent.locks.ReentrantLock() }
+    fun load(source: String, book: String, url: String, checkActive: () -> Unit = {}, fetch: () -> String): String {
+        val lock = chapterLocks[((source + "\n" + book + "\n" + url).hashCode() and Int.MAX_VALUE) % chapterLocks.size]
+        checkActive()
+        lock.lock()
+        try {
+            checkActive()
+            return read(source, book, url) ?: fetch().also { checkActive(); save(source, book, url, it) }
+        } finally { lock.unlock() }
+    }
+    private fun hash(value: String): String {
+        val bytes=MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+        val digits="0123456789abcdef"
+        return String(CharArray(bytes.size*2){i->val b=bytes[i/2].toInt() and 255;digits[if(i%2==0)b ushr 4 else b and 15]})
+    }
     private fun dir(source: String, book: String) = File(root, hash(source + "\n" + book))
     private fun chapter(source: String, book: String, url: String) = File(dir(source,book), hash(url) + ".txt")
     fun read(source: String, book: String, url: String): String? = chapter(source,book,url).takeIf { it.isFile && it.length() > 0 }?.readText()
-    fun count(source: String, book: String, toc: List<NovelChapter>) = toc.count { chapter(source,book,it.url).let { f -> f.isFile && f.length() > 0 } }
+    fun count(source: String, book: String, toc: List<NovelChapter>): Int {
+        // One directory scan, not 1694 repeated book hashes and filesystem stats per page turn.
+        val files=dir(source,book).listFiles().orEmpty().filter{it.isFile && it.name.endsWith(".txt") && it.length()>0}.map{it.name}.toHashSet()
+        if(files.isEmpty())return 0
+        return toc.count{hash(it.url)+".txt" in files}
+    }
     private fun atomic(file: File, text: String) {
         file.parentFile!!.mkdirs()
         val tmp = File.createTempFile("chapter-", ".part", file.parentFile)
@@ -24,15 +44,20 @@ class NovelCache(private val root: File) {
         require(text.isNotBlank()) { "正文为空，未写入缓存" }
         atomic(chapter(source,book,url),text)
     }
-    @Synchronized fun saveBook(source: String, book: NovelHit, chapters: List<NovelChapter>) {
+    @Synchronized fun saveBook(source: String, book: NovelHit, chapters: List<NovelChapter>, details: NovelBookDetails? = null) {
         val json = JSONObject().put("source",source).put("name",book.name).put("author",book.author).put("url",book.url).put("cover",book.cover)
             .put("chapters",JSONArray(chapters.map { JSONObject().put("title",it.title).put("url",it.url) }))
-        atomic(File(dir(source,book.url),"book.json"),json.toString())
+        val file=File(dir(source,book.url),"book.json")
+        val info=details?.let{JSONObject().put("name",it.name).put("author",it.author).put("intro",it.intro).put("cover",it.cover).put("kind",it.kind).put("latest",it.latest)}
+            ?: runCatching{JSONObject(file.readText()).optJSONObject("info")}.getOrNull()
+        if(info!=null)json.put("info",info)
+        atomic(file,json.toString())
     }
     fun books(): List<Saved> = root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { directory ->
         runCatching { val j=JSONObject(File(directory,"book.json").readText());val a=j.getJSONArray("chapters")
-            Saved(j.getString("source"),NovelHit(j.getString("name"),j.optString("author"),j.getString("url"),j.optString("cover")),
-                (0 until a.length()).map { a.getJSONObject(it).let { c -> NovelChapter(c.getString("title"),c.getString("url")) } })
+            val toc=(0 until a.length()).map { a.getJSONObject(it).let { c -> NovelChapter(c.getString("title"),c.getString("url")) } }
+            val info=j.optJSONObject("info")?.let{NovelBookDetails(it.optString("name"),it.optString("author"),it.optString("intro"),it.optString("cover"),it.optString("kind"),it.optString("latest"),toc)}
+            Saved(j.getString("source"),NovelHit(j.getString("name"),j.optString("author"),j.getString("url"),j.optString("cover")),toc,info)
         }.getOrNull()
     }
 }

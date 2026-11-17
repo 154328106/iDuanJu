@@ -77,10 +77,10 @@ class NovelThemeTest {
         ui.waitUntil(10000){ui.onAllNodesWithText("雾港",substring=false).fetchSemanticsNodes().isNotEmpty()}
         screenshot("$style-05-search-fixture")
         ui.onAllNodesWithText("雾港",substring=false).onLast().performClick()
-        ui.waitUntil(10000){ui.onAllNodesWithText("缓存 / 下载").fetchSemanticsNodes().isNotEmpty()}
-        ui.waitUntil(10000){runCatching{ui.onNodeWithText("缓存 / 下载").assertIsEnabled()}.isSuccess}
+        ui.waitUntil(10000){ui.onAllNodesWithTag("novel.detail.download").fetchSemanticsNodes().isNotEmpty()}
+        ui.waitUntil(10000){runCatching{ui.onNodeWithTag("novel.detail.download").assertIsEnabled()}.isSuccess}
         screenshot("$style-detail")
-        ui.onNodeWithText("缓存 / 下载").performClick()
+        ui.onNodeWithTag("novel.detail.download").performClick()
         try {ui.waitUntil(5000){ui.onAllNodesWithText("缓存与下载").fetchSemanticsNodes().isNotEmpty()}}
         catch(e:Exception){screenshot("$style-download-failed");ui.onRoot().printToLog("NovelUI");throw e}
         screenshot("$style-download")

@@ -511,12 +511,14 @@ object NovelSources {
         }.distinctBy { it.url }
     }
 
-    fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = NovelScript.withBook(bookURL) {
+    fun details(source: NovelSource, bookURL: String): NovelBookDetails = NovelScript.withBook(bookURL) {
         var detail:Any = document(page(bookURL, source).text)
         val info=source.rules("ruleBookInfo")
         if(info.optString("init").isNotBlank()) detail=nodes(detail,info.getString("init"),source,bookURL).firstOrNull() ?: detail
         // Book-info name rules often set variables required by TOC/content scripts.
-        if(info.optString("name").isNotBlank())ruleValue(detail,info.getString("name"),source,bookURL)
+        fun v(key: String) = runCatching { ruleValue(detail, info.optString(key), source, bookURL) }.getOrDefault("")
+        val name = stripInvisible(v("name")); val author = v("author").replace(Regex("^作者[：:]\\s*"), "")
+        val intro = v("intro"); val cover = firstLine(v("coverUrl")); val kind = v("kind"); val latest = v("lastChapter")
         val toc = ruleValue(detail, info.optString("tocUrl"),source,bookURL)
         var url = if (toc.isBlank()) bookURL else absolute(toc, bookURL)
         val rules = source.rules("ruleToc"); val out = arrayListOf<NovelChapter>(); val seen = hashSetOf<String>();val queue=ArrayDeque(listOf(url))
@@ -530,8 +532,10 @@ object NovelSources {
             val next = ruleValue(doc, rules.optString("nextTocUrl"),source,url)
             for(link in next.lines().filter{it.isNotBlank()}){val target=absolute(link,url);if(target !in seen && target !in queue)queue.add(target)}
         }
-        out.distinctBy { it.url }
+        NovelBookDetails(name, author, intro, if (cover.isBlank()) "" else runCatching{absolute(cover, bookURL)}.getOrDefault(""), kind, latest, out.distinctBy { it.url })
     }
+
+    fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = details(source, bookURL).chapters
 
     fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) {
         val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>(); var imageOnly = false
@@ -555,3 +559,6 @@ object NovelSources {
     fun cleanText(raw: String): String = Jsoup.parse(raw.replace(Regex("(?i)<br\\s*/?>|</p>|</div>"), "\n")).wholeText()
         .lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
 }
+
+/** Metadata and TOC from one real detail flow, shared by detail, shelf and download instead of a title-only TOC screen. */
+data class NovelBookDetails(val name: String, val author: String, val intro: String, val cover: String, val kind: String, val latest: String, val chapters: List<NovelChapter>)

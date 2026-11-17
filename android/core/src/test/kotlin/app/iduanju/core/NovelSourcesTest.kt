@@ -124,7 +124,9 @@ class RealRankRegressionTest {
             val hits = NovelSources.search(source, "", category = c)
             assertTrue("$id books", hits.size > 1)
             val book = hits.first(); assertFalse(book.url.contains("\n"))
-            val toc = NovelSources.chapters(source, book.url)
+            val details = NovelSources.details(source, book.url)
+            val toc = details.chapters
+            println("[metadata-offline] $id name=${details.name} author=${details.author} intro=${details.intro.length} cover=${details.cover}")
             assertTrue("$id toc", toc.size > 1)
             assertTrue(toc.first().title.isNotBlank())
             assertTrue(toc.first().url.startsWith("http"))
@@ -142,8 +144,10 @@ class RealRankRegressionTest {
             val cats = NovelSources.categories(source)
             val hits = NovelSources.search(source, "", category = cats.first { it.action == null && it.url.isNotBlank() })
             assertTrue(hits.isNotEmpty())
-            val toc = NovelSources.chapters(source, hits.first().url)
+            val details = NovelSources.details(source, hits.first().url)
+            val toc = details.chapters
             assertTrue(toc.size > 1)
+            if(id==7){assertEquals(hits.first().name,details.name);assertTrue(details.intro.length>100);assertTrue(details.cover.startsWith("https://"))}
             println("[rank-live] $id ${source.name}: cats=${cats.size} books=${hits.size} toc=${toc.size}")
         }
     }
