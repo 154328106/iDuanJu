@@ -52,6 +52,8 @@ struct MediaTrack: Identifiable, Hashable, Sendable {
     /// Called after `load` returned when the item fails later (never for a superseded load).
     var onFailed: ((Error?) -> Void)? { get set }
     var onEnded: (() -> Void)? { get set }
+    /// Explicit transport requests from native or software PiP controls.
+    var onPlaybackRequested: ((Bool) -> Void)? { get set }
     var surface: UIView { get }
 
     /// Whether this engine can take the source at all.

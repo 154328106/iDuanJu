@@ -63,7 +63,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private(set) var loadedUntil: Double = 0
     /// Buffered position for the progress bar: AVPlayer buffer or the byte pre-buffer, whichever is ahead.
     var bufferedUntil: Double { max(loadedUntil, prebuffer?.until ?? 0) }
-    private(set) var paused = false
+    /// User intent survives buffering, episode replacement and system interruptions.
+    private var wantsPlayback = true
+    private var transportPaused = false
+    var paused: Bool { !wantsPlayback || interrupted || transportPaused || current.flatMap { errors[$0] } != nil }
     /// Active playback rate (1.0 default). Locked rate persists after speed-gesture ends.
     private(set) var playbackRate: Double = 1.0
     /// Non-nil when user locked a non-1x rate via speed gesture.
@@ -155,12 +158,17 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private var backgrounded = false
     private var interrupted = false
     private var audioSessionActive = false
+    private var continuePiP = false
+    @ObservationIgnored private let suppliedEngine: PlayerEngine?
+    @ObservationIgnored private let sourceResolver: ((Int) async throws -> Source)?
 
-    init(series: HGSeries) {
+    init(series: HGSeries, engine: PlayerEngine? = nil, resolve: ((Int) async throws -> Source)? = nil) {
         self.series = series
+        self.suppliedEngine = engine
+        self.sourceResolver = resolve
         let a = AVPlayerEngine()
         self.av = a
-        self.engine = a
+        self.engine = engine ?? a
         super.init()
     }
 
@@ -193,16 +201,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 MainActor.assumeIsolated { self?.setPaused(true) }
             }
         })
-        audioObservers.append(center.addObserver(forName: AVPlayer.rateDidChangeNotification, object: player, queue: .main) { [weak self] note in
-            // PiP controls target AVPlayer directly. System background/interruption pauses must not erase play intent.
-            guard note.userInfo?[AVPlayer.rateDidChangeReasonKey] as? String == AVPlayer.RateDidChangeReason.setRateCalled.rawValue else { return }
-            MainActor.assumeIsolated {
-                guard let self, self.engineKind == .avplayer, self.pipActive, !self.restoringPiP, self.readyIndex != nil else { return }
-                // ▶ in the PiP window after an interruption: the user resumed, so drop the stale flag (see setPaused).
-                if self.av.player.rate > 0 { self.interrupted = false; self.activateAudioSession() } else if self.interrupted { return }
-                self.paused = self.av.player.rate == 0
-            }
-        })
+        bindTransportRequests(engine)
         // One clock for both cores (AVPlayer periodic observers do not exist on Aether's software route).
         let t = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -282,6 +281,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         current = nil
         backgrounded = false
         interrupted = false
+        continuePiP = false
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         prefetchTokens.values.forEach { LocalHLSProxy.shared.release($0) }
@@ -316,6 +316,11 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             Task { @MainActor in
                 guard self?.pip === controller else { return }
                 self?.pipPossible = controller.isPictureInPicturePossible
+                if let self, self.continuePiP, self.wantsPlayback, self.readyIndex != nil,
+                   controller.isPictureInPicturePossible, self.backgrounded {
+                    self.continuePiP = false
+                    controller.startPictureInPicture()
+                }
             }
         }
     }
@@ -331,12 +336,16 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        guard controller === pip else { return }
         pipActive = true
         engine.setPiPActive(true)
     }
 
     func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        guard controller === pip else { return }
         pipActive = false
+        engine.setPiPActive(false)
+        continuePiP = false
         if !backgrounded { pipError = error.localizedDescription }
     }
 
@@ -347,10 +356,15 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        guard controller === pip else { return }
         pipActive = false
         engine.setPiPActive(false)
-        if !restoringPiP { setPaused(true) }
-        else if !backgrounded, !paused, !interrupted, readyIndex != nil, engine.isPaused { play() }
+        // A software source or fallback can replace the PiP content during an episode load.
+        // That stop belongs to the handover, not to the user pressing the close button.
+        if continuePiP {
+            if readyIndex != nil { refreshPiP() }
+        } else if !restoringPiP { setPaused(true) }
+        else { resumeIfRequested() }
         restoringPiP = false
     }
 
@@ -366,7 +380,15 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             restoringPiP = true
             pip?.stopPictureInPicture()
         }
-        if !paused, !interrupted, readyIndex != nil, engine.isPaused { play() }
+        resumeIfRequested()
+        // Engine foreground restoration may itself be asynchronous. Reconcile once afterwards,
+        // re-reading intent so a pause pressed in the meantime always wins.
+        let token = activation
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let self, self.activation == token, !self.backgrounded else { return }
+            self.resumeIfRequested()
+        }
     }
 
     private func handleInterruption(_ notification: Notification) {
@@ -379,7 +401,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             interrupted = false
             let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             if !AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) { setPaused(true) }
-            else if !paused, readyIndex != nil { play() }
+            else if wantsPlayback, readyIndex != nil { play() }
         }
     }
 
@@ -404,7 +426,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         let r = Self.nearestStep(rate)
         let clamped = min(r, engine.maxRate)
         playbackRate = clamped
-        if !paused, !interrupted, readyIndex != nil { engine.setRate(clamped) }
+        if wantsPlayback, !interrupted, readyIndex != nil { engine.setRate(clamped) }
     }
 
     func lockRate(_ rate: Double) {
@@ -443,7 +465,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func select(_ index: Int?) {
         guard let index, index != current, episodes.indices.contains(index) else { return }
         current = index
-        paused = false
+        wantsPlayback = true
+        transportPaused = false
         activate(index)
     }
 
@@ -460,6 +483,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         activation = token
         if let r = readyIndex, heldFrame == nil, let img = Self.snapshot(engine.surface) { heldFrame = (img, r) }
         readyIndex = nil
+        if pipActive { continuePiP = true }
         engine.pause()
         time = 0; loadedUntil = 0
         duration = Double(episodes[i].duration)
@@ -482,6 +506,12 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             guard activation == token else { return }
             do {
                 let src = try await prepare(i)
+                #if DEBUG
+                if let delay = ProcessInfo.processInfo.environment["STV_PLAYER_LOAD_DELAY"].flatMap(Double.init), delay > 0 {
+                    try await Task.sleep(for: .seconds(delay))
+                }
+                if ProcessInfo.processInfo.environment["STV_PLAYER_LOAD_ERROR"] == "1" { throw URLError(.cannotOpenFile) }
+                #endif
                 guard activation == token else { return }
                 let next = chooseEngine(i, src)
                 switchEngine(to: next)
@@ -515,7 +545,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 next.muted = muted
                 readyIndex = i
                 refreshPiP()
-                if !paused, !interrupted { play() }
+                if wantsPlayback, !interrupted { play() }
+                if pipActive, engine.pipIdentity == pipIdentity { continuePiP = false }
                 if episodes.indices.contains(i + 1) {
                     Task { [weak self] in
                         guard let self, self.activation == token else { return }
@@ -541,6 +572,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     /// Aether unless the user chose the system player, the source needs AVPlayer (resource-loader AES,
     /// FairPlay), Aether could not be created, or it already failed on this episode.
     private func chooseEngine(_ i: Int, _ src: Source) -> PlayerEngine {
+        if let suppliedEngine { return suppliedEngine }
         guard PlayerEngineSettings.preferred == .aether, !aetherFailed.contains(i),
               let a = aether, a.supports(src) else { return av }
         return a
@@ -549,10 +581,12 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private func switchEngine(to next: PlayerEngine) {
         if next !== engine {
             engine.onFailed = nil; engine.onEnded = nil
+            engine.onPlaybackRequested = nil
             engine.stop()
             engine = next
         }
         engine.fill = fill
+        bindTransportRequests(engine)
         if engineKind != next.kind { engineKind = next.kind }
     }
 
@@ -622,6 +656,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func prepare(_ i: Int) async throws -> Source {
+        if let sourceResolver { return try await sourceResolver(i) }
         if let source = prepared[i] {
             if case .file(let url) = source, !FileManager.default.fileExists(atPath: url.path) {
                 prepared[i] = nil
@@ -749,11 +784,13 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     func togglePause() {
         // Interrupted: playback is already stopped whatever the button shows, so this tap means ▶.
-        setPaused(interrupted ? false : !paused)
+        setPaused(interrupted || (readyIndex != nil && engine.isPaused && !engine.isWaiting) ? false : wantsPlayback)
     }
 
     private func setPaused(_ value: Bool) {
-        paused = value
+        wantsPlayback = !value
+        transportPaused = value
+        if value { continuePiP = false }
         if value {
             engine.pause()
             save(force: true)
@@ -769,6 +806,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             } else {
                 play()
             }
+        } else if let current, errors[current] != nil {
+            interrupted = false
+            activate(current)
         }
         publishNowPlaying()
     }
@@ -776,6 +816,18 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private func play() {
         activateAudioSession()
         engine.play(rate: min(playbackRate, engine.maxRate))
+    }
+
+    private func bindTransportRequests(_ target: PlayerEngine) {
+        target.onPlaybackRequested = { [weak self, weak target] playing in
+            guard let self, let target, self.engine === target, !self.restoringPiP, self.readyIndex != nil else { return }
+            self.setPaused(!playing)
+        }
+    }
+
+    private func resumeIfRequested() {
+        guard wantsPlayback, !interrupted, readyIndex != nil, engine.isPaused else { return }
+        play()
     }
 
     func setMuted(_ on: Bool) {
@@ -847,6 +899,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         guard t.isFinite else { return }
         time = t
         let waiting = engine.isWaiting
+        let stopped = engine.isPaused && !waiting
+        if stopped != transportPaused { transportPaused = stopped }
         if waiting != waitingForMedia { waitingForMedia = waiting }
         let d = engine.duration
         if d.isFinite, d > 0, abs(d - duration) > 0.01 { duration = d }

@@ -9,6 +9,8 @@ import UIKit
     let kind = PlayerEngineKind.avplayer
     var onFailed: ((Error?) -> Void)?
     var onEnded: (() -> Void)?
+    var onPlaybackRequested: ((Bool) -> Void)?
+    private let transport = PlayerTransportObserver()
 
     final class Surface: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
@@ -37,6 +39,8 @@ import UIKit
         view.isUserInteractionEnabled = false
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
+        transport.bind(player)
+        transport.onRequest = { [weak self] in self?.onPlaybackRequested?($0) }
     }
 
     func supports(_ src: PlaybackCoordinator.Source) -> Bool { true }
@@ -44,6 +48,8 @@ import UIKit
     func load(_ src: PlaybackCoordinator.Source, stream: HGStream?, start: Double?, title: String) async throws {
         generation += 1
         let gen = generation
+        transport.acceptingRequests = false
+        transport.expectPaused(true)
         statusObservation = nil
         guard let item = PlaybackCoordinator.makeItem(src) else { throw URLError(.badURL) }
         item.nowPlayingInfo = [MPMediaItemPropertyTitle: title]
@@ -71,15 +77,17 @@ import UIKit
             await player.seek(to: CMTime(seconds: start, preferredTimescale: 600))
         }
         if item.status == .failed { throw item.error ?? URLError(.cannotOpenFile) }
+        transport.acceptingRequests = true
         Task { [weak self] in await self?.refreshTracks(item) }
     }
 
     func play(rate: Double) {
+        transport.expectPaused(false)
         player.defaultRate = Float(rate)
         player.play()
     }
 
-    func pause() { player.pause() }
+    func pause() { transport.expectPaused(true); player.pause() }
 
     func setRate(_ rate: Double) {
         player.defaultRate = Float(rate)
@@ -91,6 +99,7 @@ import UIKit
     }
 
     func stop() {
+        transport.acceptingRequests = false
         generation += 1
         statusObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }

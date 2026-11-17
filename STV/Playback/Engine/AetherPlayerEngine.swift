@@ -11,6 +11,10 @@ import UIKit
     let kind = PlayerEngineKind.aether
     var onFailed: ((Error?) -> Void)?
     var onEnded: (() -> Void)?
+    var onPlaybackRequested: ((Bool) -> Void)?
+    private let transport = PlayerTransportObserver()
+    private var softwarePiPDelegate: SoftwarePiPTransportDelegate?
+    private weak var softwarePiPController: AVPictureInPictureController?
     /// Opening budget before the coordinator falls back to AVPlayer.
     static var loadTimeout: TimeInterval = 25
 
@@ -46,12 +50,14 @@ import UIKit
         engine.bind(view: view)
         view.backgroundColor = .black
         view.isUserInteractionEnabled = false
+        transport.onRequest = { [weak self] in self?.onPlaybackRequested?($0) }
         engine.$state.sink { [weak self] s in
             Task { @MainActor in self?.stateChanged(s) }
         }.store(in: &bag)
     }
 
     private func stateChanged(_ s: PlaybackState) {
+        softwarePiPController?.invalidatePlaybackState()
         guard mounted else { return }
         switch s {
         case .ended: onEnded?()
@@ -112,6 +118,8 @@ import UIKit
         generation += 1
         let gen = generation
         mounted = false
+        transport.acceptingRequests = false
+        transport.expectPaused(true)
         var options = LoadOptions()
         options.autoplay = false
         options.generatesBackgroundScrubPreviews = false
@@ -144,12 +152,15 @@ import UIKit
         guard generation == gen else { throw CancellationError() }
         if case .error(let m) = engine.state { throw Failure.engine(m, engine.errorInfo) }
         mounted = true
+        transport.bind(engine.currentAVPlayer)
+        transport.acceptingRequests = true
         #if DEBUG
         NSLog("%@", "[STV] aether mounted route=\(engine.videoRoute.rawValue) codec=\(engine.sourceVideoCodecName ?? "-") audio=\(engine.audioTracks.count) subs=\(engine.subtitleTracks.count)")
         #endif
     }
 
     func play(rate: Double) {
+        transport.expectPaused(false)
         if engine.state == .ended, let last = lastLoad {
             // `.ended` is terminal in Aether: a replay is another load.
             Task { [weak self] in
@@ -172,11 +183,12 @@ import UIKit
         if engine.state != .playing { engine.play() }
     }
 
-    func pause() { engine.pause() }
+    func pause() { transport.expectPaused(true); engine.pause() }
     func setRate(_ rate: Double) { engine.setRate(Float(rate)) }
     func seek(to seconds: Double) async { await engine.seek(to: seconds) }
 
     func stop() {
+        transport.acceptingRequests = false
         generation += 1
         mounted = false
         engine.stop()
@@ -281,7 +293,17 @@ import UIKit
     }
 
     func makePiPController() -> AVPictureInPictureController? {
-        if let s = engine.softwarePiPSource { return s.makePictureInPictureController() }
+        transport.bind(engine.currentAVPlayer)
+        if let source = engine.softwarePiPSource {
+            let delegate = SoftwarePiPTransportDelegate(source: source) { [weak self] playing in
+                guard let self, self.engine.softwarePiPSource === source else { return }
+                self.onPlaybackRequested?(playing)
+            }
+            softwarePiPDelegate = delegate
+            let controller = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: source.layer, playbackDelegate: delegate))
+            softwarePiPController = controller
+            return controller
+        }
         return engine.nativePlayerLayer.flatMap { AVPictureInPictureController(playerLayer: $0) }
     }
 

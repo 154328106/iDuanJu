@@ -196,6 +196,23 @@ final class PlayerUITests: XCTestCase {
                       "selected episode did not become ready", file: file, line: line)
     }
 
+    func testSideAdjustmentsWhileEpisodeIsLoadingOrFailed() {
+        for fail in [false,true] {
+            launch(["STV_FX_EPISODES":"4", "STV_KEEP_CHROME":"1", "STV_PLAYER_LOAD_DELAY":"4", "STV_PLAYER_LOAD_ERROR":fail ? "1" : "0"])
+            XCTAssertTrue(el("player.loading").waitForExistence(timeout:10))
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(waitOrientation(landscape:true))
+            for x: CGFloat in [0.12,0.88] { swipeEpisode(next:true,x:x) }
+            XCTAssertEqual(el("player.episodeInfo").value as? String,"第1集")
+            if fail {
+                XCTAssertTrue(app.buttons["重试"].waitForExistence(timeout:10))
+                for x: CGFloat in [0.12,0.88] { swipeEpisode(next:true,x:x) }
+                XCTAssertEqual(el("player.episodeInfo").value as? String,"第1集")
+            } else { assertEpisode(1) }
+            app.terminate()
+        }
+    }
+
     private func swipeEpisode(next: Bool, x: CGFloat = 0.5) {
         let window = app.windows.firstMatch
         window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.65 : 0.35))

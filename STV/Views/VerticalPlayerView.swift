@@ -317,33 +317,32 @@ struct PlayerScreen: View {
 
     private func stage(_ i: Int) -> some View {
         ZStack {
-            if co.readyIndex == i {
-                PlayerTouchCatcher(
-                    edgeBackWidth: edgeBackWidth, speedMode: speedMode, locked: locked,
-                    onTap: handleTap,
-                    onDoubleTap: handleDoubleTap,
-                    onSpeedBegan: enterSpeedMode,
-                    onSpeedChanged: handleSpeedTranslation,
-                    onSpeedEnded: endSpeedMode,
-                    landscape: landscape,
-                    onAdjustBegan: { adjuster.begin($0) },
-                    onAdjustChanged: { adjuster.change($0, fraction: $1) },
-                    onAdjustEnded: { adjuster.end() },
-                    onPinchFill: { fill in
-                        guard fill != fillScreen else { return }
-                        withAnimation(.easeInOut(duration: 0.25)) { fillScreen = fill }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        showOSD(fill ? "画面：铺满全屏" : "画面：完整自适应")
-                    }
-                )
-            } else {
-                // Held still on the episode being left; the new episode's page stays see-through so the video
-                // layer (riding with it) is visible the moment its first frame lands — no poster cutting in.
+            if co.readyIndex != i {
                 if (i == co.heldFrame?.index || i == co.current) && co.errors[i] == nil {
                     Color.clear
                 } else {
-                    PosterBackdrop(url: series.cover)
+                    PosterBackdrop(url: series.cover).allowsHitTesting(false)
                 }
+            }
+            PlayerTouchCatcher(
+                playbackReady: co.readyIndex == i, edgeBackWidth: edgeBackWidth, speedMode: speedMode, locked: locked,
+                onTap: handleTap,
+                onDoubleTap: handleDoubleTap,
+                onSpeedBegan: enterSpeedMode,
+                onSpeedChanged: handleSpeedTranslation,
+                onSpeedEnded: endSpeedMode,
+                landscape: landscape,
+                onAdjustBegan: { adjuster.begin($0) },
+                onAdjustChanged: { adjuster.change($0, fraction: $1) },
+                onAdjustEnded: { adjuster.end() },
+                onPinchFill: { fill in
+                    guard fill != fillScreen else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) { fillScreen = fill }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showOSD(fill ? "画面：铺满全屏" : "画面：完整自适应")
+                }
+            )
+            if co.readyIndex != i {
                 if let error = co.errors[i] {
                     VStack(spacing: 12) {
                         Text(error).font(.footnote).multilineTextAlignment(.center)
@@ -353,7 +352,7 @@ struct PlayerScreen: View {
                         Button("重试") { co.activate(i) }.buttonStyle(.borderedProminent)
                     }.padding(32)
                 } else if i == co.current {
-                    ProgressView("正在载入分集").tint(.white)
+                    ProgressView("正在载入分集").tint(.white).allowsHitTesting(false).accessibilityIdentifier("player.loading")
                 }
             }
         }
@@ -967,6 +966,7 @@ struct PlayerLayerView: UIViewRepresentable {
 /// `UILongPressGestureRecognizer` with `shouldRecognizeSimultaneouslyWith == true`
 /// and `hitTest` returning nil on the left edge cooperates cleanly.
 struct PlayerTouchCatcher: UIViewRepresentable {
+    var playbackReady = true
     var edgeBackWidth: CGFloat
     var speedMode: Bool
     var locked: Bool = false
@@ -1007,12 +1007,12 @@ struct PlayerTouchCatcher: UIViewRepresentable {
         c.onAdjustChanged = onAdjustChanged
         c.onAdjustEnded = onAdjustEnded
         c.onPinchFill = onPinchFill
-        c.pinch.isEnabled = !locked && !speedMode
+        c.pinch.isEnabled = playbackReady && !locked && !speedMode
         // While speed HUD is up, keep catcher receiving the finger; chrome is hit-disabled.
         uiView.isUserInteractionEnabled = true
-        c.longPress.isEnabled = !locked
+        c.longPress.isEnabled = playbackReady && !locked
         c.adjustPan.isEnabled = !locked
-        c.doubleTapEnabled = !speedMode && !locked
+        c.doubleTapEnabled = playbackReady && !speedMode && !locked
         c.tap.isEnabled = !speedMode
     }
 
