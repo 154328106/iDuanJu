@@ -275,6 +275,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         pipPossible = false
         timer?.invalidate(); timer = nil
         observer = nil
+        engine.onPlaybackRequested = nil
+        suppliedEngine?.stop()
         av.stop()
         aether?.stop()
         readyIndex = nil
@@ -502,7 +504,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         }
         errors[i] = nil
         verifyTargets[i] = nil
+        let lease = backgrounded || pipActive ? PlaybackBackgroundLease() : nil
         Task { [self] in
+            defer { lease?.end() }
             guard activation == token else { return }
             do {
                 let src = try await prepare(i)
@@ -784,7 +788,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     func togglePause() {
         // Interrupted: playback is already stopped whatever the button shows, so this tap means ▶.
-        setPaused(interrupted || (readyIndex != nil && engine.isPaused && !engine.isWaiting) ? false : wantsPlayback)
+        let failed = current.flatMap { errors[$0] } != nil
+        setPaused(failed || interrupted || (readyIndex != nil && engine.isPaused && !engine.isWaiting) ? false : wantsPlayback)
     }
 
     private func setPaused(_ value: Bool) {

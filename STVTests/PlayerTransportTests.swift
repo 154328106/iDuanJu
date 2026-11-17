@@ -101,6 +101,17 @@ import AVKit
         XCTAssertTrue(co.paused)
     }
 
+    func testFailedPlaybackShowsPlayAndTheButtonRetries() async throws {
+        let e = TestPlayerEngine(); e.failLoad = true
+        let co = coordinator(e); defer { co.teardown() }
+        co.select(0)
+        for _ in 0..<200 where co.errors[0] == nil { try await Task.sleep(for:.milliseconds(10)) }
+        XCTAssertNotNil(co.errors[0]); XCTAssertTrue(co.paused)
+        e.failLoad = false
+        co.togglePause(); try await ready(co,0)
+        XCTAssertNil(co.errors[0]); XCTAssertFalse(e.isPaused); XCTAssertFalse(co.paused)
+    }
+
     func testNativeObserverIgnoresExpectedCommandsAndBackgroundPauses() async throws {
         let player = AVPlayer(); let observer = PlayerTransportObserver()
         var requests: [Bool] = []
@@ -147,9 +158,11 @@ import AVKit
     var routeLabel: String { "test" }
     var loadDelay: Duration = .zero
     var notifyInternalPause = false
+    var failLoad = false
     func supports(_ src: PlaybackCoordinator.Source) -> Bool { true }
     func load(_ src: PlaybackCoordinator.Source, stream: HGStream?, start: Double?, title: String) async throws {
         try await Task.sleep(for:loadDelay); isPaused = true
+        if failLoad { throw URLError(.cannotOpenFile) }
     }
     func play(rate: Double) { isPaused = false }
     func pause() { isPaused = true; if notifyInternalPause { onPlaybackRequested?(false) } }
