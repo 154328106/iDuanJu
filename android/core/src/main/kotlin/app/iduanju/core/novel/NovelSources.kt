@@ -244,7 +244,7 @@ object NovelSources {
 
     internal fun ruleValue(content: Any, raw: String, source: NovelSource, base: String, key: String = "", page: Int = 1): String {
         if (raw.isEmpty()) return ""
-        val put = Regex("@put:(\\{[^}]*})").find(raw)
+        val put = Regex("@put:(\\{[^}]*\\})").find(raw)
         if (put != null) {
             val vars=JSONObject(put.groupValues[1])
             for(k in vars.keys()) NovelScript.setVariable(source.id,k,ruleValue(content,vars.getString(k),source,base,key,page))
@@ -254,12 +254,12 @@ object NovelSources {
         if(jsAt>=0) {
             val prefix=raw.substring(0,jsAt)
             val input=if(prefix.isBlank())content.toString() else ruleValue(content,prefix,source,base,key,page)
-            val code=Regex("\\{\\{(.*?)}}",RegexOption.DOT_MATCHES_ALL).replace(script(raw.substring(jsAt))) { m ->
+            val code=Regex("\\{\\{(.*?)\\}\\}",RegexOption.DOT_MATCHES_ALL).replace(script(raw.substring(jsAt))) { m ->
                 ruleValue(content,m.groupValues[1],source,base,key,page).replace("\\","\\\\").replace("'","\\'").replace("\"","\\\"").replace("\n","\\n")
             }
             return NovelScript(source,base,key,page).eval(code,input)?.toString().orEmpty()
         }
-        if(raw.contains("{{"))return Regex("\\{\\{(.*?)}}",RegexOption.DOT_MATCHES_ALL).replace(raw){m ->
+        if(raw.contains("{{"))return Regex("\\{\\{(.*?)\\}\\}",RegexOption.DOT_MATCHES_ALL).replace(raw){m ->
             val expr=m.groupValues[1];if(expr.startsWith('$')||expr.startsWith('@'))ruleValue(content,expr,source,base,key,page)
             else NovelScript(source,base,key,page).eval(expr,content.toString())?.toString().orEmpty()
         }

@@ -87,6 +87,7 @@ jobs:
           name: novel-android-native-verification
           path: |
             ${{ runner.temp }}/android-novel/*.png
+            ${{ runner.temp }}/android-novel/*.json
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/
   sources:
