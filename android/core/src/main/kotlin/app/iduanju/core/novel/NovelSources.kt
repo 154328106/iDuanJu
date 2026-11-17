@@ -21,8 +21,13 @@ data class NovelSource(val json: JSONObject) {
         ?: runCatching { JSONObject(json.optString(name)) }.getOrDefault(JSONObject())
 }
 data class NovelHit(val name: String, val author: String, val url: String, val cover: String = "", val kind: String = "", val latest: String = "")
-data class NovelCategory(val title: String, val url: String, val group: String = "推荐", val action: String? = null) {
-    val id get() = "$group|$title|$url|${action.orEmpty()}"
+data class NovelFlexStyle(val basis:Double=-1.0,val grow:Double=0.0,val wrapBefore:Boolean=false)
+data class NovelCategory(val title: String, val url: String, val group: String = "推荐", val action: String? = null,
+    val type:String="url",val chars:List<String> = emptyList(),val defaultValue:String="",val viewName:String="",
+    val style:NovelFlexStyle=NovelFlexStyle(),val value:String="",val displayTitle:String=title) {
+    val selectionKey get() = "$group|$title|$type"
+    val id get() = "$selectionKey|$url|${action.orEmpty()}"
+    val isControl get() = type != "url"
 }
 data class NovelChapter(val title: String, val url: String)
 
@@ -175,12 +180,33 @@ object NovelSources {
         var raw = source.json.optString("exploreUrl").trim()
         if (raw.isEmpty()) return emptyList()
         if(raw.startsWith("@js:") || raw.startsWith("<js>")) raw = NovelScript(source,source.id).eval(script(raw))?.toString().orEmpty()
-        return parseCategories(raw)
+        val parsed = parseCategories(raw)
+        val info = NovelScript.exploreInfo(source.id)
+        var changed = false
+        parsed.filter { it.isControl }.forEach { c -> if (!info.has(c.title)) { info.put(c.title, c.defaultValue.ifEmpty { c.chars.firstOrNull().orEmpty() }); changed = true } }
+        if (changed) NovelScript.saveExploreInfo(source.id, info)
+        return parsed.map { c ->
+            val display = if (c.viewName.isBlank()) c.title else NovelScript(source,source.id).eval(script(c.viewName))?.toString() ?: c.title
+            c.copy(value=info.optString(c.title),displayTitle=display)
+        }
     }
 
-    fun categoryAction(source: NovelSource, category: NovelCategory) {
-        category.action?.let { NovelScript(source,source.id).eval(it) }
+    fun categoryAction(source: NovelSource, category: NovelCategory, value:String? = null) {
+        if (category.isControl) {
+            val info = NovelScript.exploreInfo(source.id)
+            val next = value ?: if (category.type == "toggle" && category.chars.isNotEmpty()) category.chars[(category.chars.indexOf(info.optString(category.title)) + 1).mod(category.chars.size)] else null
+            if (next != null) { info.put(category.title,next); NovelScript.saveExploreInfo(source.id,info) }
+        }
+        category.action?.takeIf { it.isNotBlank() }?.let { NovelScript(source,source.id).eval(script(it)) }
     }
+
+    /** Titles/groups identify a category across filter-generated URL changes; never keep a stale URL snapshot. */
+    fun refreshedCategory(previous:NovelCategory?, categories:List<NovelCategory>, group:String):NovelCategory? =
+        categories.firstOrNull { !it.isControl && it.selectionKey==previous?.selectionKey }
+            ?: categories.firstOrNull { !it.isControl && it.url==previous?.url }
+            ?: categories.firstOrNull { !it.isControl && it.group==group }
+            ?: categories.firstOrNull { !it.isControl }
+
 
     /** Legado parses discovery JSON with Gson, which tolerates raw line breaks / tabs inside strings (multi-line `@js:` urls). */
     internal fun escapeRawControls(raw: String): String {
@@ -207,7 +233,13 @@ object NovelSources {
         if (raw.startsWith("[")) {
             val a = runCatching { JSONArray(raw) }.getOrElse { JSONArray(escapeRawControls(raw)) }
             for(i in 0 until a.length()) a.optJSONObject(i)?.let { o ->
-                add(o.optString("title"),o.optString("url").takeUnless { it=="null" }.orEmpty(),if(o.optString("type")=="button")o.optString("action") else null)
+                val type=o.optString("type").ifEmpty { "url" }
+                if(type in listOf("button","text","toggle","select")) {
+                    val title=stripInvisible(o.optString("title")).trim()
+                    val chars=o.optJSONArray("chars")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                    val style=o.optJSONObject("style")
+                    if(title.isNotEmpty())out += NovelCategory(title,"",group,o.optString("action").takeIf { it.isNotBlank() },type,chars,o.optString("default"),o.optString("viewName"),NovelFlexStyle(style?.optDouble("layout_flexBasisPercent",-1.0)?:-1.0,style?.optDouble("layout_flexGrow",0.0)?:0.0,style?.optBoolean("layout_wrapBefore",false)?:false))
+                } else add(o.optString("title"),o.optString("url").takeUnless { it=="null" }.orEmpty())
             }
         } else for(line in raw.split("&&","\n").filter { it.isNotBlank() }) {
             val p=line.trim().split("::",limit=2)

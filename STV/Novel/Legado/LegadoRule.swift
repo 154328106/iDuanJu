@@ -79,6 +79,8 @@ final class LegadoContext {
     private func host(_ name: String, _ a: [String: Any]) throws -> Any? {
         func s(_ k: String) -> String { a[k] as? String ?? "" }
         switch name {
+        case "sourceInfoSave":
+            LegadoVars.put(sourceScope, "__exploreInfoMap", s("value")); return nil
         case "ajax":
             let r = try LegadoURL.request(s("url"), ctx: self, base: source.bookSourceUrl)
             return try r.fetch().text
@@ -244,6 +246,7 @@ final class LegadoContext {
     func evalJS(_ code: String, result: Any?, baseURL: String, extra: [String: Any] = [:]) throws -> Any? {
         var b: [String: Any] = ["baseUrl": baseURL, "source": sourceJSON, "book": book]
         b["result"] = LegadoAnalyzer.jsonable(result)
+        b["infoMap"] = LegadoClient.exploreInfo(source)
         // Legado's `src` is the analyzer content: the item for item rules, the raw body for page rules.
         if let cur = stack.last { b["src"] = LegadoAnalyzer.jsonable(cur.content) } else if let src { b["src"] = src }
         var code = code

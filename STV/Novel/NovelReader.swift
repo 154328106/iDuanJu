@@ -259,7 +259,7 @@ struct NovelReaderView: View {
             version += 1
         }
         .onChange(of: ref.chapter) { _, c in if book.isWeb { loader.prefetch(book, around: c) } }
-        .onDisappear { store.addReadTime(book, Date().timeIntervalSince(opened)); speaker.stop() }
+        .onDisappear { loader.cancelPrefetch(book); store.addReadTime(book, Date().timeIntervalSince(opened)); speaker.stop() }
         .task {
             // WeRead shows the hint briefly when a book opens.
             try? await Task.sleep(for: .seconds(3))

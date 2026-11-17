@@ -17,6 +17,7 @@ struct NovelExploreView: View {
     @State private var managing = false
     @State private var choosingSource = false
     @State private var generation = UUID()
+    @State private var controlHeight: CGFloat = 0
     private let accent = STVTheme.accent
     private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && ($0.bookSourceType ?? 0) == 0 && !($0.exploreUrl ?? "").isEmpty } }
     private var groups: [String] { categories.reduce(into: [String]()) { if !$0.contains($1.group) { $0.append($1.group) } } }
@@ -44,6 +45,7 @@ struct NovelExploreView: View {
                 } else {
                     sourceBar.padding(.top, 10)
                     if groups.count > 1 { groupBar.padding(.top, 16) } else { Color.clear.frame(height: 12) }
+                    if categories.contains(where: { $0.group == group && $0.isControl }) { sourceControls }
                     HStack(spacing: 0) { categoryRail; results.frame(maxWidth: .infinity, maxHeight: .infinity) }
                         .overlay(alignment: .top) { Hairline() }
                         .padding(.top, groups.count > 1 ? 4 : 0)
@@ -86,7 +88,7 @@ struct NovelExploreView: View {
     private var categoryRail: some View {
         ScrollView {
             LazyVStack(spacing: 4) {
-                ForEach(categories.filter { $0.group == group }) { category in
+                ForEach(categories.filter { $0.group == group && !$0.isControl }) { category in
                     let on = category.id == categoryID
                     Button { withAnimation(DS.select) { select(category) } } label: {
                         Text(category.title).font(.system(size: 14, weight: on ? .semibold : .regular))
@@ -175,16 +177,52 @@ struct NovelExploreView: View {
             }.novelScreen().presentationCornerRadius(28).navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .topBarLeading) { NovelBackButton { choosingSource = false } } }
         }
     }
-    private func select(_ category: LegadoClient.ExploreCategory) {
-        if category.action != nil {
-            Task {
-                guard let source = sources.first(where: { $0.id == sourceID }) else { return }
-                do { try await LegadoClient.run { try LegadoClient.exploreAction(source, category: category) }; await refreshCategories() }
-                catch { self.error = error.localizedDescription }
+    private var sourceControls: some View {
+        ScrollView(.vertical) {
+            ExploreControlsLayout(spacing: 6) {
+                ForEach(categories.filter { $0.group == group && $0.isControl }) { c in
+                    Group {
+                        if c.type == "text" {
+                            ExploreTextControl(category: c, enabled: !busy) { performControl(c, value: $0) }
+                        } else if c.type == "select" {
+                            Menu { ForEach(c.chars, id: \.self) { value in Button(value) { performControl(c, value: value) } } } label: { Text((c.displayTitle.isEmpty ? c.title : c.displayTitle) + "：" + c.value + " ▾") }
+                        } else {
+                            Button((c.type == "toggle" ? c.value : "") + (c.displayTitle.isEmpty ? c.title : c.displayTitle)) { performControl(c) }
+                        }
+                    }
+                    .font(.system(size: 13)).buttonStyle(.bordered).disabled(busy)
+                    .layoutValue(key: ExploreBasisKey.self, value: c.flexBasis)
+                    .layoutValue(key: ExploreGrowKey.self, value: c.flexGrow)
+                    .layoutValue(key: ExploreWrapKey.self, value: c.wrapBefore)
+                    .accessibilityIdentifier("novel.rank.filter." + c.title)
+                }
             }
-        } else { categoryID = category.id; Task { await resetAndLoad() } }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
+            .padding(.horizontal, 16)
+        }
+        .frame(height: min(240, controlHeight))
+        .scrollBounceBehavior(.basedOnSize)
     }
-    private func refreshCategories() async {
+
+    private func select(_ category: LegadoClient.ExploreCategory) {
+        guard !busy else { return }
+        if category.isControl { performControl(category) }
+        else { categoryID = category.id; Task { await resetAndLoad() } }
+    }
+    private func performControl(_ category: LegadoClient.ExploreCategory, value: String? = nil) {
+        guard !busy, let source = sources.first(where: { $0.id == sourceID }) else { return }
+        let previous = categories.first { $0.id == categoryID }
+        generation = UUID(); let token = generation
+        items = []; page = 1; hasMore = false; error = nil; busy = true
+        Task {
+            do {
+                try await LegadoClient.run { try LegadoClient.exploreAction(source, category: category, value: value) }
+                guard token == generation, sourceID == source.id, !Task.isCancelled else { return }
+                await refreshCategories(previous: previous)
+            } catch { if token == generation { self.error = error.localizedDescription; busy = false } }
+        }
+    }
+    private func refreshCategories(previous: LegadoClient.ExploreCategory? = nil) async {
         generation = UUID(); categories = []; categoryID = ""; items = []; error = nil
         guard let source = sources.first(where: { $0.id == sourceID }) else { return }
         let token = generation; busy = true
@@ -193,7 +231,10 @@ struct NovelExploreView: View {
             guard token == generation, !Task.isCancelled else { return }
             categories = result
             if !result.contains(where: { $0.group == group }) { group = result.first?.group ?? "" }
-            busy = false; categoryID = result.first { $0.group == group && !$0.url.isEmpty }?.id ?? ""
+            busy = false
+            let chosen = LegadoClient.refreshedCategory(previous, in: result, group: group)
+            categoryID = chosen?.id ?? ""
+            if let chosen { group = chosen.group }
             if result.isEmpty { error = "书源没有可用的发现配置" }
             await resetAndLoad()
         } catch { if token == generation { self.error = error.localizedDescription; busy = false } }
@@ -213,5 +254,66 @@ struct NovelExploreView: View {
             items += fresh; hasMore = !fresh.isEmpty; page += 1
         } catch { if token == generation { self.error = error.localizedDescription } }
         if token == generation { busy = false }
+    }
+}
+
+private struct ExploreBasisKey: LayoutValueKey { static let defaultValue: Double = -1 }
+private struct ExploreGrowKey: LayoutValueKey { static let defaultValue: Double = 0 }
+private struct ExploreWrapKey: LayoutValueKey { static let defaultValue = false }
+
+/// Generic source flex widths/wrapping; not tied to any site's labels or URL formats.
+private struct ExploreControlsLayout: Layout {
+    var spacing: CGFloat = 6
+    private func rows(_ subviews: Subviews, _ width: CGFloat) -> [[(Int, CGFloat)]] {
+        var rows: [[(Int, CGFloat)]] = []; var row: [(Int, CGFloat)] = []; var used: CGFloat = 0
+        for (i, v) in subviews.enumerated() {
+            let basis = v[ExploreBasisKey.self]
+            let w = min(width, basis > 0 ? width * min(1, basis) : v.sizeThatFits(.unspecified).width)
+            if !row.isEmpty && (v[ExploreWrapKey.self] || used + spacing + w > width) { rows.append(row); row = []; used = 0 }
+            row.append((i, w)); used += w + (row.count > 1 ? spacing : 0)
+        }
+        if !row.isEmpty { rows.append(row) }
+        return rows.map { row in
+            let extra = max(0, width - row.reduce(0) { $0 + $1.1 } - CGFloat(max(0, row.count - 1)) * spacing)
+            let grow = row.reduce(0) { $0 + max(0, subviews[$1.0][ExploreGrowKey.self]) }
+            return row.map { (i, w) in (i, w + (grow > 0 ? extra * max(0, subviews[i][ExploreGrowKey.self]) / grow : 0)) }
+        }
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let rows = rows(subviews, width)
+        let height = rows.reduce(CGFloat.zero) { height, row in height + (row.map { subviews[$0.0].sizeThatFits(.init(width: $0.1, height: nil)).height }.max() ?? 0) } + CGFloat(max(0, rows.count - 1)) * spacing
+        return CGSize(width: width, height: height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(subviews, bounds.width) {
+            var x = bounds.minX
+            let height = row.map { subviews[$0.0].sizeThatFits(.init(width: $0.1, height: nil)).height }.max() ?? 0
+            for (i, width) in row { subviews[i].place(at: CGPoint(x: x, y: y), proposal: .init(width: width, height: height)); x += width + spacing }
+            y += height + spacing
+        }
+    }
+}
+
+private struct ExploreTextControl: View {
+    let category: LegadoClient.ExploreCategory
+    let enabled: Bool
+    let onValue: (String) -> Void
+    @State private var text: String
+    @State private var pending: Task<Void, Never>?
+    init(category: LegadoClient.ExploreCategory, enabled: Bool, onValue: @escaping (String) -> Void) {
+        self.category = category; self.enabled = enabled; self.onValue = onValue; _text = State(initialValue: category.value)
+    }
+    var body: some View {
+        TextField(category.displayTitle.isEmpty ? category.title : category.displayTitle, text: $text)
+            .textFieldStyle(.roundedBorder).frame(minWidth: 140).disabled(!enabled)
+            .onChange(of: text) { _, value in
+                pending?.cancel()
+                guard value != category.value else { return }
+                pending = Task { do { try await Task.sleep(for: .milliseconds(450)); onValue(value) } catch {} }
+            }
+            .onChange(of: category.value) { _, value in text = value }
+            .onDisappear { pending?.cancel() }
     }
 }

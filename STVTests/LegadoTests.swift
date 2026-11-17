@@ -18,6 +18,32 @@ final class LegadoTests: XCTestCase {
         XCTAssertEqual(try LegadoClient.exploreCategories(imported).first?.url, "/rank")
     }
 
+    func testTypedExploreControlsPersistInfoMapAndSelectedCategory() throws {
+        var source = htmlSource; source.bookSourceUrl = "https://filters.test/" + UUID().uuidString
+        source.exploreUrl = #"""
+        @js:JSON.stringify([{title:'分组',url:''},{title:'关键词',type:'text',default:'a',action:"source.put('applied',infoMap.get('关键词'))"},{title:'完成',type:'toggle',chars:['off','on'],default:'off'},{title:'排序',type:'select',chars:['hot','new'],default:'new',viewName:"'排序 '+infoMap.get('排序')",style:{layout_flexBasisPercent:1,layout_wrapBefore:true}},{title:'榜单',url:'/rank?sort='+(infoMap.get('排序')||'new')+'&q='+(infoMap.get('关键词')||'a')+'&page={{page}}'}])
+        """#
+        let initial = try LegadoClient.exploreCategories(source)
+        XCTAssertEqual(initial.map(\.type), ["text", "toggle", "select", "url"])
+        XCTAssertTrue(initial.allSatisfy { $0.group == "分组" })
+        XCTAssertEqual(initial[2].value, "new"); XCTAssertEqual(initial[2].displayTitle, "排序 new")
+        XCTAssertEqual(initial[2].flexBasis, 1); XCTAssertTrue(initial[2].wrapBefore)
+        try LegadoClient.exploreAction(source, category: initial[0], value: "b")
+        try LegadoClient.exploreAction(source, category: initial[1])
+        try LegadoClient.exploreAction(source, category: initial[2], value: "hot")
+        let refreshed = try LegadoClient.exploreCategories(source)
+        XCTAssertEqual(refreshed[0].value, "b"); XCTAssertEqual(refreshed[1].value, "on"); XCTAssertEqual(refreshed[2].value, "hot")
+        let ctx = LegadoContext(source: source); ctx.book = ["bookUrl": "unrelated-book"]
+        XCTAssertEqual(try ctx.evalJS("source.get('applied')", result: nil, baseURL: source.bookSourceUrl) as? String, "b")
+        XCTAssertEqual(try ctx.evalJS("infoMap.get('missing')===null", result: nil, baseURL: source.bookSourceUrl) as? Bool, true)
+        let selected = try XCTUnwrap(LegadoClient.refreshedCategory(initial.last, in: refreshed, group: "分组"))
+        XCTAssertEqual(selected.selectionKey, initial.last?.selectionKey); XCTAssertNotEqual(selected.url, initial.last?.url)
+        XCTAssertTrue(selected.url.contains("sort=hot&q=b"))
+        _ = try ctx.evalJS("infoMap.put('关键词','c');infoMap['完成']='off';'ok'", result: nil, baseURL: source.bookSourceUrl)
+        XCTAssertEqual(try LegadoClient.exploreCategories(source)[0].value, "c")
+        XCTAssertEqual(try LegadoClient.exploreCategories(source)[1].value, "off")
+    }
+
     private var requests: [URLRequest] = []
 
     override func setUp() {
@@ -377,6 +403,37 @@ final class RealRankRegressionTests: XCTestCase {
         guard var u = URLComponents(string: raw) else { return raw }
         u.queryItems = u.queryItems?.filter { !["t", "sign"].contains($0.name) }.sorted { $0.name < $1.name }
         return u.string ?? raw
+    }
+
+    func testExactUserQimaoFilterActionsRegenerateSameSelectedCategory() throws {
+        let source = try XCTUnwrap(LegadoSourceStore.parse(Data(contentsOf: root.appendingPathComponent("source7-exact.json"))).first)
+        let scope = "s|" + source.bookSourceUrl
+        let saved = LegadoVars.get(scope, "__sourceVariable"), savedInfo = LegadoVars.get(scope, "__exploreInfoMap")
+        LegadoVars.put(scope, "__sourceVariable", "{}"); LegadoVars.put(scope, "__exploreInfoMap", "{}")
+        defer { LegadoVars.put(scope, "__sourceVariable", saved ?? ""); LegadoVars.put(scope, "__exploreInfoMap", savedInfo ?? "{}") }
+        LegadoHTTP.transport = { request in
+            let file: String
+            if request.url!.path == "/api/v5/category/index" { file = "source7-category-index.json" }
+            else if request.url!.path == "/api/v1/leader-board" { file = "source7-rank-index.json" }
+            else { throw LegadoError.rule("unrecorded real-source request: " + request.url!.absoluteString) }
+            return (try Data(contentsOf: self.root.appendingPathComponent(file)), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!)
+        }
+        var cats = try LegadoClient.exploreCategories(source)
+        let original = try XCTUnwrap(cats.first { $0.title == "爽文" && !$0.isControl })
+        try LegadoClient.exploreAction(source, category: XCTUnwrap(cats.first { $0.title.hasPrefix("⚙ 筛选") }))
+        cats = try LegadoClient.exploreCategories(source)
+        for title in ["完结", "50-100万", "按评分"] {
+            try LegadoClient.exploreAction(source, category: XCTUnwrap(cats.first { $0.title == title }))
+            cats = try LegadoClient.exploreCategories(source)
+        }
+        let chosen = try XCTUnwrap(LegadoClient.refreshedCategory(original, in: cats, group: original.group))
+        XCTAssertEqual(chosen.selectionKey, original.selectionKey); XCTAssertNotEqual(chosen.url, original.url)
+        XCTAssertTrue(chosen.url.hasSuffix(",page,1,2,2)}}"))
+        XCTAssertEqual(cats.first { $0.title.hasPrefix("⚙ 筛选") }?.flexBasis, 1)
+        let ctx = LegadoContext(source: source); ctx.page = 2
+        let request = try LegadoURL.request(chosen.url, ctx: ctx, base: source.bookSourceUrl)
+        let query = URLComponents(url: request.request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        for (key, value) in [("page", "2"), ("over", "1"), ("words", "2"), ("sort", "2")] { XCTAssertTrue(query.contains { $0.name == key && $0.value == value }) }
     }
 
     func testRealRankingThroughDetailAndTOCOffline() throws {

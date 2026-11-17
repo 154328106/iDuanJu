@@ -40,6 +40,8 @@ internal class NovelScript(private val source: NovelSource, private val base: St
             val scope = bookURL.get()?.let { "$source|book|$it|$key" } ?: "$source|$key"
             put(scope, value)
         }
+        internal fun exploreInfo(source: String): JSONObject = runCatching { JSONObject(storage["$source|__exploreInfoMap"] ?: "{}") }.getOrDefault(JSONObject())
+        internal fun saveExploreInfo(source: String, info: JSONObject) { put("$source|__exploreInfoMap", info.toString()) }
         private val libraries = ConcurrentHashMap<String, String>()
         /** Legado also accepts jsLib as a JSON map `{"name": "https://…/lib.js"}`: download once, run before the source code. */
         internal fun libraryCode(lib: String): String {
@@ -94,12 +96,15 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         ScriptableObject.putProperty(scope, "__host", host)
         cx.evaluateString(scope, "var globalThis=this;\n" + compatible(prelude), "novel-host", 1, null)
         val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${if (nodeList != null) "__nodeList(" + JSONArray(nodeList.map { handle(it) }) + ")" else jsonValue(result)}; var src=${JSONObject.quote(srcText ?: src.get().orEmpty())};"
-        cx.evaluateString(scope, globals, "novel-context", 1, null)
+        cx.evaluateString(scope, globals + "var infoMap=" + exploreInfo(source.id).toString() + ";Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});", "novel-context", 1, null)
         val lib = libraryCode(source.json.optString("jsLib"))
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)
         val value = cx.evaluateString(scope, compatible(code), "source-rule", 1, null)
         ScriptableObject.putProperty(scope, "__result", value)
         val json = cx.evaluateString(scope, "JSON.stringify(__result === undefined ? null : __result)", "source-result", 1, null)
+        val info = cx.evaluateString(scope, "JSON.stringify(infoMap)", "source-filter-state", 1, null)
+        val changed = JSONObject(Context.toString(info))
+        if (changed.toString() != exploreInfo(source.id).toString()) saveExploreInfo(source.id, changed)
         val parsed = org.json.JSONTokener(Context.toString(json)).nextValue()
         if (parsed == JSONObject.NULL) null else parsed
     })

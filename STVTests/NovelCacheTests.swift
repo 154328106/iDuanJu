@@ -2,6 +2,64 @@ import XCTest
 @testable import STV
 
 @MainActor final class NovelCacheTests: XCTestCase {
+    func testNeighborPrefetchPlanIsBoundedAndKeepsPreviousChapter() {
+        XCTAssertEqual(NovelWebLoader.prefetchIndices(around: 5, total: 12, count: 3), [6, 4, 7, 8, 3, 2])
+        XCTAssertEqual(NovelWebLoader.prefetchIndices(around: 0, total: 4, count: 20), [1, 2, 3])
+        XCTAssertEqual(NovelWebLoader.prefetchIndices(around: 3, total: 4, count: 20), [2, 1, 0])
+        XCTAssertTrue(NovelWebLoader.prefetchIndices(around: 0, total: 4, count: 0).isEmpty)
+    }
+
+    func testCancelledLoadDoesNotWriteCacheOrPoisonRetry() async throws {
+        let source = LegadoSource(bookSourceUrl: "https://cancel.test/" + UUID().uuidString, bookSourceName: "cancel", searchUrl: "/s", ruleContent: ["content": "id.content@text"])
+        LegadoSourceStore.shared.add([source])
+        let item = LegadoSearchItem(name: "取消测试", author: "", kind: "", intro: "", cover: "", latest: "", bookURL: source.id + "/book", sourceURL: source.id, sourceName: "cancel")
+        let book = NovelStore.shared.addWeb(item, info: nil, toc: [LegadoChapter(title: "第一章", url: source.id + "/1")])
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal(); LegadoHTTP.transport = nil; NovelStore.shared.remove(book); LegadoSourceStore.shared.remove([source.id]) }
+        LegadoHTTP.transport = { request in
+            _ = gate.wait(timeout: .now() + 3)
+            return (Data("<div id='content'>迟到正文</div>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let loader = NovelWebLoader.shared
+        let request = Task { try await loader.load(book, 0) }
+        for _ in 0..<100 where !loader.isLoading(book, 0) { try await Task.sleep(for: .milliseconds(5)) }
+        request.cancel()
+        try await Task.sleep(for: .milliseconds(30))
+        gate.signal()
+        do { try await request.value; XCTFail("cancelled load succeeded") } catch is CancellationError {} catch { XCTFail("unexpected: \(error)") }
+        for _ in 0..<100 where loader.isLoading(book, 0) { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(NovelStore.shared.isCached(book, 0))
+        XCTAssertNil(loader.error(book, 0))
+        LegadoHTTP.transport = { request in (Data("<div id='content'>重试正文</div>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
+        try await loader.load(book, 0)
+        XCTAssertTrue(NovelStore.shared.chapterText(book, 0).contains("重试正文"))
+    }
+
+    func testPrefetchCancellationPreservesForegroundWaiter() async throws {
+        let source = LegadoSource(bookSourceUrl: "https://prefetch.test/" + UUID().uuidString, bookSourceName: "prefetch", searchUrl: "/s", ruleContent: ["content": "id.content@text"])
+        LegadoSourceStore.shared.add([source])
+        let item = LegadoSearchItem(name: "预取所有权", author: "", kind: "", intro: "", cover: "", latest: "", bookURL: source.id + "/book", sourceURL: source.id, sourceName: "prefetch")
+        let book = NovelStore.shared.addWeb(item, info: nil, toc: (0..<3).map { LegadoChapter(title: "章\($0)", url: source.id + "/\($0)") })
+        try NovelStore.shared.cache(book, 0, "当前正文")
+        let gate = DispatchSemaphore(value: 0)
+        let loader = NovelWebLoader.shared
+        defer { gate.signal(); loader.cancelPrefetch(book); LegadoHTTP.transport = nil; NovelStore.shared.remove(book); LegadoSourceStore.shared.remove([source.id]) }
+        LegadoHTTP.transport = { request in
+            _ = gate.wait(timeout: .now() + 3)
+            return (Data("<div id='content'>共享正文</div>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        loader.prefetch(book, around: 0)
+        for _ in 0..<100 where !loader.isLoading(book, 1) { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(loader.isLoading(book, 1))
+        let foreground = Task { try await loader.load(book, 1) }
+        try await Task.sleep(for: .milliseconds(30))
+        loader.cancelPrefetch(book)
+        gate.signal()
+        try await foreground.value
+        XCTAssertTrue(NovelStore.shared.chapterText(book, 1).contains("共享正文"))
+        XCTAssertNil(loader.error(book, 1))
+    }
+
     func testDownloadAndResumeReadsCachedChaptersWithoutNetwork() async throws {
         let store = NovelStore.shared
         let source = LegadoSource(bookSourceUrl: "https://download.test/" + UUID().uuidString, bookSourceName: "下载测试", searchUrl: "/s", ruleContent: ["content": "id.content@text"])

@@ -52,7 +52,18 @@ enum LegadoClient {
         var url: String
         var group: String = "推荐"
         var action: String? = nil
-        var id: String { group + "|" + title + "|" + url + "|" + (action ?? "") }
+        var type: String = "url"
+        var chars: [String] = []
+        var defaultValue: String = ""
+        var viewName: String = ""
+        var value: String = ""
+        var displayTitle: String = ""
+        var flexBasis: Double = -1
+        var flexGrow: Double = 0
+        var wrapBefore: Bool = false
+        var isControl: Bool { type != "url" }
+        var selectionKey: String { group + "|" + title + "|" + type }
+        var id: String { selectionKey + "|" + url + "|" + (action ?? "") }
     }
 
     static func exploreCategories(_ s: LegadoSource) throws -> [ExploreCategory] {
@@ -66,7 +77,32 @@ enum LegadoClient {
                 raw = String(decoding: try JSONSerialization.data(withJSONObject: array), as: UTF8.self)
             } else { raw = LegadoAnalyzer.textOf(value) }
         }
-        return try parseExploreCategories(raw)
+        let parsed = try parseExploreCategories(raw)
+        var info = exploreInfo(s)
+        for c in parsed where c.isControl && info[c.title] == nil { info[c.title] = c.defaultValue.isEmpty ? (c.chars.first ?? "") : c.defaultValue }
+        saveExploreInfo(s, info)
+        return try parsed.map { c in
+            var c = c; c.value = info[c.title] ?? ""; c.displayTitle = c.title
+            if !c.viewName.isEmpty { c.displayTitle = LegadoAnalyzer.textOf(try LegadoContext(source: s).evalJS(c.viewName, result: nil, baseURL: s.bookSourceUrl)) }
+            return c
+        }
+    }
+
+    static func exploreInfo(_ source: LegadoSource) -> [String: String] {
+        let raw = LegadoVars.get("s|" + source.bookSourceUrl, "__exploreInfoMap") ?? "{}"
+        let values = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] ?? [:]
+        return values.mapValues { LegadoAnalyzer.textOf($0) }
+    }
+    static func saveExploreInfo(_ source: LegadoSource, _ values: [String: String]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) else { return }
+        let value = String(decoding: data, as: UTF8.self)
+        if value != LegadoVars.get("s|" + source.bookSourceUrl, "__exploreInfoMap") { LegadoVars.put("s|" + source.bookSourceUrl, "__exploreInfoMap", value) }
+    }
+    static func refreshedCategory(_ previous: ExploreCategory?, in categories: [ExploreCategory], group: String) -> ExploreCategory? {
+        categories.first { !$0.isControl && $0.selectionKey == previous?.selectionKey }
+            ?? categories.first { !$0.isControl && $0.url == previous?.url }
+            ?? categories.first { !$0.isControl && $0.group == group }
+            ?? categories.first { !$0.isControl }
     }
 
     static func parseExploreCategories(_ raw: String) throws -> [ExploreCategory] {
@@ -83,7 +119,12 @@ enum LegadoClient {
         if let array = lenientJSONArray(raw) {
             for item in array {
                 let type = item["type"] as? String
-                add((item["title"] as? String) ?? "", (item["url"] as? String) ?? "", type == "button" ? item["action"] as? String : nil)
+                if let type, ["button", "text", "toggle", "select"].contains(type) {
+                    let title = stripInvisible(item["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !title.isEmpty else { continue }
+                    let style = item["style"] as? [String: Any] ?? [:]
+                    entries.append(ExploreCategory(title: title, url: "", group: group, action: item["action"] as? String, type: type, chars: item["chars"] as? [String] ?? [], defaultValue: item["default"] as? String ?? "", viewName: item["viewName"] as? String ?? "", flexBasis: (style["layout_flexBasisPercent"] as? Double) ?? -1, flexGrow: (style["layout_flexGrow"] as? Double) ?? 0, wrapBefore: (style["layout_wrapBefore"] as? Bool) ?? false))
+                } else { add((item["title"] as? String) ?? "", (item["url"] as? String) ?? "") }
             }
         } else {
             if raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") { throw LegadoError.rule("发现栏目 JSON 格式错误") }
@@ -125,9 +166,16 @@ enum LegadoClient {
         return try? JSONSerialization.jsonObject(with: d) as? [[String: Any]]
     }
 
-    static func exploreAction(_ source: LegadoSource, category: ExploreCategory) throws {
-        guard let action = category.action else { return }
-        _ = try LegadoContext(source: source).evalJS(action, result: nil, baseURL: source.bookSourceUrl)
+    static func exploreAction(_ source: LegadoSource, category: ExploreCategory, value: String? = nil) throws {
+        var info = exploreInfo(source)
+        var next = value
+        if next == nil, category.type == "toggle", !category.chars.isEmpty {
+            next = category.chars[((category.chars.firstIndex(of: info[category.title] ?? "") ?? -1) + 1) % category.chars.count]
+        }
+        if let next { info[category.title] = next; saveExploreInfo(source, info) }
+        guard let action = category.action, !action.isEmpty else { return }
+        let code = action.hasPrefix("@js:") ? String(action.dropFirst(4)) : action.replacingOccurrences(of: "<js>", with: "").replacingOccurrences(of: "</js>", with: "")
+        _ = try LegadoContext(source: source).evalJS(code, result: nil, baseURL: source.bookSourceUrl)
     }
 
     static func explore(_ s: LegadoSource, category: ExploreCategory, page: Int = 1) throws -> [LegadoSearchItem] {

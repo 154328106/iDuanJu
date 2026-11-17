@@ -599,6 +599,9 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
             let json = (JSONSerialization.isValidJSONObject([v]) ? try? JSONSerialization.data(withJSONObject: [v]) : nil).map { String(decoding: $0, as: UTF8.self) } ?? "[null]"
             header += "var \(k) = \(json)[0];\n"
         }
+        if bindings["infoMap"] != nil {
+            header += "Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});\n"
+        }
         // `book` / `source` / `chapter` objects also answer Legado's getter style (book.getVariable, source.getKey()).
         header += "if (typeof source === 'object' && source) __wrapSource(source);\n"
         header += "if (typeof book === 'object' && book) { book.getVariable = (k) => java.get(k || '__bookVariable'); book.setVariable = (k,v) => java.put(v === undefined ? '__bookVariable' : k, v === undefined ? k : v); }\n"
@@ -629,6 +632,11 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
             throw LegadoError.rule("JS：\(m)")
         }
         defer { idj_str_free(r) }
+        if bindings["infoMap"] != nil {
+            let saved = idj_eval_sloppy(box, "__host('sourceInfoSave', JSON.stringify({value:JSON.stringify(infoMap)}))", 8, &err)
+            guard let saved else { throw LegadoError.rule("筛选状态保存失败：" + Self.message(err)) }
+            idj_str_free(saved)
+        }
         return try? JSONSerialization.jsonObject(with: Data(String(cString: r).utf8), options: [.fragmentsAllowed])
     }
 
