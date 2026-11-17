@@ -393,6 +393,17 @@ enum PluginInstaller {
 
     static func applySubscription(_ data: Data, to sub: inout PluginSubscription) throws {
         guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw PluginError.install("订阅不是 JSON 对象") }
+        // Reject foreign formats before mutating a saved subscription. Previously a TVBox
+        // object silently succeeded with zero entries and erased the last good list.
+        if o["sites"] != nil || o["spider"] != nil || o["lives"] != nil {
+            throw PluginError.install("这是 TVBox 配置，不是 idj1 订阅；不支持直接运行 JAR / CatVod / Python 源")
+        }
+        guard o["plugins"] is [Any] || o["cms"] is [Any] else {
+            throw PluginError.install("不是 idj1 订阅（需要 plugins 或 cms 数组）；阅读 RSS 规则不能直接导入")
+        }
+        for key in ["plugins", "cms"] where o[key] != nil && !(o[key] is [Any]) {
+            throw PluginError.install("订阅字段 \(key) 必须是数组")
+        }
         sub.name = o["name"] as? String ?? URL(string: sub.url)?.host ?? "订阅"
         let entries = (o["plugins"] as? [[String: Any]] ?? []).compactMap { e -> PluginSubscription.Entry? in
             guard let id = e["id"] as? String, let m = e["manifest"] as? String, let base = URL(string: sub.url),

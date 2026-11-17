@@ -277,6 +277,87 @@ final class PluginTests: XCTestCase {
         }
     }
 
+    func testOptInHuangguoAIReadOnlyPipeline() async throws {
+        guard ProcessInfo.processInfo.environment["STV_COMPAT_AI"] == "1" else { throw XCTSkip("set STV_COMPAT_AI") }
+        let channel = try XCTUnwrap(HuangguoClient.aiChannels.first { $0.slug == "ai-duanju" })
+        let list = try await HuangguoClient.shared.list(channel,page:1)
+        let first = try XCTUnwrap(list.items.first)
+        let detail = try await HuangguoClient.shared.detail(first)
+        let ep = try XCTUnwrap(detail.episodes.first)
+        let result = try await HuangguoClient.shared.resolve(seriesId:first.seriesId,episode:ep)
+        let stream = try XCTUnwrap(result.streams.first)
+        let url = try XCTUnwrap(URL(string:stream.url))
+        var request = URLRequest(url:url)
+        for (k,v) in stream.headers { request.setValue(v,forHTTPHeaderField:k) }
+        let (data,response) = try await URLSession.shared.data(for:request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let report:[String:Any] = ["list":list.items.count,"id":first.seriesId,"chapters":detail.episodes.count,"mediaHost":url.host ?? "","mediaPath":url.path,"status":status,"isHLS":String(decoding:data.prefix(16),as:UTF8.self).hasPrefix("#EXTM3U"),"bytes":data.count]
+        if let dir=ProcessInfo.processInfo.environment["STV_SHOT_DIR"] { try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:URL(fileURLWithPath:dir).appendingPathComponent("ios-ai-native-metadata.json")) }
+        XCTAssertEqual(status,200)
+        XCTAssertTrue(String(decoding:data,as:UTF8.self).hasPrefix("#EXTM3U"))
+    }
+
+    @MainActor func testOptInM3UBundleThroughNativeRuntime() async throws {
+        guard let path = ProcessInfo.processInfo.environment["STV_COMPAT_BUNDLE"] else { throw XCTSkip("set STV_COMPAT_BUNDLE for reviewed M3U sample") }
+        let pending = try PluginInstaller.prepare(bundle: Data(contentsOf: URL(fileURLWithPath: path)), origin: "compatibility-test")
+        try PluginStore.shared.commit(pending)
+        let p = JSVideoProvider(source: .plugin(pending.manifest.id))
+        let list = try await p.list(SiteCategory(id: JSVideoProvider.homeID, title: "", path: ""), page: 1)
+        XCTAssertEqual(list.items.count, 1)
+        let first = try XCTUnwrap(list.items.first)
+        XCTAssertTrue(first.title.contains("Big Buck Bunny"))
+        let search = try await p.search("Bunny", page: 1)
+        XCTAssertEqual(search.items.count, 1)
+        let detail = try await p.detail(first)
+        let video = try await p.resolve(first, XCTUnwrap(detail.episodes.first))
+        let streamURL = try XCTUnwrap(video.url)
+        XCTAssertEqual(URL(string: streamURL)?.host, "test-streams.mux.dev")
+        let (data, response) = try await URLSession.shared.data(from: XCTUnwrap(URL(string: streamURL)))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).hasPrefix("#EXTM3U"))
+        PluginRuntime.unload(pending.manifest.id)
+        XCTAssertNotNil(PluginStore.snapshot(pending.manifest.id), "installation persists after engine unload")
+        let again = try await p.search("Bunny", page: 1)
+        XCTAssertEqual(again.items.count, 1)
+    }
+
+    @MainActor func testSubscriptionRefreshPersistsAndRejectsForeignUpdate() async throws {
+        let url="https://compat.example.org/sub/list.json"
+        var body=Data(#"{"name":"v1","plugins":[{"id":"com.example.catalog","manifest":"plugins/manifest.json","version":"1.0.0"}]}"#.utf8)
+        PluginFixtures.responder={request in request.url?.absoluteString==url ? .init(body:body) : nil}
+        let store=PluginStore.shared
+        defer{store.removeSubscription(url);PluginFixtures.responder=nil}
+        try await store.addSubscription(url)
+        var current=try XCTUnwrap(store.subscriptions.first{$0.url==url})
+        XCTAssertEqual(current.plugins.first?.manifest,"https://compat.example.org/sub/plugins/manifest.json")
+        body=Data(#"{"name":"v2","plugins":[{"id":"com.example.catalog","manifest":"plugins/manifest.json","version":"1.1.0"}]}"#.utf8)
+        await store.refreshSubscriptions()
+        current=try XCTUnwrap(store.subscriptions.first{$0.url==url})
+        XCTAssertEqual(current.name,"v2");XCTAssertEqual(current.plugins.first?.version,"1.1.0")
+        body=Data(#"{"sites":[],"spider":"https://example.org/spider.jar"}"#.utf8)
+        await store.refreshSubscriptions()
+        current=try XCTUnwrap(store.subscriptions.first{$0.url==url})
+        XCTAssertEqual(current.name,"v2");XCTAssertEqual(current.plugins.count,1)
+        XCTAssertTrue(current.error?.contains("TVBox")==true)
+        let persisted=try JSONDecoder().decode([PluginSubscription].self,from:XCTUnwrap(UserDefaults.standard.data(forKey:PluginStore.subsKey)))
+        XCTAssertEqual(persisted.first{$0.url==url}?.plugins.first?.version,"1.1.0")
+        XCTAssertNil(PluginStore.snapshot("com.example.catalog"),"a subscription refresh must not auto-install executable plugins")
+    }
+
+    func testSubscriptionRejectsForeignWithoutClobberingCache() throws {
+        var sub = PluginSubscription(url: "https://example.org/sub.json")
+        try PluginInstaller.applySubscription(Data(#"{"name":"good","plugins":[],"cms":[{"name":"Demo","api":"https://example.org/api"}]}"#.utf8), to: &sub)
+        for text in [#"{}"#, #"{"sites":[],"spider":"https://example.org/a.jar"}"#,
+                     #"{"sourceUrl":"https://example.org/rss","ruleArticles":"item"}"#,
+                     #"{"plugins":{},"cms":[]}"#, #"{"plugins":[],"cms":null}"#] {
+            XCTAssertThrowsError(try PluginInstaller.applySubscription(Data(text.utf8), to: &sub))
+            XCTAssertEqual(sub.name, "good")
+            XCTAssertEqual(sub.cms.count, 1)
+        }
+        try PluginInstaller.applySubscription(Data(#"{"plugins":[],"cms":[]}"#.utf8), to: &sub)
+        XCTAssertTrue(sub.cms.isEmpty, "an explicitly empty idj1 subscription is still valid")
+    }
+
     // MARK: bundled comic plugins against saved pages (offline)
 
     @MainActor func install(_ name: String) throws -> MangaSourceID {

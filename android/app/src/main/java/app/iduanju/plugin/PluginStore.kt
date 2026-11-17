@@ -8,7 +8,11 @@ import org.json.JSONObject
 import java.io.File
 
 /** Installed idj1 plugins (iOS PluginStore): files/plugins/<id>/{bundle.idjplugin,storage.json}; index in prefs. */
-class PluginStore(private val ctx: Context) {
+class PluginStore(private val ctx: Context,
+    // Injectable only as an app-code dependency for deterministic native storage tests.
+    // Production callers keep the HTTPS/NetGuard/capped downloader below.
+    private val subscriptionLoader: (String) -> String = { download(it) }
+) {
     data class Installed(val id: String, val name: String, val type: String, val adult: Boolean, val version: String, val enabled: Boolean, val origin: String) {
         fun toJSON() = JSONObject().put("id", id).put("name", name).put("type", type).put("adult", adult).put("version", version).put("enabled", enabled).put("origin", origin)
         companion object { fun of(o: JSONObject) = Installed(o.optString("id"), o.optString("name"), o.optString("type"), o.optBoolean("adult"), o.optString("version"), o.optBoolean("enabled", true), o.optString("origin")) }
@@ -80,13 +84,13 @@ class PluginStore(private val ctx: Context) {
     private fun saveSubs() { sp.edit().putString(SUBS, JSONArray(subscriptions.map { it.toJSON() }).toString()).apply() }
     fun addSubscription(url: String): PluginSubscription {
         val u = url.trim()
-        val sub = PluginSubscription.apply(download(u), u)
+        val sub = PluginSubscription.apply(subscriptionLoader(u), u)
         subscriptions.removeAll { it.url == u }; subscriptions.add(sub); saveSubs(); return sub
     }
     fun refreshSubscriptions() {
         for (i in subscriptions.indices) {
             val s = subscriptions[i]
-            subscriptions[i] = runCatching { PluginSubscription.apply(download(s.url), s.url) }.getOrElse { s.copy(error = (it as? PluginException)?.friendly ?: it.message) }
+            subscriptions[i] = runCatching { PluginSubscription.apply(subscriptionLoader(s.url), s.url) }.getOrElse { s.copy(error = (it as? PluginException)?.friendly ?: it.message) }
         }
         saveSubs()
     }
