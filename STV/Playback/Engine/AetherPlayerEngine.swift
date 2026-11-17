@@ -50,7 +50,10 @@ import UIKit
         engine.bind(view: view)
         view.backgroundColor = .black
         view.isUserInteractionEnabled = false
-        transport.onRequest = { [weak self] in self?.onPlaybackRequested?($0) }
+        transport.onRequest = { [weak self] playing in
+            guard let self, self.mounted, self.engine.state != .ended, self.engine.state != .loading else { return }
+            self.onPlaybackRequested?(playing)
+        }
         engine.$state.sink { [weak self] s in
             Task { @MainActor in self?.stateChanged(s) }
         }.store(in: &bag)

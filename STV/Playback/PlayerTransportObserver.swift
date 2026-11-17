@@ -22,6 +22,10 @@ import AVFoundation
             MainActor.assumeIsolated {
                 guard let self, let player, self.player === player, self.acceptingRequests else { return }
                 let paused = player.rate == 0
+                // Natural EOF is not the PiP pause button. It must reach onEnded without
+                // cancelling the intent that starts the next episode.
+                if paused, let item = player.currentItem, item.duration.isNumeric,
+                   item.duration.seconds > 0, CMTimeCompare(player.currentTime(),item.duration) >= 0 { return }
                 guard paused != self.expectedPaused else { return }
                 self.expectedPaused = paused
                 self.onRequest?(!paused)

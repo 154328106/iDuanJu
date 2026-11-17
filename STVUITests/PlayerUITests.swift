@@ -213,6 +213,19 @@ final class PlayerUITests: XCTestCase {
         }
     }
 
+    func testNaturalEndStartsNextEpisodeOnBothEngines() {
+        for engine in ["avplayer","aether"] {
+            launch(["STV_FX_EPISODES":"4", "STV_KEEP_CHROME":"1", "STV_ENGINE":engine, "STV_SEEK":"58"])
+            XCTAssertTrue(el("player.progress").waitForExistence(timeout:30))
+            assertEpisode(2)
+            let before = seconds(el("player.progress").value as? String ?? "")
+            Thread.sleep(forTimeInterval:2)
+            let after = seconds(el("player.progress").value as? String ?? "")
+            XCTAssertGreaterThan(after,before,"next episode must actually play on \(engine)")
+            app.terminate()
+        }
+    }
+
     private func swipeEpisode(next: Bool, x: CGFloat = 0.5) {
         let window = app.windows.firstMatch
         window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.65 : 0.35))
