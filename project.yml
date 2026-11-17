@@ -42,6 +42,9 @@ targets:
         script: |
           if [ "$CONFIGURATION" = "Debug" ]; then
             cp "$SRCROOT/STVTests/Fixtures/player_landscape.mp4" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_color_bars.mp4"
+            cp "$SRCROOT/STVTests/Fixtures/novel_sample_gbk.txt" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/novel_sample_gbk.txt"
+            mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_legado"
+            cp -R "$SRCROOT/STVTests/Fixtures/legado/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_legado/"
           fi
     info:
       path: STV/Info.plist

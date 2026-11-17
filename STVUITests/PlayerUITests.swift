@@ -125,7 +125,9 @@ final class PlayerUITests: XCTestCase {
         app.windows.firstMatch.pinch(withScale: 2.2, velocity: 3)
         XCTAssertTrue(waitValue(video, "fill"), "pinch out did not fill: \(video.value ?? "-")")
         shot("pl_07_pinch_fill")
-        app.windows.firstMatch.pinch(withScale: 0.45, velocity: -3)
+        // Bound the inward gesture away from iOS's edge strips; Window.pinch starts a finger at an edge on iOS 27.
+        showChrome("player.playPause")
+        el("player.playPause").pinch(withScale: 0.45, velocity: -3)
         XCTAssertTrue(waitValue(video, "fit"), "pinch in did not fit: \(video.value ?? "-")")
     }
 
@@ -331,6 +333,7 @@ final class PlayerUITests: XCTestCase {
         pick.tap()
         assertCenterStaysHidden(for: 5, "picking from the episode panel must not pop the centre controls")
         assertEpisode(3)
+        shot("ux_switched_episode_3_no_center_local_color_bars")
     }
 
     func testAutoplayAdvanceKeepsCenterHidden() {
@@ -354,6 +357,18 @@ final class PlayerUITests: XCTestCase {
     }
     func scrimTap(landscape: Bool) {
         app.windows.firstMatch.coordinate(withNormalizedOffset: landscape ? CGVector(dx: 0.2, dy: 0.5) : CGVector(dx: 0.85, dy: 0.18)).tap()
+    }
+
+    func testShortFixtureEpisodeGrid() {
+        launch(["STV_FX_EPISODES":"48", "STV_FX_SHORT":"1", "STV_FX_START":"35", "STV_KEEP_CHROME":"1", "STV_FILL":"0"])
+        XCTAssertTrue(el("player.progress").waitForExistence(timeout:20))
+        assertEpisode(36)
+        el("player.episodes").tap()
+        XCTAssertTrue(el("player.ep.36").waitForExistence(timeout:4))
+        shot("ux_short_grid_local_color_bars")
+        el("player.ep.37").tap()
+        assertEpisode(37)
+        assertCenterStaysHidden(for:4,"episode grid switch must keep centre hidden")
     }
 
     func testV3IconsAndPopoversPortrait() {

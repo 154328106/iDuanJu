@@ -135,8 +135,8 @@ struct PlayerScreen: View {
                        let i = co.current, co.readyIndex == i, co.episodes.indices.contains(i) {
                         danmakuLayer(i, full: full, ins: ins)
                     }
-                    if !co.pipActive, controlsVisible, !locked {
-                        gradients(full).transition(.opacity)
+                    if !co.pipActive {
+                        gradients(full)
                     }
                     if panel != nil {
                         Color.black.opacity(0.5).frame(width: full.width, height: full.height)
@@ -252,12 +252,12 @@ struct PlayerScreen: View {
 
     private func gradients(_ full: CGSize) -> some View {
         VStack(spacing: 0) {
-            LinearGradient(colors: [.black.opacity(0.62), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: landscape ? 120 : 150)
+            LinearGradient(stops: [.init(color: .black.opacity(0.88), location: 0), .init(color: .black.opacity(0.65), location: 0.42), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
+                .frame(height: landscape ? 140 : 170)
             Spacer(minLength: 0)
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.55), location: 0.5),
-                                   .init(color: .black.opacity(0.86), location: 1)], startPoint: .top, endPoint: .bottom)
-                .frame(height: landscape ? 200 : 300)
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.74), location: 0.45),
+                                   .init(color: .black.opacity(0.94), location: 1)], startPoint: .top, endPoint: .bottom)
+                .frame(height: landscape ? 180 : 330)
         }
         .frame(width: full.width, height: full.height)
         .allowsHitTesting(false)
@@ -507,7 +507,7 @@ struct PlayerScreen: View {
 
     private func landSubline(_ i: Int) -> String {
         let e = co.episodes[i]
-        if series.source.isLongVideo {
+        if longForm {
             return co.episodes.count > 1 ? "S1:E\(e.ep)" + (e.title.isEmpty ? "" : " · " + e.title) : (series.subtitle ?? Fmt.meta(series))
         }
         return (seasonTag.map { $0 + " · " } ?? "") + "第 \(e.ep) 集 / 共 \(co.episodes.count) 集"
@@ -596,7 +596,7 @@ struct PlayerScreen: View {
 
     private func meta(_ i: Int, skip: Bool) -> some View {
         let e = co.episodes[i]
-        let longList = series.source.isLongVideo
+        let longList = longForm
         let line: String, strong: String, rest: String
         if longList {
             if co.episodes.count > 1 { line = ""; strong = "S1:E\(e.ep)"; rest = e.title.isEmpty ? "" : " · " + e.title }
@@ -604,7 +604,7 @@ struct PlayerScreen: View {
         } else {
             line = seasonTag.map { $0 + " · " } ?? ""; strong = "第\(e.ep)集"; rest = " / 共\(co.episodes.count)集"
         }
-        return PlayerMetaRow(source: longList && co.episodes.count > 1 ? nil : series.source.label, line: line, lineStrong: strong, rest: rest,
+        return PlayerMetaRow(source: shortFixture ? "本地彩条测试" : (longList && co.episodes.count > 1 ? nil : series.source.label), line: line, lineStrong: strong, rest: rest,
                              showSkip: skip && showSkip, onSkip: skipIntro)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("player.episodeInfo")
@@ -619,6 +619,15 @@ struct PlayerScreen: View {
     }
 
     // MARK: Icon row
+
+    private var shortFixture: Bool {
+        #if DEBUG
+        return series.seriesId.hasPrefix("fixture/") && ProcessInfo.processInfo.environment["STV_FX_SHORT"] == "1"
+        #else
+        return false
+        #endif
+    }
+    private var longForm: Bool { series.source.isLongVideo && !shortFixture }
 
     private var qualityTag: String {
         if let t = co.tech, !t.resolution.isEmpty { return t.resolution }
@@ -742,7 +751,7 @@ struct PlayerScreen: View {
         case .quality:
             ScrollView {
                 QualityPopover(streams: co.streams[i] ?? [], chosen: co.chosen[i], sources: sourceRows,
-                               streamsTitle: series.source.isLongVideo ? series.source.streamSectionTitle : "画质") { s in
+                               streamsTitle: longForm ? series.source.streamSectionTitle : "画质") { s in
                     co.choose(s, for: i); closePanel()
                 }
             }.scrollIndicators(.hidden)
@@ -762,7 +771,7 @@ struct PlayerScreen: View {
         case .episodes:
             EpisodesPopover(episodes: co.episodes, current: co.current ?? 0,
                             seasons: seasonChips,
-                            currentSeason: series.seriesId, listStyle: series.source.isLongVideo,
+                            currentSeason: series.seriesId, listStyle: longForm,
                             dateLine: series.onlineTime > 0 ? Self.date(series.onlineTime) : nil,
                             onPick: { idx in closePanel(); co.select(idx) },
                             onSeason: { id in
@@ -931,7 +940,7 @@ struct PlayerScreen: View {
             try Task.checkCancellation()
             loadError = nil
             guard !d.episodes.isEmpty else { throw ProviderError.upstream("暂无可播放分集") }
-            let start = min(max(0, startIndex ?? library.progress(for: series)?.episodeIndex ?? 0), d.episodes.count - 1)
+            let start = min(max(0, startIndex ?? (shortFixture ? Int(ProcessInfo.processInfo.environment["STV_FX_START"] ?? "") : nil) ?? library.progress(for: series)?.episodeIndex ?? 0), d.episodes.count - 1)
             co.detail = d
             co.select(start)
             flashChrome()
@@ -1090,6 +1099,7 @@ struct PlayerTouchCatcher: UIViewRepresentable {
         v.isMultipleTouchEnabled = true   // pinch to fill / fit
         v.backgroundColor = .clear
         context.coordinator.bind(to: v)
+        v.onWindowChanged = { [weak c = context.coordinator] window in c?.mountPinch(in: window) }
         return v
     }
 
@@ -1114,6 +1124,11 @@ struct PlayerTouchCatcher: UIViewRepresentable {
         c.adjustPan.isEnabled = !locked
         c.doubleTapEnabled = playbackReady && !speedMode && !locked
         c.tap.isEnabled = !speedMode
+    }
+
+    static func dismantleUIView(_ uiView: CatcherView, coordinator: Coordinator) {
+        uiView.onWindowChanged = nil
+        coordinator.mountPinch(in: nil)
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
@@ -1165,9 +1180,17 @@ struct PlayerTouchCatcher: UIViewRepresentable {
             pinch.addTarget(self, action: #selector(handlePinch))
             pinch.delegate = self
             pinch.cancelsTouchesInView = false
-            view.addGestureRecognizer(pinch)
+            // Mounted on the containing window once available; see `mountPinch`.
             // Prefer long-press over tap when both could fire (hold, don't tap).
             tap.require(toFail: longPress)
+        }
+
+        private weak var pinchWindow: UIWindow?
+        func mountPinch(in window: UIWindow?) {
+            guard pinchWindow !== window else { return }
+            pinchWindow?.removeGestureRecognizer(pinch)
+            pinchWindow = window
+            window?.addGestureRecognizer(pinch)
         }
 
         @objc private func handleTap(_ g: UITapGestureRecognizer) {
@@ -1218,11 +1241,14 @@ struct PlayerTouchCatcher: UIViewRepresentable {
             }
         }
 
+        private var pinchDecided = false
         @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
-            // Decide once per pinch, as soon as it is clearly in or out.
-            guard g.state == .changed, abs(g.scale - 1) > 0.12 else { return }
+            if g.state == .began { pinchDecided = false }
+            // Decide once, but never disable/re-enable the recognizer mid-stream: that can lose the
+            // following inward gesture while UIKit is still ending the cancelled previous gesture.
+            guard g.state == .changed, !pinchDecided, abs(g.scale - 1) > 0.12 else { return }
+            pinchDecided = true
             onPinchFill(g.scale > 1)
-            g.isEnabled = false; g.isEnabled = true   // cancel the rest of this pinch
         }
 
         @objc private func handleAdjust(_ g: UIPanGestureRecognizer) {
@@ -1270,7 +1296,7 @@ struct PlayerTouchCatcher: UIViewRepresentable {
             guard let view else { return true }
             let x = gestureRecognizer.location(in: view).x
             // Left strip reserved for interactive pop — never claim it.
-            if x < view.edgeBackWidth { return false }
+            if gestureRecognizer !== pinch, x < view.edgeBackWidth { return false }
             if gestureRecognizer === adjustPan, let pan = gestureRecognizer as? UIPanGestureRecognizer {
                 guard !speedMode, Coordinator.side(pan, in: view, landscape: landscape) != nil else { return false }
                 let v = pan.velocity(in: view)
@@ -1281,6 +1307,8 @@ struct PlayerTouchCatcher: UIViewRepresentable {
     }
 
     final class CatcherView: UIView {
+        var onWindowChanged: ((UIWindow?) -> Void)?
+        override func didMoveToWindow() { super.didMoveToWindow(); onWindowChanged?(window) }
         var edgeBackWidth: CGFloat = 36
 
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

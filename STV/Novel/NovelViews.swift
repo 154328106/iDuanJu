@@ -203,7 +203,9 @@ struct NovelHomeView: View {
             LegadoSourceStore.shared.remove(Set(LegadoSourceStore.shared.sources.map(\.id)))
             LegadoSourceStore.shared.add(list)
         }
-        if let dir = ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE"], !dir.isEmpty,
+        let requested = ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE"]
+        let fixtureDir = requested.map { FileManager.default.fileExists(atPath: $0) ? $0 : (Bundle.main.resourceURL?.appendingPathComponent("ui_legado").path ?? $0) }
+        if let dir = fixtureDir, !dir.isEmpty,
         let rd = FileManager.default.contents(atPath: dir + "/routes.json"),
         let routes = (try? JSONSerialization.jsonObject(with: rd)) as? [String: String] {
             LegadoHTTP.transport = { req in
@@ -220,9 +222,12 @@ struct NovelHomeView: View {
                 LegadoSourceStore.shared.add(list)
             }
         }
-        guard store.books.isEmpty, let p = ProcessInfo.processInfo.environment["STV_NOVEL_SEED"], !p.isEmpty,
+        let requestedBook = ProcessInfo.processInfo.environment["STV_NOVEL_SEED"]
+        let seedPath = requestedBook.map { FileManager.default.fileExists(atPath: $0) ? $0 : (Bundle.main.url(forResource: "novel_sample_gbk", withExtension: "txt")?.path ?? $0) }
+        guard let p = seedPath, !p.isEmpty,
         let data = FileManager.default.contents(atPath: p),
-        let parsed = try? NovelImport.parse(data, fileName: (p as NSString).lastPathComponent) else { return }
+        let parsed = try? NovelImport.parse(data, fileName: (p as NSString).lastPathComponent),
+        !store.books.contains(where: { $0.title == parsed.title }) else { return }
         try? store.add(parsed, format: (p as NSString).pathExtension)
         #endif
     }

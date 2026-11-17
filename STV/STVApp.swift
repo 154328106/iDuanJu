@@ -158,7 +158,7 @@ struct DebugRouteHost: View {
             NavigationStack {
                 VerticalPlayerView(series: HGSeries(source: .telegram, seriesId: "fixture/1/0", title: ProcessInfo.processInfo.environment["STV_FX_TITLE"] ?? "公开测试流 · 横版 1280×720", cover: "",
                                                     duration: 60, onlineTime: 1_586_390_400, orientation: "landscape", page: URL(fileURLWithPath: path).absoluteString),
-                                   startIndex: 0).routes()
+                                   startIndex: Int(ProcessInfo.processInfo.environment["STV_FX_START"] ?? "") ?? 0).routes()
             }
         case .tgPlay(let ref):
             NavigationStack { TGPlayRouteHost(ref: ref).routes() }
