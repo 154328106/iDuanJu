@@ -9,14 +9,14 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 
 **下载（仅保留以下两个新版）**：
 
-- [Android 1.5.10 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android) · [直接下载 APK](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5.10-novel-android/iDuanJu-1.5.10-novel-android.apk)
-- [iOS 1.5 build 10 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b10-novel) · [直接下载未签名 IPA](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5b10-novel/STV-1.5b10-unsigned.ipa)
+- [Android 1.5.12 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.12-ui-android) · [直接下载 APK](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5.12-ui-android/iDuanJu-1.5.12-ui-android.apk)
+- [iOS 1.5 build 12 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b12-ui) · [直接下载未签名 IPA](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5b12-ui/STV-1.5b12-unsigned.ipa)
 
-新版包含小说改动和上一版红果取流、筛选修复。Android 与 1.5.8 使用同一分发签名，可下载 APK 覆盖安装；iOS IPA 需自行重签侧载。请下载 Assets 中的 APK / IPA，SHA-256 见同页附件。
+新版为 UI 重设计版，并包含此前的小说、红果取流与筛选修复。Android 与 1.5.8 使用同一分发签名，可下载 APK 覆盖安装；iOS IPA 需自行重签侧载。请下载 Assets 中的 APK / IPA，SHA-256 见同页附件。
 
-### UI redesign 验收分支（1.5 build 11）
+### 2026-11-17 UI 重设计版（iOS 1.5 build 12 / Android 1.5.12）
 
-`codex/ui-redesign` 的版本、验收范围、签名限制与已知测试缺口见 [交付记录](docs/ui-redesign-1.5b11.md)。此分支打包不等于顶部正式发布页已更新；本地 Android 包使用 Debug 证书，iOS 为未签名 IPA。
+更新内容见 [发布说明](docs/releases/ui-redesign-1.5b12.md)，验收范围与已知缺口见 [交付记录](docs/ui-redesign-1.5b11.md)。
 
 ### 2026-11-17 小说增强版
 

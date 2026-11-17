@@ -572,7 +572,11 @@ private struct PosterHero: View {
     }
 
     /// `.hero`: 14 pt padding around a 112 pt 3:4 poster (landscape sites: 16:9 at 176 pt).
-    private var height: CGFloat { landscape ? 14 + 99 + 14 + 62 : 14 + 112 * 4 / 3 + 14 }
+    private static let pad: CGFloat = 14
+    private static let posterHeight: CGFloat = 112 * 4 / 3
+    private static let landscapeHeight: CGFloat = pad + 99 + pad + 62
+    private static let portraitHeight: CGFloat = pad + posterHeight + pad
+    private var height: CGFloat { landscape ? Self.landscapeHeight : Self.portraitHeight }
     /// DEBUG `STV_HERO_STILL=1` (UI tests) disables auto-advance so taps never race a page change.
     static var autoAdvance: Bool {
         #if DEBUG

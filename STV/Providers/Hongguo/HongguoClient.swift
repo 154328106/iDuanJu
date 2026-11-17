@@ -755,7 +755,8 @@ actor HongguoClient {
         b[8] = (b[8] & 0x3f) | 0x80
         let h = HGPlayerSign.hexStr(b)
         let c = Array(h)
-        return [c[0..<8], c[8..<12], c[12..<16], c[16..<20], c[20..<32]].map { String($0) }.joined(separator: "-")
+        let parts: [ArraySlice<Character>] = [c[0..<8], c[8..<12], c[12..<16], c[16..<20], c[20..<32]]
+        return parts.map { String($0) }.joined(separator: "-")
     }
 
     private func purePlayerPairs() async throws -> [(String, String)] {
