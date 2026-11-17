@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+enum LegadoSourceImportError: LocalizedError {
+    case unsupportedFormat(String)
+    var errorDescription:String? { if case .unsupportedFormat(let format)=self { return "暂不支持\(format)运行时；不是坏源，请勿当作文本书源导入" };return nil }
+}
+
 /// One 「阅读」(Legado) book source. Decoded leniently: rule values may be strings, numbers or nested JSON
 /// (we keep them as strings); unknown keys are ignored. Only text sources (bookSourceType 0) are supported.
 struct LegadoSource: Codable, Hashable, Identifiable {
@@ -27,7 +32,7 @@ struct LegadoSource: Codable, Hashable, Identifiable {
     var id: String { bookSourceUrl }
     var isOn: Bool { enabled ?? true }
     var hasLogin: Bool { !(loginUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var supported: Bool { (bookSourceType ?? 0) == 0 && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty) }
+    var supported: Bool { !bookSourceUrl.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && (bookSourceType ?? 0) == 0 && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty) }
 
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookSourceComment, enabled, header, searchUrl,
@@ -129,6 +134,10 @@ final class LegadoSourceStore {
     nonisolated static func parse(_ data: Data) throws -> [LegadoSource] {
         let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         let d = Data(trimmed.utf8)
+        let object = try JSONSerialization.jsonObject(with:d)
+        let rows = (object as? [Any])?.compactMap{$0 as? [String:Any]} ?? (object as? [String:Any]).map{[$0]} ?? []
+        if rows.contains(where:{$0["sites"] != nil || $0["spider"] != nil || $0["lives"] != nil}) { throw LegadoSourceImportError.unsupportedFormat(" TVBox ") }
+        if rows.contains(where:{$0["sourceUrl"] != nil && ($0["ruleArticles"] != nil || $0["sortUrl"] != nil)}) { throw LegadoSourceImportError.unsupportedFormat(" Legado RSS 订阅源") }
         if trimmed.hasPrefix("[") { return try JSONDecoder().decode([LossyItem].self, from: d).compactMap(\.value) }
         return [try JSONDecoder().decode(LegadoSource.self, from: d)]
     }

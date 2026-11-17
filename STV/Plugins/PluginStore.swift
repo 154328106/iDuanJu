@@ -283,32 +283,56 @@ final class PluginStore {
 
 /// Download / parse / validate a plugin before the user confirms. Nothing here touches installed state.
 enum PluginInstaller {
+    private final class NoRedirects:NSObject,URLSessionTaskDelegate,@unchecked Sendable {
+        func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void){completionHandler(nil)}
+    }
+    static func checkedDownloadURL(_ value:String) throws -> URL {
+        guard let url=URL(string:value),url.scheme=="https",let host=url.host,!host.isEmpty,
+              url.user==nil,url.password==nil,url.port==nil || url.port==443,!NetGuard.isIPLiteral(host) else {
+            throw PluginError.install("插件/订阅地址只支持无凭证的 HTTPS 公网域名和443端口")
+        }
+        return url
+    }
     static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.httpCookieStorage = nil
         c.httpShouldSetCookies = false
         c.urlCache = nil
         c.timeoutIntervalForRequest = 20
-        return URLSession(configuration: c)
+        c.timeoutIntervalForResource = 30
+        return URLSession(configuration: c, delegate: NoRedirects(), delegateQueue: nil)
     }()
 
     static func download(_ url: String, limit: Int) async throws -> Data {
-        guard let u = URL(string: url), u.scheme == "https" || u.scheme == "http", let host = u.host, !NetGuard.isIPLiteral(host) || !NetGuard.isBlockedIP(host) else {
-            throw PluginError.install("地址无效：\(url)")
+        var next=url
+        for hop in 0...5 {
+            let u=try checkedDownloadURL(next)
+            var req=URLRequest(url:u)
+            req.setValue("STV/\(AppInfo.version) plugin-installer",forHTTPHeaderField:"User-Agent")
+            let data:Data;let response:HTTPURLResponse
+            #if DEBUG
+            let fixture=PluginFixtures.responder?(req)
+            #else
+            let fixture:PluginFixtures.Reply?=nil
+            #endif
+            if let fixture {
+                data=fixture.body
+                response=HTTPURLResponse(url:u,statusCode:fixture.status,httpVersion:nil,headerFields:fixture.headers)!
+            } else {
+                if await Task.detached(operation:{NetGuard.resolvesToBlocked(u.host!)}).value { throw PluginError.install("插件/订阅地址解析到本机或内网，已拒绝") }
+                let (body,resp)=try await session.data(for:req)
+                guard let http=resp as? HTTPURLResponse else { throw PluginError.install("插件下载响应无效") }
+                data=body;response=http
+            }
+            if [301,302,303,307,308].contains(response.statusCode),let location=response.value(forHTTPHeaderField:"Location") {
+                guard hop<5,let target=URL(string:location,relativeTo:u)?.absoluteURL else { throw PluginError.install("插件跳转过多或地址无效") }
+                next=target.absoluteString;continue
+            }
+            guard (200..<300).contains(response.statusCode) else { throw PluginError.install("下载失败 HTTP \(response.statusCode)：\(u.host ?? "")") }
+            guard data.count<=limit else { throw PluginError.install("文件太大（>\(limit/1024)KB）") }
+            return data
         }
-        #if DEBUG
-        if let fx = PluginFixtures.responder, let r = fx(URLRequest(url: u)) { return r.body }
-        #endif
-        if await Task.detached(operation: { NetGuard.resolvesToBlocked(host) }).value {
-            throw PluginError.install("\(host) 解析到本机/内网地址，已拒绝")
-        }
-        var req = URLRequest(url: u)
-        req.setValue("STV/\(AppInfo.version) plugin-installer", forHTTPHeaderField: "User-Agent")
-        let (data, resp) = try await session.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else { throw PluginError.install("下载失败 HTTP \(code)：\(u.host ?? "")") }
-        guard data.count <= limit else { throw PluginError.install("文件太大（>\(limit / 1024)KB）") }
-        return data
+        throw PluginError.install("插件跳转过多")
     }
 
     /// Text pasted / scanned by the user: a manifest URL, a subscription URL, or a bundle JSON.

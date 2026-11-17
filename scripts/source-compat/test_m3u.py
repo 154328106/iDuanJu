@@ -18,4 +18,13 @@ class M3UTest(unittest.TestCase):
  def test_duplicate_titles_keep_unique_ids(self):
   a=parse('#EXTM3U\n#EXTINF:-1,A\nhttps://a.org/a\n#EXTINF:-1,A\nhttps://a.org/b')
   self.assertEqual([x['id'] for x in a],['1','2'])
+
+
+class SafetyReview(unittest.TestCase):
+    def test_ambiguous_hosts_and_encoded_secret_queries(self):
+        from m3u_to_idj import public_url, parse
+        for url in ['https://127.1/a','https://localhost./a','https://cdn.example.org/a?auth_key=secret','https://cdn.example.org/a?%74oken=secret','https://cdn.example.org/a?X-Amz-Signature=secret']:
+            with self.assertRaises(ValueError): public_url(url)
+        with self.assertRaises(ValueError): parse('#EXTM3U\n#EXTINF:-1,Test\n#EXTVLCOPT:http-user-agent=bad\x00value\nhttps://cdn.example.org/a.m3u8')
+
 if __name__=='__main__': unittest.main()

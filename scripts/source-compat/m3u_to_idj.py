@@ -3,18 +3,24 @@
 Does not fetch URLs, execute scripts, copy cookies, or claim arbitrary TVBox support.
 """
 import argparse, base64, hashlib, ipaddress, json, re
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, parse_qsl
 from pathlib import Path
 
 
 def public_url(raw, base=None):
     url = urljoin(base or '', raw.strip())
+    if re.search(r'[\x00-\x20\x7f\\]', url):
+        raise ValueError('URL contains whitespace, controls or backslashes')
     u = urlsplit(url)
     if u.scheme not in ('https', 'http') or not u.hostname or u.username or u.password:
         raise ValueError('only credential-free HTTP(S) URLs are supported')
-    if u.port and u.port not in (80, 443):
+    if u.port and u.port != (443 if u.scheme == 'https' else 80):
         raise ValueError('nonstandard ports need a reviewed adapter')
     host = u.hostname.lower()
+    if not host.isascii() or host.endswith('.') or all(re.fullmatch(r'(?:0x[0-9a-f]+|[0-9]+)', part, re.I) for part in host.split('.')):
+        raise ValueError('ambiguous numeric, trailing-dot or non-ASCII host needs a reviewed adapter')
+    if not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', host):
+        raise ValueError('invalid DNS hostname')
     try:
         ipaddress.ip_address(host)
     except ValueError:
@@ -23,7 +29,8 @@ def public_url(raw, base=None):
     else:
         raise ValueError('IP literal URLs are not supported by idj1 permissions')
     # Do not turn expiring/secret URL credentials into persisted episode IDs.
-    if re.search(r'(?i)(?:^|[?&])(token|auth|key|password|sign|signature|cookie)=', u.query and '?' + u.query):
+    sensitive = re.compile(r'(?i)^(?:token|access[_-]?token|auth|auth_key|authorization|key|api[_-]?key|password|pass|secret|sign|signature|sig|cookie|x-amz-.+|x-goog-.+)$')
+    if any(sensitive.fullmatch(key) for key, _ in parse_qsl(u.query, keep_blank_values=True) + parse_qsl(u.fragment, keep_blank_values=True)):
         raise ValueError('signed/authenticated URL needs an adapter; do not persist credentials')
     return url, host
 
@@ -55,7 +62,7 @@ def parse(text, base=None):
         elif line.startswith('#EXTVLCOPT:'):
             key, _, value = line[len('#EXTVLCOPT:'):].partition('=')
             mapped = {'http-referrer': 'Referer', 'http-user-agent': 'User-Agent'}.get(key.lower())
-            if not mapped or '\r' in value or '\n' in value:
+            if meta is None or not mapped or len(value)>500 or any(ord(c)<32 or ord(c)==127 for c in value):
                 raise ValueError('unsupported/unsafe VLC option: ' + key)
             if mapped == 'Referer': public_url(value)
             headers[mapped] = value

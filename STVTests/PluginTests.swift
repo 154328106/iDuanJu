@@ -277,6 +277,19 @@ final class PluginTests: XCTestCase {
         }
     }
 
+    func testInstallerRejectsUnsafeRedirectsAndHeaders() async throws {
+        for url in ["http://example.org/x","https://u:p@example.org/x","https://127.0.0.1/x","https://example.org:8443/x"] {
+            XCTAssertThrowsError(try PluginInstaller.checkedDownloadURL(url))
+        }
+        var calls=0
+        PluginFixtures.responder={ request in calls+=1;return .init(status:302,headers:["Location":"http://127.0.0.1/private"],body:Data()) }
+        defer {PluginFixtures.responder=nil}
+        do { _=try await PluginInstaller.download("https://example.org/start",limit:1024);XCTFail("unsafe redirect accepted") } catch {}
+        XCTAssertEqual(calls,1,"must reject redirected target before any fetch")
+        let headers=PluginOut.headers(["Referer":"safe\r\nInjected: yes","User-Agent":"safe","Authorization":"not allowed"])
+        XCTAssertNil(headers["Referer"]);XCTAssertNil(headers["Authorization"]);XCTAssertEqual(headers["User-Agent"],"safe")
+    }
+
     func testAIMirrorRequiresCatalogNotLandingPage() {
         XCTAssertFalse(HuangguoClient.isAICatalogResponse(status:200,data:Data("<title>最新地址入口</title><div class='hg-drama-card'>".utf8)))
         XCTAssertFalse(HuangguoClient.isAICatalogResponse(status:404,data:Data(#"{"data":{"items":[]}}"#.utf8)))

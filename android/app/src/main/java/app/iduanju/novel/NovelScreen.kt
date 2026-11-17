@@ -117,10 +117,11 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     DisposableEffect(Unit){onDispose{rankGeneration++;rankJob?.cancel()}}
     fun saveSources() { prefs.edit().putString("sources", JSONArray(sources.map { it.json }).toString()).apply() }
     fun addSources(raw: String) {
-        val parsed = NovelSources.import(raw)
-        require(parsed.isNotEmpty()) { "没有可用的文本书源" }
+        val report = NovelSources.importReport(raw)
+        val parsed = report.sources
+        require(parsed.isNotEmpty()) { if(report.unsupported>0)report.message else "没有可用的文本书源；仅支持 Legado 文本格式" }
         for (s in parsed) { sources.removeAll { it.id == s.id }; sources.add(s) }
-        saveSources(); selected = parsed.first().id; importResult = "已导入 ${parsed.size} 个书源"
+        saveSources(); selected = parsed.first().id; importResult = report.message
     }
     suspend fun read(index: Int, selectedSource: NovelSource? = source, bookToSave: NovelHit? = currentBook) {
         val s = selectedSource ?: return

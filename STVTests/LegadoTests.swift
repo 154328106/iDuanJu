@@ -418,6 +418,19 @@ final class RealRankRegressionTests: XCTestCase {
     private var root: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/legado-rank") }
     override func tearDown() { LegadoHTTP.transport = nil }
     /// Multiline request options are part of book identity, not a list of links.
+    func testUnsupportedFormatsAreNotBadSources() throws {
+        for kind in [1,2,4] {
+            let raw="{\"bookSourceUrl\":\"https://example.org\",\"bookSourceType\":\(kind),\"exploreUrl\":\"/catalog\"}"
+            let source=try XCTUnwrap(LegadoSourceStore.parse(Data(raw.utf8)).first)
+            XCTAssertFalse(source.supported)
+        }
+        for raw in [#"[{"sourceUrl":"https://example.org","ruleArticles":"a"}]"#,#"{"sites":[],"spider":"x.jar"}"#] {
+            XCTAssertThrowsError(try LegadoSourceStore.parse(Data(raw.utf8))) { error in
+                XCTAssertTrue(error.localizedDescription.contains("不是坏源"))
+            }
+        }
+    }
+
     func testMultilinePostBookURLPreservesIdentity() {
         let raw="https://example.org/detail,{\n  \"method\": \"POST\",\n  \"body\": \"book_id=12\"\n}"
         XCTAssertEqual(LegadoClient.firstRequestURL(raw),raw)

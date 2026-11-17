@@ -17,6 +17,31 @@ final class NovelUITests: XCTestCase {
         return parts.count == 2 ? (parts[0], parts[1]) : (0, 0)
     }
 
+    func testUnsupportedImportsShowHonestNativeFeedback() {
+        continueAfterFailure=false
+        app=XCUIApplication();app.launchEnvironment=["STV_HOME_TAB":"novel","STV_NOVEL_PAGE":"import"]
+        func input(_ raw:String) {
+            app.launch()
+            let field=el("import.url");XCTAssertTrue(field.waitForExistence(timeout:10))
+            field.tap();field.typeText(raw)
+            XCTAssertEqual(field.value as? String,raw)
+            field.typeText("\n")
+        }
+        input(#"{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":1,"exploreUrl":"/catalog"}"#)
+        let audio=app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","当前书源类型不支持")).firstMatch
+        let shown=audio.waitForExistence(timeout:10)
+        if !shown,let dir=ProcessInfo.processInfo.environment["STV_SHOT_DIR"] {
+            try? app.debugDescription.write(toFile:dir+"/ios-import-ui-debug.txt",atomically:true,encoding:.utf8)
+            shot("ios-import-ui-debug")
+        }
+        XCTAssertTrue(shown)
+        app.swipeUp();shot("ios-unsupported-audio-import")
+        app.terminate()
+        input(#"[{"sourceUrl":"https://compat-rss.invalid","ruleArticles":"a"}]"#)
+        XCTAssertTrue(app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","暂不支持 Legado RSS")).firstMatch.waitForExistence(timeout:10))
+        app.swipeUp();shot("ios-unsupported-rss-import")
+    }
+
     func testReadTurnPagesAndJumpChapter() {
         continueAfterFailure = false
         app = XCUIApplication()

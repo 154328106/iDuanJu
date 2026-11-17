@@ -40,12 +40,20 @@ object NovelSources {
     /** Optional diagnostic observer; disabled by default. Never provides cookies or auth headers. */
     @Volatile var requestObserver: ((method:String,url:String,body:String?) -> Unit)? = null
 
-    fun import(text: String): List<NovelSource> {
-        val trimmed = text.trim().removePrefix("\uFEFF")
-        val array = if (trimmed.startsWith("[")) JSONArray(trimmed) else JSONArray().put(JSONObject(trimmed))
-        return (0 until array.length()).mapNotNull { i -> array.optJSONObject(i)?.let { o ->
-            if (o.optInt("bookSourceType", 0) != 0 || o.optString("bookSourceUrl").isBlank()) null else NovelSource(o)
-        } }.distinctBy { it.id }
+    data class ImportReport(val sources:List<NovelSource>,val unsupported:Int,val invalid:Int) {
+        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持有声、视频、漫画等非文本书源；不是坏源或网站失效" else
+            "已导入 ${sources.size} 个文本书源" + (if(unsupported>0) "；跳过 $unsupported 个不支持的非文本源（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
+    }
+    fun import(text:String):List<NovelSource> = importReport(text).sources
+    fun importReport(text:String):ImportReport {
+        val trimmed=text.trim().removePrefix("\uFEFF")
+        val array=if(trimmed.startsWith("["))JSONArray(trimmed)else JSONArray().put(JSONObject(trimmed))
+        val rows=(0 until array.length()).mapNotNull{array.optJSONObject(it)}
+        require(rows.none{it.has("sites")||it.has("spider")||it.has("lives")}){"这是 TVBox 配置，小说导入器不支持；不是坏源"}
+        require(rows.none{it.has("sourceUrl")&&(it.has("ruleArticles")||it.has("sortUrl"))}){"暂不支持 Legado RSS 订阅源运行时；不是坏源，请勿当作文本书源导入"}
+        val unsupported=rows.count{it.optInt("bookSourceType",0)!=0}
+        val valid=rows.filter{it.optInt("bookSourceType",0)==0&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
+        return ImportReport(valid,unsupported,array.length()-rows.count{it.optInt("bookSourceType",0)!=0||it.optString("bookSourceUrl").isNotBlank()})
     }
 
     fun absolute(raw: String, base: String): String {
