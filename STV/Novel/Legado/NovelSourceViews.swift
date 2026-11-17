@@ -143,6 +143,7 @@ struct NovelSearchView: View {
                     } description: { Text("先在「书源」里导入「阅读」(Legado) 书源") } actions: {
                         Button("管理书源") { manage = true }.buttonStyle(.borderedProminent)
                     }
+                    .listRowBackground(STVTheme.bg).listRowSeparator(.hidden)
                 } else if total > 0 {
                     Section {
                         ForEach(groups) { g in
@@ -158,9 +159,11 @@ struct NovelSearchView: View {
                     }
                     if done >= total && groups.isEmpty {
                         ContentUnavailableView("没有找到书籍", systemImage: "magnifyingglass", description: Text("换个关键词，或在书源配置中启用其他来源。"))
+                            .listRowBackground(STVTheme.bg).listRowSeparator(.hidden)
                     }
                 } else {
                     ContentUnavailableView("搜索你的下一本书", systemImage: "magnifyingglass", description: Text("输入书名或作者，同时搜索已启用的书源。相同书籍会合并显示。"))
+                        .listRowBackground(STVTheme.bg).listRowSeparator(.hidden)
                 }
             }
             .listStyle(.plain)
