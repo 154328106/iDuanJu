@@ -28,7 +28,7 @@ final class SoftwarePiPTransportDelegate: NSObject, AVPictureInPictureSampleBuff
     func pictureInPictureController(_ controller: AVPictureInPictureController, didTransitionToRenderSize size: CMVideoDimensions) {
         wrapped.pictureInPictureController(controller, didTransitionToRenderSize: size)
     }
-    func pictureInPictureController(_ controller: AVPictureInPictureController, skipByInterval interval: CMTime, completionHandler completion: @escaping () -> Void) {
-        wrapped.pictureInPictureController(controller, skipByInterval: interval, completionHandler: completion)
+    func pictureInPictureController(_ controller: AVPictureInPictureController, skipByInterval interval: CMTime, completion: @escaping () -> Void) {
+        wrapped.pictureInPictureController(controller, skipByInterval: interval, completion: completion)
     }
 }

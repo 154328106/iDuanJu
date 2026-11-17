@@ -330,6 +330,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func togglePiP() {
         guard let pip else { return }
         if pip.isPictureInPictureActive {
+            continuePiP = false
             restoringPiP = true
             pip.stopPictureInPicture()
         } else if pip.isPictureInPicturePossible {
@@ -378,6 +379,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func didBecomeActive() {
         guard backgrounded else { return }
         backgrounded = false
+        continuePiP = false
         if pip?.isPictureInPictureActive == true {
             restoringPiP = true
             pip?.stopPictureInPicture()
