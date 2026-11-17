@@ -117,7 +117,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                     if (epIndex + 1 < n) epIndex += 1
                 }
             }
-            override fun onPlayerError(e: PlaybackException) { error = "播放失败：${e.errorCodeName}" }
+            override fun onPlayerError(e: PlaybackException) { error = "播放失败：${e.errorCodeName}"; keepScreenOn(activity, false) }
+            // Keep the display awake only while frames are actually playing (portrait, landscape, same activity window).
+            override fun onIsPlayingChanged(isPlaying: Boolean) { keepScreenOn(activity, isPlaying) }
             override fun onTracksChanged(t: androidx.media3.common.Tracks) {
                 tags = TechTags.from(player, quality)
             }
@@ -126,7 +128,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { tags = TechTags.from(player, quality) }
         }
         player.addListener(l)
-        onDispose { player.removeListener(l); player.release() }
+        onDispose { keepScreenOn(activity, false); player.removeListener(l); player.release() }
     }
 
     LaunchedEffect(seriesId) {
@@ -605,4 +607,13 @@ private fun ProgressBar(pos: Long, dur: Long, buffered: Long, onSeek: (Long) -> 
 private fun fmt(ms: Long): String {
     val s = (ms / 1000).toInt(); val h = s / 3600; val m = s / 60 % 60; val r = s % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, r) else "%d:%02d".format(m, r)
+}
+
+
+/** FLAG_KEEP_SCREEN_ON on the hosting window while video plays; cleared on pause, end, error and leaving the player. */
+internal fun keepScreenOn(activity: android.app.Activity?, on: Boolean) {
+    val w = activity?.window ?: return
+    if (on) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    android.util.Log.i("IDJ", "keepScreenOn=$on")
 }
