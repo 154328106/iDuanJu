@@ -85,8 +85,12 @@ object BoardCache {
     suspend fun load(b: BoardSpec, force: Boolean = false) {
         synchronized(loading) { if (b.id in loading || (!force && items.containsKey(b.id))) return; loading.add(b.id) }
         try {
-            val r = withContext(Dispatchers.IO) { IdjApp.instance.hongguo.rank(b.sub, b.genre).items }
+            // NonCancellable: leaving 首页 (e.g. opening a drama) must not throw away a fetch that is already in
+            // flight, nor mark the board as failed; the result lands in the cache for when the page is shown again.
+            android.util.Log.i("IDJ", "board fetch ${b.id}")
+            val r = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { IdjApp.instance.hongguo.rank(b.sub, b.genre).items }
             items[b.id] = r; failed.remove(b.id)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e
         } catch (e: Exception) { failed[b.id] = e.message ?: "加载失败"; android.util.Log.w("IDJ", "board ${b.id} failed: $e") }
         finally { synchronized(loading) { loading.remove(b.id) } }
     }
@@ -349,7 +353,7 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (Stri
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp + 72.dp)) {
         if (subs.size > 1) {
-            SegmentedTabs(subs, tab, { it.subLabel }, { tab = it }, Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
+            SegmentedTabs(subs, tab, { it.subLabel }, { tab = it; HomeSubSel.map[source.label] = subs.indexOf(it) }, Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
         }
         if (tab == HomeTab.ActorRank) {
             val go = app.iduanju.ui.LocalNavigate.current

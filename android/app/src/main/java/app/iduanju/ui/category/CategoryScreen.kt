@@ -58,28 +58,32 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewModelScope
 
 /** ui-redesign 01–03 (iOS CategoryView twin): 榜单 = segmented 剧种 + chips + top-3 posters + ranked rows;
  *  筛选找片 = card panel that collapses into a sticky glass strip. */
 @Composable
 fun CategoryScreen(onOpenDetail: (String) -> Unit) {
     val c = IdjThemeColors
-    val scope = rememberCoroutineScope()
-    var filterMode by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page == "filter") }
-    var genre by remember { mutableStateOf(HGRankGenre.all) }
-    var sub by remember { mutableStateOf(HGRankSub.hotSearch) }
-    var panel by remember { mutableStateOf<HGPanel?>(null) }
-    var panelErr by remember { mutableStateOf<String?>(null) }
-    val selected = remember { mutableStateMapOf<String, String>() }
-    val names = remember { mutableStateMapOf<String, String>() }
-    val items = remember { mutableStateListOf<HGSeries>() }
-    var nextOffset by remember { mutableIntStateOf(0) }
-    var session by remember { mutableStateOf<String?>(null) }
-    var hasMore by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var err by remember { mutableStateOf<String?>(null) }
-    var gen by remember { mutableIntStateOf(0) }
-    var panelGen by remember { mutableIntStateOf(0) }
+    // State lives in a ViewModel scoped to the 找剧 back-stack entry: opening a drama and coming back keeps the
+    // list, filters, paging cursor and scroll position, and in-flight loads are not cancelled by leaving.
+    val vm: CategoryState = androidx.lifecycle.viewmodel.compose.viewModel()
+    val scope = vm.scope
+    var filterMode by vm.filterMode
+    var genre by vm.genre
+    var sub by vm.sub
+    var panel by vm.panel
+    var panelErr by vm.panelErr
+    val selected = vm.selected
+    val names = vm.names
+    val items = vm.items
+    var nextOffset by vm.nextOffset
+    var session by vm.session
+    var hasMore by vm.hasMore
+    var loading by vm.loading
+    var err by vm.err
+    var gen by vm.gen
+    var panelGen by vm.panelGen
 
     fun load(reset: Boolean) {
         if (loading && !reset) return
@@ -118,11 +122,14 @@ fun CategoryScreen(onOpenDetail: (String) -> Unit) {
         catch (e: Exception) { if (token == panelGen) panelErr = e.message }
     }
     LaunchedEffect(filterMode, genre, sub) {
+        val key = "$filterMode/$genre/$sub"
+        // Returning from detail re-enters composition with the same key: keep the cached list, no refetch.
+        if (vm.loadedKey == key && (items.isNotEmpty() || loading)) { android.util.Log.i("IDJ", "category cache hit $key items=${items.size}"); return@LaunchedEffect }
         if (filterMode && panel == null) loadPanel()
         if (!genre.subs.contains(sub)) sub = genre.subs[0]
-        if (!filterMode || panel != null) load(true)
+        if (!filterMode || panel != null) { vm.loadedKey = "$filterMode/$genre/$sub"; android.util.Log.i("IDJ", "category load ${vm.loadedKey}"); load(true) }
     }
-    val grid = rememberLazyGridState()
+    val grid = vm.grid
     LaunchedEffect(Unit) { if(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.scroll) { kotlinx.coroutines.delay(2500); grid.scrollToItem(3) } }
     LaunchedEffect(grid) {
         snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
@@ -303,3 +310,25 @@ internal fun RankRow(s: HGSeries, rank: Int, onOpen: (String) -> Unit) {
 /** Board grids (BoardScreen) use the same redesigned cell. */
 @Composable
 internal fun NumberedPosterCell(s: HGSeries, rank: Int?, onOpen: (String) -> Unit) = PosterCell(s, rank, null, onOpen, Modifier.padding(bottom = 16.dp))
+
+
+class CategoryState : androidx.lifecycle.ViewModel() {
+    val scope get() = viewModelScope
+    val filterMode = mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page == "filter")
+    val genre = mutableStateOf(HGRankGenre.all)
+    val sub = mutableStateOf(HGRankSub.hotSearch)
+    val panel = mutableStateOf<HGPanel?>(null)
+    val panelErr = mutableStateOf<String?>(null)
+    val selected = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    val names = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    val items = androidx.compose.runtime.mutableStateListOf<HGSeries>()
+    val nextOffset = androidx.compose.runtime.mutableIntStateOf(0)
+    val session = mutableStateOf<String?>(null)
+    val hasMore = mutableStateOf(false)
+    val loading = mutableStateOf(false)
+    val err = mutableStateOf<String?>(null)
+    val gen = androidx.compose.runtime.mutableIntStateOf(0)
+    val panelGen = androidx.compose.runtime.mutableIntStateOf(0)
+    var loadedKey: String? = null
+    val grid = androidx.compose.foundation.lazy.grid.LazyGridState()
+}
