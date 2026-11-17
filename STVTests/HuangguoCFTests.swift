@@ -52,7 +52,13 @@ final class HuangguoCFTests: XCTestCase {
 
     func testClearanceCookieSyncsIntoAppJar() throws {
         let jar = HTTPCookieStorage.shared
-        defer { for c in jar.cookies ?? [] where c.domain.hasSuffix("huangguo.video") { jar.deleteCookie(c) } }
+        // Isolate the test from cookies set by real simulator verification (e.g. _hgs), then restore them.
+        let saved = (jar.cookies ?? []).filter { $0.domain.hasSuffix("huangguo.video") }
+        saved.forEach { jar.deleteCookie($0) }
+        defer {
+            for c in jar.cookies ?? [] where c.domain.hasSuffix("huangguo.video") { jar.deleteCookie(c) }
+            saved.forEach { jar.setCookie($0) }
+        }
         let c = try XCTUnwrap(HTTPCookie(properties: [.domain: ".huangguo.video", .path: "/", .name: "cf_clearance", .value: "v",
                                                       .secure: "TRUE", .expires: Date().addingTimeInterval(3600)]))
         let other = try XCTUnwrap(HTTPCookie(properties: [.domain: "example.com", .path: "/", .name: "x", .value: "y"]))
