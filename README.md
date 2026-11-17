@@ -7,9 +7,10 @@
 i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / Telegram 频道聚合播放器，另有原生 Kotlin 编写的
 [Android 版](#android-版)。App 本身**不托管任何内容**，所有数据都由你的设备直接向各个公开站点请求。
 
-**下载**：到 [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) 获取 iOS 未签名 IPA 和 Android APK
-（[Android 1.5.10 小说统一主题版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android)、
-[iOS 1.5 build 10 小说统一主题版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b10-novel)）。
+**下载（仅保留以下两个新版）**：
+
+- [Android 1.5.10 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android) · [直接下载 APK](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5.10-novel-android/iDuanJu-1.5.10-novel-android.apk)
+- [iOS 1.5 build 10 发布页](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b10-novel) · [直接下载未签名 IPA](https://github.com/my-name-is-alan/iDuanJu/releases/download/v1.5b10-novel/STV-1.5b10-unsigned.ipa)
 
 新版包含小说改动和上一版红果取流、筛选修复。Android 与 1.5.8 使用同一分发签名，可下载 APK 覆盖安装；iOS IPA 需自行重签侧载。请下载 Assets 中的 APK / IPA，SHA-256 见同页附件。
 
@@ -17,7 +18,7 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 
 - 按真实合集 1335 修复发现分组、JS 生成请求、部分脚本与正文兼容，榜单改为顶部分组＋左侧栏目＋封面排名列表。
 - 详情和阅读页加入缓存 / 下载、预取章数设置、同书换源与章节进度接续；已缓存文字可离线读取，失败后可继续下载。
-- 番茄《十日终焉》、书旗《凡人修仙传》的榜单、搜索、目录、前三章正文及离线缓存已实际验证，并修复 Android 设备上的 ICU 正则与 JSON 桥接差异。小说榜单、搜索、书源配置和缓存页统一使用应用蓝色主题及浅深色背景。完整范围见 [本轮验收记录](docs/novel-followup-20261117.md)；图片正文和部分 403 来源仍不支持。旧 `hgfix` 安装包不含小说改动，请使用上方新版。
+- 番茄《十日终焉》、书旗《凡人修仙传》的榜单、搜索、目录、前三章正文及离线缓存已实际验证，并修复 Android 设备上的 ICU 正则与 JSON 桥接差异。小说榜单、搜索、书源配置和缓存页统一使用应用蓝色主题及浅深色背景。完整范围见 [本轮验收记录](docs/novel-followup-20261117.md)；图片正文和部分 403 来源仍不支持。
 
 使用：小说 → 书源 → 导入自己的 Legado 合集 → 在榜单顶部选源、左侧选栏目。详情或阅读页进入“下载 / 缓存”，可缓存后 50 / 200 章或全本、调整提前缓存章数；“换源”会查找同名同作者书籍并接续章节。下载时保持应用前台，已缓存文字可离线阅读。本轮用 [合集 1335](https://www.yckceo.com/yuedu/shuyuans/json/id/1335.json) 做测试，不把第三方书源内置到安装包。
 
@@ -28,7 +29,7 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 
 ### 2026-11-16 更新
 
-- 红果取流与筛选同步至 gateway `0613b49`：当前 Medusa 播放签名、同身份端点回退与有界换设备；筛选请求独立使用 551，按真人剧 / 漫剧 / AI 剧加载对应面板。已包含在上方带 `hgfix` 的红果修复版中；原始 1.5.8 / 1.5b8 下载不包含修复。
+- 红果取流与筛选同步至 gateway `0613b49`：当前 Medusa 播放签名、同身份端点回退与有界换设备；筛选请求独立使用 551，按真人剧 / 漫剧 / AI 剧加载对应面板。上述修复已包含在顶部两个新版中。
 
 - 修复 Actions：Android 使用 Maven Central 镜像、Gradle 缓存和有界重试；iOS 保留完整编译日志并作为 artifact 上传。
 - 苹果 CMS：首页按分类独立分页、刷新完整分类列表、显示上游错误与空分类提示。部分接口的“电影”等父分类本身无资源，请选择“动作片”等子分类。
@@ -145,7 +146,7 @@ Releases 中的 APK 使用固定分发签名（未上架任何商店），首次
 
 在 GitHub **Actions → package → Run workflow** 运行双端构建。Android 先运行 `:core:test`，再生成 APK；iOS 默认生成未签名 IPA。勾选 `verify_simulator` 会额外生成本机架构的模拟器 app zip，并运行小说、CMS、CENC 定向测试（TDLib 编译较慢）。构建失败时查看 `ios-build-logs` 和 `android-test-reports` artifacts。
 
-iOS 发布可运行 **Actions → publish iOS**，传入成功的 `main` 分支 package run ID 和新标签（如 `v1.5b8`）。发布任务检查来源、IPA 完整性、包名、平台和版本后上传，并生成 `SHA256SUMS.txt`；不会覆盖已有 Release。
+双端发布可运行 **Actions → publish existing packages**，传入已合入 `main` 的成功 package run ID、发布后缀和说明文件。发布任务检查来源、APK 签名及版本、IPA 完整性、包名、平台和版本后上传，并生成 `SHA256SUMS.txt`；默认不覆盖已有 Release。
 
 Android 固定签名使用仓库 Secrets `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`，别名 `iduanju`；私钥不在仓库中。维护者应保留离线备份，避免更换签名导致覆盖安装失效。
 
@@ -194,10 +195,10 @@ sandboxed QuickJS plugin system (per-plugin domain allow-list, isolated cookies/
 - Player core: AetherEngine 7.62.0 (LGPL-3.0 with App Store exception, unmodified) with FFmpeg (LGPL-2.1) shipped as replaceable
   dynamic frameworks; automatic AVPlayer fallback; speed capped at 2× by the engine; optional HLS ad-strip (on by default). Sideload the unsigned IPA from `scripts/package.sh`.
 - **Android** (`android/`): native Kotlin + Jetpack Compose + Media3, minSdk 26 / targetSdk 35. Build with JDK 21:
-  `cd android && ./gradlew assembleRelease`. Prebuilt (debug-cert signed) APK on the
-  [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) page. Not yet ported: TDLib login/downloads, manga offline
+  `cd android && ./gradlew assembleRelease`. Download the distribution-signed [Android 1.5.10 APK](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android)
+  or the [iOS 1.5 build 10 unsigned IPA](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b10-novel). Not yet ported: TDLib login/downloads, manga offline
   download, plugin timeout/signature checks, CF verification, streaming CENC and Face ID lock.
-- **Android 1.5.8 / iOS 1.5 build 8**: CMS category fixes, source-driven novel discovery, Android actor ranking, basic novel reader, cache controls and CENC regression fixes. Android does not yet implement the full iOS novel JS/XPath engine, EPUB or speech.
+- **Android 1.5.10 / iOS 1.5 build 10**: unified novel themes, Fanqie compatibility, and real-source tests of rankings, search, chapter lists, the first three chapters and offline caches for Fanqie and Shuqi samples. Android still lacks full Legado Java/WebView compatibility, EPUB import and speech.
 - **Signing**: Android releases from 1.5.8 use a persistent distribution key. Older debug-signed builds may require uninstalling first (which clears local data); back up your source configuration before migrating.
 - Telegram login uses **your own** `api_id` / `api_hash` from my.telegram.org; none are bundled.
 - Adult (18+) sources are off by default and require explicit unlock.
