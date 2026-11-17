@@ -394,6 +394,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func didBecomeActive() {
         guard backgrounded else { return }
         backgrounded = false
+        audioSessionActive = false
         continuePiP = false
         if !pipActive { engine.setPiPActive(false) }
         if pip?.isPictureInPictureActive == true {
@@ -505,6 +506,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         if let r = readyIndex, heldFrame == nil, let img = Self.snapshot(engine.surface) { heldFrame = (img, r) }
         readyIndex = nil
         if pipActive { continuePiP = true }
+        // A source/renderer reload can deactivate the shared session independently of this flag.
+        // The next play must acquire it again rather than trust the previous episode's value.
+        audioSessionActive = false
         engine.pause()
         time = 0; loadedUntil = 0
         duration = Double(episodes[i].duration)
