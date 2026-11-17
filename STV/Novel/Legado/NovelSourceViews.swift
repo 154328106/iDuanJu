@@ -72,7 +72,7 @@ struct NovelSourcesView: View {
                 }
                 Text([s.bookSourceGroup, URL(string: s.bookSourceUrl)?.host].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if !s.supported { Text("暂不支持（非文本书源或没有搜索地址）").font(.caption).foregroundStyle(.orange) }
+                if !s.supported { Text("暂不支持（非文本书源或没有搜索 / 发现地址）").font(.caption).foregroundStyle(.orange) }
             }
         }
         .disabled(!s.supported)

@@ -153,7 +153,7 @@ struct NovelExploreView: View {
         } catch { if token == generation { self.error = error.localizedDescription; busy = false } }
     }
     private func resetAndLoad() async {
-        guard !categoryID.isEmpty else { return }
+        guard !categoryID.isEmpty else { items = []; hasMore = false; return }
         generation = UUID(); items = []; page = 1; hasMore = true; busy = false; error = nil
         await load(generation)
     }

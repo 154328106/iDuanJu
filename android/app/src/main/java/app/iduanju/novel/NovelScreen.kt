@@ -66,6 +66,8 @@ fun NovelScreen(onBack: () -> Unit) {
     var alternatives by remember { mutableStateOf<List<Pair<NovelSource,NovelHit>>>(emptyList()) }
     var switchBusy by remember { mutableStateOf(false) }
     var switchJob by remember { mutableStateOf<Job?>(null) }
+    var readGeneration by remember { mutableIntStateOf(0) }
+    var prefetchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
     val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
@@ -74,8 +76,8 @@ fun NovelScreen(onBack: () -> Unit) {
     val source = sources.firstOrNull { it.id == selected }
     fun work(block: suspend () -> Unit) {
         if (busy) return
+        busy = true; error = null
         scope.launch {
-            busy = true; error = null
             try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "操作失败" }
             finally { busy = false }
         }
@@ -91,10 +93,13 @@ fun NovelScreen(onBack: () -> Unit) {
         val s = selectedSource ?: return
         val chapter = chapters.getOrNull(index) ?: return
         val book = bookToSave ?: return
+        val token = ++readGeneration
+        prefetchJob?.cancel()
         val cached = withContext(Dispatchers.IO) { cache.read(s.id, book.url, chapter.url) }
         val body = cached ?: withContext(Dispatchers.IO) { NovelSources.content(s, chapter, chapters.getOrNull(index + 1)?.url,book.url) }.also { value ->
             withContext(Dispatchers.IO) { cache.save(s.id,book.url,chapter.url,value) }
         }
+        if (token != readGeneration) return
         text = body; chapterIndex = index; localBook = false
         bookToSave?.let { book ->
             prefs.edit().putString("last", JSONObject().put("source", s.id).put("name", book.name).put("author", book.author).put("url", book.url).put("chapter", index).toString()).apply()
@@ -102,8 +107,8 @@ fun NovelScreen(onBack: () -> Unit) {
         readerState.scrollToItem(0)
         val toc = chapters.toList()
         cachedCount = withContext(Dispatchers.IO) { cache.count(s.id,book.url,toc) }
-        if (prefetch > 0) scope.launch(Dispatchers.IO) {
-            for(i in index+1 until minOf(toc.size,index+1+prefetch)) {
+        if (prefetch > 0) prefetchJob = scope.launch(Dispatchers.IO) {
+            for(i in index+1 until minOf(toc.size,index+1+prefetch.coerceIn(0,20))) {
                 if(cache.read(s.id,book.url,toc[i].url)==null) {
                     try { cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url,book.url)) }
                     catch(e: CancellationException){throw e} catch(_:Exception){break}
@@ -116,6 +121,7 @@ fun NovelScreen(onBack: () -> Unit) {
         val nextPage = if (reset) 1 else page
         val chosen = if (reset) cat else category
         val result = withContext(Dispatchers.IO) { NovelSources.search(s, query, nextPage, chosen) }
+        if (selected != s.id) return@work
         val existing = if (reset) emptyList() else hits
         val fresh = result.filter { r -> existing.none { it.url == r.url } }
         hits = existing + fresh; page = nextPage + 1; more = fresh.isNotEmpty(); category = chosen
@@ -157,7 +163,8 @@ fun NovelScreen(onBack: () -> Unit) {
                     withContext(Dispatchers.IO) {
                         if(cache.read(s.id,book.url,toc[i].url)==null) cache.save(s.id,book.url,toc[i].url,NovelSources.content(s,toc[i],toc.getOrNull(i+1)?.url,book.url))
                     }
-                    downloadDone++;cachedCount=withContext(Dispatchers.IO){cache.count(s.id,book.url,toc)}
+                    downloadDone++
+                    if (currentBook?.url == book.url && selected == s.id) cachedCount=withContext(Dispatchers.IO){cache.count(s.id,book.url,toc)}
                 }
             } catch(e:CancellationException){error="下载已暂停，可继续";throw e} catch(e:Exception){error="下载中断：${e.message}，已完成章节保留"}
             finally { downloadBusy=false }
@@ -186,7 +193,7 @@ fun NovelScreen(onBack: () -> Unit) {
             } finally {switchBusy=false}
         }
     }
-    fun back() { if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else onBack() }
+    fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else onBack() }
     androidx.activity.compose.BackHandler { back() }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

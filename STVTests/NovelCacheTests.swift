@@ -41,13 +41,54 @@ import XCTest
         XCTAssertEqual(store.chapterText(updated, 0), "第二章\n离线正文")
         XCTAssertFalse(store.isCached(updated, 1))
         var other = item; other.sourceURL = "https://another.invalid"
-        let alternate = store.addWeb(other, info: nil, toc: toc)
+        let alternate = store.addWeb(other, info: nil, toc: Array(toc.reversed()))
         defer { store.remove(alternate) }
         XCTAssertFalse(store.isCached(alternate, 1))
         store.record(book, chapter: 1, offset: 40)
         store.transferProgress(from: book, to: alternate)
-        XCTAssertEqual(store.progress[alternate.id]?.chapter, 1)
+        XCTAssertEqual(store.progress[alternate.id]?.chapter, 0, "source switch follows the chapter title, not the old row number")
         XCTAssertEqual(store.progress[alternate.id]?.offset, 0)
         XCTAssertThrowsError(try store.cache(book, 0, ""))
+    }
+
+    func testLegacyCacheIsOnlyMigratedOnce() throws {
+        let store = NovelStore.shared
+        let item = LegadoSearchItem(name: "旧缓存", author: "", kind: "", intro: "", cover: "", latest: "", bookURL: "https://legacy.test/" + UUID().uuidString, sourceURL: "https://source.test", sourceName: "test")
+        let toc = [LegadoChapter(title: "一", url: "https://legacy.test/1"), LegadoChapter(title: "二", url: "https://legacy.test/2")]
+        let book = store.addWeb(item, info: nil, toc: toc)
+        defer { store.remove(book) }
+        let old = NovelStore.dir(book.id).appendingPathComponent("ch/0.txt")
+        try FileManager.default.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("第一章旧缓存".utf8).write(to: old)
+        XCTAssertEqual(store.chapterText(book, 0), "第一章旧缓存")
+        store.updateToc(book, Array(toc.reversed()))
+        let updated = try XCTUnwrap(store.book(book.id))
+        XCTAssertFalse(store.isCached(updated, 0), "the old index file must not migrate again onto another chapter")
+        XCTAssertEqual(store.chapterText(updated, 1), "第一章旧缓存")
+    }
+
+    func testDownloadStopsOnSourceFailureAndCanResume() async throws {
+        let source = LegadoSource(bookSourceUrl: "https://retry.test/" + UUID().uuidString, bookSourceName: "test", searchUrl: "/s", ruleContent: ["content": "id.content@text"])
+        LegadoSourceStore.shared.add([source])
+        let item = LegadoSearchItem(name: "恢复测试", author: "", kind: "", intro: "", cover: "", latest: "", bookURL: source.id + "/book", sourceURL: source.id, sourceName: "test")
+        let book = NovelStore.shared.addWeb(item, info: nil, toc: (0..<3).map { LegadoChapter(title: "第\($0)章", url: source.id + "/\($0)") })
+        defer { LegadoHTTP.transport = nil; NovelStore.shared.remove(book); LegadoSourceStore.shared.remove([source.id]) }
+        LegadoHTTP.transport = { request in
+            if request.url!.path.hasSuffix("/1") { throw URLError(.notConnectedToInternet) }
+            return (Data("<div id='content'>正文</div>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let loader = NovelWebLoader.shared
+        loader.download(book, from: 0, count: nil)
+        for _ in 0..<100 where loader.downloadStates[book.id]?.active == true { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(NovelStore.shared.cachedCount(book), 1)
+        XCTAssertEqual(loader.downloadStates[book.id]?.failures, 1)
+        LegadoHTTP.transport = { request in
+            XCTAssertFalse(request.url!.path.hasSuffix("/0"), "completed chapters must be reused")
+            return (Data("<div id='content'>恢复后的正文</div>".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        loader.download(book, from: 0, count: nil)
+        for _ in 0..<100 where loader.downloadStates[book.id]?.active == true { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(NovelStore.shared.cachedCount(book), 3)
+        XCTAssertEqual(loader.downloadStates[book.id]?.failures, 0)
     }
 }
