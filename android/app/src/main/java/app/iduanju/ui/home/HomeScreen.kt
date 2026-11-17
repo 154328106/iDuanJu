@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -386,51 +387,100 @@ private fun HeroSkeleton() {
     Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(228.dp).clip(RoundedCornerShape(22.dp)).background(c.surface))
 }
 
-/** ui-redesign 10 `.hero`: radius 22, blurred current cover, 112 pt 3:4 poster, kicker / title / meta, white 查看详情, dots. */
+/** Spec 10/11: intrinsic-height poster/info grid. Android font metrics must never
+ * consume the footer's measurement budget (a constrained Column shrank the CTA).
+ * Measure all real pager titles first so every page shares one sufficient height. */
 @Composable
 private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setIndex: (Int) -> Unit, onOpen: (String) -> Unit) {
-    val c = IdjThemeColors
     val pager = rememberPagerState { picks.size }
     LaunchedEffect(pager.currentPage) { setIndex(pager.currentPage) }
     LaunchedEffect(pager.currentPage, picks.size) {
         if (picks.size > 1) { delay(6000); pager.animateScrollToPage((pager.currentPage + 1) % picks.size) }
     }
     val cur = picks.getOrNull(index)
-    Box(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(177.dp)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val kickerStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
+    val titleStyle = androidx.compose.ui.text.TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
+    val metaStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, lineHeight = 18.sp,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
+    val buttonStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
+    BoxWithConstraints(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
+        // Preserve the spec's 112 dp poster normally; narrow windows keep a usable info column.
+        val posterWidth = minOf(112.dp, (maxWidth - 28.dp - 14.dp - 160.dp).coerceAtLeast(80.dp))
+        val infoWidth = maxWidth - 28.dp - posterWidth - 14.dp
+        val infoPx = with(density) { infoWidth.roundToPx() }
+        fun textHeight(text: String, style: androidx.compose.ui.text.TextStyle, lines: Int) = with(density) {
+            measurer.measure(text, style, maxLines = lines, overflow = TextOverflow.Ellipsis,
+                constraints = androidx.compose.ui.unit.Constraints(maxWidth = infoPx)).size.height.toDp()
+        }
+        val ctaWidth = with(density) { measurer.measure("查看详情", buttonStyle).size.width.toDp() } + 48.dp
+        val visualButtonHeight = with(density) { 16.sp.toDp() + 12.dp }.coerceAtLeast(32.dp)
+        val touchHeight = maxOf(48.dp, visualButtonHeight)
+        val dotsWidth = if (picks.size > 1) (14 + (picks.size - 1) * 9).dp else 0.dp
+        val stackedFooter = picks.size > 1 && infoWidth < ctaWidth + dotsWidth + 8.dp
+        val footerHeight = touchHeight + if (stackedFooter) 12.dp else 0.dp
+        fun kicker(i: Int) = if (board.isEmpty()) "TOP ${i + 1}" else "$board · TOP ${i + 1}"
+        fun metadata(s: HGSeries) = listOf(
+            listOfNotNull(s.tags.take(2).joinToString(" · ").ifEmpty { null }, if (s.episodeCount > 0) "${s.episodeCount} 集" else null).joinToString(" · "),
+            if (s.playCount > 0) DS.count(s.playCount) + "热度" else ""
+        ).filter { it.isNotEmpty() }
+        val infoHeight = picks.mapIndexed { i, s ->
+            4.dp + textHeight(kicker(i), kickerStyle, 1) + 6.dp + textHeight(s.title, titleStyle, 2) +
+                (if (metadata(s).isEmpty()) 0.dp else 7.dp + metadata(s).map { textHeight(it, metaStyle, 1) }.fold(0.dp) { a, b -> a + b }) +
+                8.dp + footerHeight
+        }.maxOrNull() ?: 149.dp
+        val cardHeight = maxOf(posterWidth * 4 / 3, infoHeight) + 28.dp
+        Box(Modifier.fillMaxWidth().height(cardHeight)
             .shadow(15.dp, RoundedCornerShape(22.dp), ambientColor = Color.Black.copy(0.22f), spotColor = Color.Black.copy(0.22f))
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF241A1A)),
-    ) {
-        androidx.compose.animation.Crossfade(cur?.cover, label = "heroBg") { url ->
-            BlurBackdrop(url, Modifier.fillMaxSize().scale(1.5f), 40.dp, 0.85f)
-        }
-        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color.Black.copy(0.18f), Color.Black.copy(0.62f)))))
-        HorizontalPager(pager, Modifier.fillMaxSize()) { i ->
-            val s = picks[i]
-            Row(Modifier.fillMaxSize().graphicsLayer { alpha = 1f - kotlin.math.abs(pager.getOffsetDistanceInPages(i)).coerceIn(0f, 1f) * 1.6f }
-                .pressClick(0.98f, label = "home.hero.page.$i") { onOpen(s.seriesId) }.padding(14.dp), verticalAlignment = Alignment.Top) {
-                PosterArt(s.cover, Modifier.size(112.dp, 149.dp), badge = HomeFmt.progress(s)?.let { DS.spaced(it) })
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f).fillMaxHeight().padding(top = 3.dp, bottom = 1.dp)) {
-                    Text(if (board.isEmpty()) "TOP ${i + 1}" else "$board · TOP ${i + 1}", color = Color(0xFFF2B55C), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp, maxLines = 1)
-                    Text(s.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 25.sp, modifier = Modifier.padding(top = 6.dp))
-                    val line1 = listOfNotNull(s.tags.take(2).joinToString(" · ").ifEmpty { null }, if (s.episodeCount > 0) "${s.episodeCount} 集" else null).joinToString(" · ")
-                    val line2 = if (s.playCount > 0) DS.count(s.playCount) + "热度" else ""
-                    Column(Modifier.padding(top = 7.dp)) {
-                        if (line1.isNotEmpty()) Text(line1, color = Color.White.copy(0.74f), fontSize = 12.sp, maxLines = 1, lineHeight = 17.sp)
-                        if (line2.isNotEmpty()) Text(line2, color = Color.White.copy(0.74f), fontSize = 12.sp, maxLines = 1, lineHeight = 17.sp)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    PillButton("查看详情", icon = Icons.Filled.PlayArrow, tone = PillTone.White, small = true) { onOpen(s.seriesId) }
-                }
+            .clip(RoundedCornerShape(22.dp)).background(Color(0xFF241A1A))) {
+            androidx.compose.animation.Crossfade(cur?.cover, label = "heroBg") { url ->
+                BlurBackdrop(url, Modifier.fillMaxSize().scale(1.5f), 40.dp, 0.85f)
             }
-        }
-        if (picks.size > 1) {
-            Row(Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 28.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                picks.indices.forEach { i ->
-                    val w by animateDpAsState(if (i == index) 14.dp else 5.dp, DS.select(), label = "dot")
-                    Box(Modifier.size(w, 5.dp).clip(RoundedCornerShape(50)).background(if (i == index) Color.White else Color.White.copy(0.4f)))
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color.Black.copy(0.18f), Color.Black.copy(0.62f)))))
+            HorizontalPager(pager, Modifier.fillMaxSize().testTag("home.hero.pager")) { i ->
+                val s = picks[i]
+                Row(Modifier.fillMaxSize().testTag("home.hero.page.$i").graphicsLayer { alpha = 1f - kotlin.math.abs(pager.getOffsetDistanceInPages(i)).coerceIn(0f, 1f) * 1.6f }
+                    .pressClick(0.98f, label = "home.hero.page.$i") { onOpen(s.seriesId) }.padding(14.dp), verticalAlignment = Alignment.Top) {
+                    PosterArt(s.cover, Modifier.size(posterWidth, posterWidth * 4 / 3), badge = HomeFmt.progress(s)?.let { DS.spaced(it) })
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f).fillMaxHeight().padding(top = 3.dp, bottom = 1.dp)) {
+                        Text(kicker(i), Modifier.testTag("home.hero.kicker.$i"), color = Color(0xFFF2B55C), style = kickerStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(s.title, Modifier.padding(top = 6.dp).testTag("home.hero.title.$i"), color = Color.White, style = titleStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        metadata(s).forEachIndexed { j, line ->
+                            Text(line, Modifier.padding(top = if (j == 0) 7.dp else 0.dp).testTag("home.hero.meta.$i.$j"),
+                                color = Color.White.copy(0.74f), style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
+                        @Composable fun cta() {
+                            // Explicit 48 dp hit slot; the spec's 32 dp white pill stays visually compact.
+                            Box(Modifier.height(touchHeight).width(ctaWidth).testTag("home.hero.cta.$i")
+                                .pressClick(0.98f, label = "查看详情") { onOpen(s.seriesId) }, contentAlignment = Alignment.Center) {
+                                Row(Modifier.fillMaxWidth().height(visualButtonHeight).testTag("home.hero.pill.$i").clip(CircleShape).background(Color.White).padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(14.dp), tint = Color(0xFF111317))
+                                    Text("查看详情", Modifier.testTag("home.hero.ctaText.$i"), color = Color(0xFF111317), style = buttonStyle, maxLines = 1)
+                                }
+                            }
+                        }
+                        @Composable fun dots() {
+                            if (picks.size > 1) Row(Modifier.testTag("home.hero.dots.$i"), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                picks.indices.forEach { n ->
+                                    val w by animateDpAsState(if (n == index) 14.dp else 5.dp, DS.select(), label = "dot")
+                                    Box(Modifier.size(w, 5.dp).clip(RoundedCornerShape(50)).background(if (n == index) Color.White else Color.White.copy(0.4f)))
+                                }
+                            }
+                        }
+                        if (stackedFooter) Column(Modifier.fillMaxWidth().height(footerHeight)) {
+                            cta()
+                            Box(Modifier.fillMaxWidth().height(12.dp), contentAlignment = Alignment.CenterEnd) { dots() }
+                        } else Row(Modifier.fillMaxWidth().height(footerHeight), verticalAlignment = Alignment.CenterVertically) {
+                            cta(); Spacer(Modifier.weight(1f)); dots()
+                        }
+                    }
                 }
             }
         }
