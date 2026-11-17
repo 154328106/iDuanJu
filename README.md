@@ -8,16 +8,23 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 [Android 版](#android-版)。App 本身**不托管任何内容**，所有数据都由你的设备直接向各个公开站点请求。
 
 **下载**：到 [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) 获取 iOS 未签名 IPA 和 Android APK
-（[Android 1.5.8 红果修复版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.8-hgfix-android)、
-[iOS 1.5 build 8 红果修复版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b8-hgfix)）。
+（[Android 1.5.9 小说增强版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.9-novel-android)、
+[iOS 1.5 build 9 小说增强版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b9-novel)）。
 
-红果修复版直接发布已验证的构建产物，包内版本号不变。Android 请手动下载 APK 覆盖安装（与原 1.5.8 签名一致，版本号相同不会自动提示更新）；iOS IPA 需自行重签侧载。
+新版包含小说改动和上一版红果取流、筛选修复。Android 与 1.5.8 使用同一分发签名，可下载 APK 覆盖安装；iOS IPA 需自行重签侧载。请下载 Assets 中的 APK / IPA，SHA-256 见同页附件。
 
-### 2026-11-17 小说源码更新
+### 2026-11-17 小说增强版
 
 - 按真实合集 1335 修复发现分组、JS 生成请求、部分脚本与正文兼容，榜单改为顶部分组＋左侧栏目＋封面排名列表。
 - 详情和阅读页加入缓存 / 下载、预取章数设置、同书换源与章节进度接续；已缓存文字可离线读取，失败后可继续下载。
-- 七猫、乐读、望书阁抽样正文与缓存已验证；番茄复杂 Java I/O、图片正文、部分被 403 拦截的源仍不完整支持。完整范围见 [真实合集验收记录](docs/novel-validation-20261117.md)。当前上方 `hgfix` 安装包不含本次小说改动。
+- 七猫、乐读、望书阁抽样正文与缓存已验证；番茄复杂 Java I/O、图片正文、部分被 403 拦截的源仍不完整支持。完整范围见 [真实合集验收记录](docs/novel-validation-20261117.md)。旧 `hgfix` 安装包不含小说改动，请使用上方新版。
+
+使用：小说 → 书源 → 导入自己的 Legado 合集 → 在榜单顶部选源、左侧选栏目。详情或阅读页进入“下载 / 缓存”，可缓存后 50 / 200 章或全本、调整提前缓存章数；“换源”会查找同名同作者书籍并接续章节。下载时保持应用前台，已缓存文字可离线阅读。本轮用 [合集 1335](https://www.yckceo.com/yuedu/shuyuans/json/id/1335.json) 做测试，不把第三方书源内置到安装包。
+
+以下是原生模拟器中的合成数据布局验收图，真实书源测试结果单独记录：
+
+<img src="docs/screenshots/novel-rank.png" width="280" alt="小说分组榜单布局">
+<img src="docs/screenshots/novel-download.png" width="280" alt="缓存下载和阅读预取设置">
 
 ### 2026-11-16 更新
 
@@ -36,7 +43,7 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 - **内置源**：红果短剧（本地签名、匿名设备）、黄果（AI 短剧 / 视频）、Telegram 频道（网页预览 + 可选 TDLib 登录）
 - **长视频站点**（18+，默认关闭）：MissAV、Jable、SupJav、Hanime1、Pornhub、XVideos、Eporner 等
 - **漫画**：MangaDex、包子漫画，以及 JS 插件（manga18fx / komikindo / 18comic，18+，默认关闭）
-- **小说**：iOS 支持 TXT / EPUB、阅读书源、搜索、发现、阅读进度与朗读；Android 支持 TXT 和基础阅读书源，兼容范围见下文。
+- **小说**：iOS 支持 TXT / EPUB、阅读书源、搜索、发现、阅读进度与朗读；Android 支持 TXT 和部分 Legado 书源。双端支持分组榜单、预取、章节下载、离线阅读与同书换源，兼容范围见下文。
 - **JS 插件系统**：基于 QuickJS 的沙箱，每个插件独立运行、只能访问自己声明且你同意过的域名，cookie / 存储互相隔离，
   不能 `eval`、访问不到本机和内网。支持从网址 / 文件 / 粘贴添加，以及订阅列表。规范见 [`docs/plugins/SPEC_ZH.md`](docs/plugins/SPEC_ZH.md)
 - **苹果 CMS v10 采集站**通用适配（m3u8 / mp4 直链）
@@ -108,7 +115,7 @@ scripts/package.sh            # 输出到 ./dist/STV-<版本>-unsigned.ipa
 ## Android 版
 
 位于 [`android/`](android/)：原生 **Kotlin + Jetpack Compose + Media3（ExoPlayer）**，插件运行时为 QuickJS，
-目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.8**（预发布）。
+目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.9**（预发布）。
 
 ```bash
 # 要求 JDK 21 + Android SDK（platform 35）
@@ -129,7 +136,7 @@ Releases 中的 APK 使用固定分发签名（未上架任何商店），首次
 - 黄果、漫画（MangaDex、包子、插件）；首页频道栏与「频道」面板、多源搜索、继续观看 / 收藏 / 历史
 - 「我的」：成人片源开关（18+ 确认，默认关闭）、去广告、重置设备 / 会话、清缓存
 - 剧星榜：排名、头像、热度、代表作与分页，点击演员进入名字搜索
-- 小说：首页 / 我的 → 小说；文件或粘贴 JSON / URL 导入书源；CSS/Jsoup、JSONPath、部分 XPath / JS 规则；分组榜单、TXT 阅读、章节预取、下载缓存、同书换源与续读（当前源码，兼容结果见验收记录）
+- 小说：首页 / 我的 → 小说；文件或粘贴 JSON / URL 导入书源；CSS/Jsoup、JSONPath、部分 XPath / JS 规则；分组榜单、TXT 阅读、章节预取、下载缓存、同书换源与续读（兼容结果见验收记录）
 - 播放设置：下一集预加载开关、播放缓存上限
 
 仍有差异：小说规则尚未覆盖 Legado 的全部 Java / WebView 能力；Android 尚无 EPUB 文件导入、朗读、演员主页与性别筛选、内置长视频站适配、TDLib 登录与下载管理、漫画离线下载、插件执行超时中断与签名校验、Cloudflare 验证、CENC 边下边解、Face ID 片源锁。小说推荐来自用户导入的书源，不内置推书君、优书网等第三方服务。
@@ -144,7 +151,7 @@ Android 固定签名使用仓库 Secrets `ANDROID_KEYSTORE_BASE64`、`ANDROID_KE
 
 离线测试：`cd android && ./gradlew :core:test`。联网测试需显式 `-Plive=1`；离线通过不代表所有上游站点始终可用。
 
-**红果取流**：两端使用独立匿名注册身份和当前播放器 Medusa 签名，健康身份会复用；单集空包时先用同一身份尝试两个批量端点，全部空包才更换身份，最多 3 次并带冷却。筛选接口独立使用 551 签名。仓库不附带设备 ID 或 SDK token；也可以在“我的”填入自己的设备覆盖。请下载带 `hgfix` 的修复版。
+**红果取流**：两端使用独立匿名注册身份和当前播放器 Medusa 签名，健康身份会复用；单集空包时先用同一身份尝试两个批量端点，全部空包才更换身份，最多 3 次并带冷却。筛选接口独立使用 551 签名。仓库不附带设备 ID 或 SDK token；也可以在“我的”填入自己的设备覆盖。上方新版已包含这些修复。
 
 ## Telegram（TDLib）登录
 

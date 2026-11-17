@@ -76,3 +76,10 @@ GitHub Actions `novel source validation` 同时运行 Android 测试与应用构
 
 <img src="screenshots/novel-rank.png" width="300" alt="合成数据的原生榜单布局">
 <img src="screenshots/novel-download.png" width="300" alt="原生缓存和下载入口">
+
+双端正式产物来自提交 `96e0a3f284cce95157139a7e15e4deafb075b2e0` 的 [package 43992689066](https://github.com/my-name-is-alan/iDuanJu/actions/runs/43992689066)，[发布任务 43996128770](https://github.com/my-name-is-alan/iDuanJu/actions/runs/43996128770) 核验 APK 签名、包名版本、IPA 结构与版本后直接上传，未重复编译。两份小说 Release 已公开，旧的草稿附件已替换；公开标签与最终构建源码一致。
+
+- Android `1.5.9-android (1509)`：`f38c615cba69c6224e11038ca80aa2d66983bb907ab44d88087e7ad91cc0e792`。
+- iOS `1.5 build 9` 未签名 IPA：`58ee95b2e7d04f33b4eb5c30531d9881ddece3dbc303a33d48b0c225310c69a7`。
+
+Release 上的文件大小及 GitHub SHA-256 digest 与构建产物一致，公开 SHA256SUMS.txt 内容也已回读核验。Android 分发证书与 1.5.8 保持一致，可覆盖安装；iOS 需自行重签侧载。
