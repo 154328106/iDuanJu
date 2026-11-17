@@ -300,7 +300,9 @@ import UIKit
                 self.onPlaybackRequested?(playing)
             }
             softwarePiPDelegate = delegate
-            let controller = AVPictureInPictureController(contentSource: .init(sampleBufferDisplayLayer: source.layer, playbackDelegate: delegate))
+            // Use the source's factory so its reload/end lifecycle still knows which window to stop.
+            guard let controller = source.makePictureInPictureController() else { return nil }
+            controller.contentSource = .init(sampleBufferDisplayLayer: source.layer, playbackDelegate: delegate)
             softwarePiPController = controller
             return controller
         }

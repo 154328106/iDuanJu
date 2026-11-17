@@ -4,6 +4,13 @@ import AVKit
 @testable import STV
 
 @MainActor final class PlayerTransportTests: XCTestCase {
+    private var oldAutoNext: Any?
+    override func setUp() async throws {
+        await MainActor.run { oldAutoNext = UserDefaults.standard.object(forKey:"stv.player.autoNext") }
+    }
+    override func tearDown() async throws {
+        await MainActor.run { UserDefaults.standard.set(oldAutoNext,forKey:"stv.player.autoNext") }
+    }
     private func coordinator(_ engine: TestPlayerEngine) -> PlaybackCoordinator {
         let id = "transport-" + UUID().uuidString
         let series = HGSeries(source: .telegram, seriesId: id, title: "transport", cover: "")
@@ -83,6 +90,15 @@ import AVKit
         co.togglePause()
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertTrue(e.isPaused); XCTAssertTrue(co.paused)
+    }
+
+    func testLateEndNotificationDoesNotOverrideExplicitPause() async throws {
+        let e = TestPlayerEngine(); let co = coordinator(e)
+        defer { co.teardown() }
+        co.select(0); try await ready(co,0)
+        co.togglePause(); e.onEnded?()
+        XCTAssertEqual(co.current,0)
+        XCTAssertTrue(co.paused)
     }
 
     func testNativeObserverIgnoresExpectedCommandsAndBackgroundPauses() async throws {

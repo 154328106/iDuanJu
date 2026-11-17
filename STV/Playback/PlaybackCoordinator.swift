@@ -527,7 +527,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 }
                 next.onEnded = { [weak self, weak next] in
                     guard let self, let next, self.activation == token, self.engine === next, self.current == i else { return }
-                    if i + 1 < self.episodes.count, self.autoNext { self.select(i + 1) } else { self.setPaused(true) }
+                    if self.wantsPlayback, i + 1 < self.episodes.count, self.autoNext { self.select(i + 1) } else { self.setPaused(true) }
                 }
                 do {
                     try await next.load(src, stream: chosen[i], start: start, title: title)
