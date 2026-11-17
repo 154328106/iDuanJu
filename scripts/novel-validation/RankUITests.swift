@@ -10,7 +10,7 @@ final class RankUITests: XCTestCase {
         app.buttons["search.sources"].tap()
         XCTAssertTrue(app.navigationBars["书源配置"].waitForExistence(timeout:10))
         XCTAssertTrue(app.buttons["sources.add"].exists)
-        app.buttons["返回"].firstMatch.tap()
+        app.navigationBars["书源配置"].buttons["返回"].tap()
         let query = app.searchFields.firstMatch
         XCTAssertTrue(query.waitForExistence(timeout:5))
         query.tap(); query.typeText("雾港\n")

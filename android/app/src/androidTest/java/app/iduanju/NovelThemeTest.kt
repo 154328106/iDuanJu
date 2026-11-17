@@ -34,6 +34,7 @@ class NovelThemeTest {
             repeat(200){i->chapters.put(JSONObject().put("title","第${i+1}章").put("url","https://preview.invalid/chapter/$i"))}
             JSONObject().put("books",books).put("toc","https://preview.invalid/toc").put("chapters",chapters).put("content","合成离线正文").toString()
         }
+        org.junit.Assert.assertEquals(4,NovelSources.search(app.iduanju.core.novel.NovelSource(source),"",category=app.iduanju.core.novel.NovelCategory("月票榜","/rank/month")).size)
     }
     @After fun cleanup(){NovelSources.fixture=null}
     private fun screenshot(name:String){
@@ -49,7 +50,8 @@ class NovelThemeTest {
         ui.setContent{IdjTheme(dark=dark){NovelScreen(onBack={})}}
         ui.waitUntil(10000){ui.onAllNodesWithText("月票榜").fetchSemanticsNodes().isNotEmpty()}
         ui.onNodeWithText("月票榜").performClick()
-        ui.waitUntil(10000){ui.onAllNodesWithText("1. 雾港").fetchSemanticsNodes().isNotEmpty()}
+        try { ui.waitUntil(10000){ui.onAllNodesWithText("1. 雾港").fetchSemanticsNodes().isNotEmpty()} }
+        catch(e:Exception) { screenshot("$style-rank-failed"); ui.onRoot().printToLog("NovelUI"); throw e }
         screenshot("$style-rank")
         ui.onNodeWithText("书源").performClick()
         ui.onNodeWithText("书源配置").assertIsDisplayed()

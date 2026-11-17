@@ -204,7 +204,7 @@ fun NovelScreen(onBack: () -> Unit) {
             TextButton(onClick = { importing = true }, enabled = !busy) { Text("书源") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        error?.let { Text(it, color = IdjThemeColors.accentWarm) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize=13.sp, modifier=Modifier.padding(vertical=8.dp)) }
         if (text.isNotEmpty()) {
             Row {
                 TextButton(onClick = { font = (font - 1).coerceAtLeast(14f); prefs.edit().putFloat("font", font).apply() }) { Text("A−") }
