@@ -1,7 +1,8 @@
 package app.iduanju
 
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.activity.enableEdgeToEdge
 import androidx.test.platform.app.InstrumentationRegistry
 import app.iduanju.core.novel.*
 import app.iduanju.novel.NovelScreen
@@ -16,7 +17,7 @@ import java.util.concurrent.TimeUnit
 
 /** Native UI, live unmodified user source. No NovelSources.fixture or sample books. */
 class NovelRealParityTest {
-    @get:Rule val ui=createComposeRule()
+    @get:Rule val ui=createAndroidComposeRule<androidx.activity.ComponentActivity>()
     private fun screenshot(name:String){
         ui.waitForIdle();android.os.SystemClock.sleep(700)
         val bmp=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
@@ -25,10 +26,12 @@ class NovelRealParityTest {
     @Test fun realQimaoRankingDetailAndReader(){
         saveNovelEvidence("parity-android-real-flow-current.json",org.json.JSONObject().put("flowCompleted",false).put("startedAtMs",System.currentTimeMillis()).put("readerParityComplete",false).toString(2).toByteArray())
         NovelSources.fixture=null
-        val raw=OkHttpClient.Builder().callTimeout(60,TimeUnit.SECONDS).build().newCall(Request.Builder().url("https://www.yckceo.com/yuedu/shuyuans/json/id/1335.json").build()).execute().use{check(it.isSuccessful);it.body!!.string()}
+        val raw=InstrumentationRegistry.getInstrumentation().context.assets.open("real-1335.json").bufferedReader().use{it.readText()}
+        assertEquals("874efe33cbe38b7dcf830704b5bd0614b9485fe1974a20d9c09030ebec07df30",java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString(""){"%02x".format(it)})
         val all=NovelSources.import(raw);val source=all.first{it.name=="七猫小说"}
         val ctx=InstrumentationRegistry.getInstrumentation().targetContext
         ctx.getSharedPreferences("novel",0).edit().clear().putString("sources",raw).putString("rankSource",source.id).commit()
+        ui.runOnUiThread{ui.activity.enableEdgeToEdge()}
         ui.setContent{IdjTheme(dark=false){NovelScreen({})}}
         ui.onNodeWithText("排行榜").performClick()
         ui.waitUntil(60000){ui.onAllNodesWithText("爽文",substring=false).fetchSemanticsNodes().isNotEmpty()}
@@ -54,8 +57,8 @@ class NovelRealParityTest {
         screenshot("parity-android-03-real-download.png")
         ui.onNodeWithText("返回",substring=false).performClick()
         ui.onNodeWithTag("novel.detail.read").performClick()
-        ui.waitUntil(60000){ui.onAllNodesWithText("A−",substring=false).fetchSemanticsNodes().isNotEmpty()}
-        screenshot("parity-android-04-reader-still-pending.png")
+        ui.waitUntil(60000){ui.onAllNodesWithTag("novel.page").fetchSemanticsNodes().isNotEmpty()}
+        screenshot("parity-android-04-real-native-reader.png")
         val saved=cache.books().first{it.source==source.id&&it.book.name=="无敌天命"}
         assertTrue(saved.chapters.size>1600)
         assertTrue(cache.read(source.id,saved.book.url,saved.chapters.first().url)!!.contains("青州"))
@@ -66,14 +69,17 @@ class NovelRealParityTest {
         ui.waitUntil(90000){cache.read(source.id,saved.book.url,saved.chapters[1].url)!=null}
         try {
             NovelSources.fixture={error("Offline verification: no requests permitted")}
-            ui.waitUntil(10000){runCatching{ui.onNodeWithText("下一章",substring=false).assertIsEnabled()}.isSuccess}
-            ui.onNodeWithText("下一章",substring=false).performClick()
+            ui.onNodeWithTag("novel.page").performTouchInput{click(center)}
+            ui.onNodeWithTag("novel.menu.toc").performClick()
+            ui.onNodeWithTag("novel.chapter.1").performClick()
             ui.waitUntil(20000){org.json.JSONObject(ctx.getSharedPreferences("novel",0).getString("last","{}")!!).optInt("chapter",-1)==1}
-            ui.waitForIdle();ui.onNodeWithText(saved.chapters[1].title,substring=false).assertIsDisplayed()
-            ui.waitUntil(10000){runCatching{ui.onNodeWithText("上一章",substring=false).assertIsEnabled()}.isSuccess}
-            ui.onNodeWithText("上一章",substring=false).performClick()
+            ui.onNodeWithTag("novel.page").assertContentDescriptionContains(saved.chapters[1].title,substring=true)
+            ui.onNodeWithTag("novel.page").performTouchInput{click(center)}
+            ui.onNodeWithTag("novel.menu.toc").performClick()
+            ui.onNodeWithTag("novel.toc").performScrollToIndex(0)
+            ui.onNodeWithTag("novel.chapter.0").performClick()
             ui.waitUntil(20000){org.json.JSONObject(ctx.getSharedPreferences("novel",0).getString("last","{}")!!).optInt("chapter",-1)==0}
-            ui.waitForIdle();ui.onNodeWithText(saved.chapters[0].title,substring=false).assertIsDisplayed()
+            ui.onNodeWithTag("novel.page").assertContentDescriptionContains(saved.chapters[0].title,substring=true)
         }finally{NovelSources.fixture=null}
         saveNovelEvidence("parity-android-real-flow-current.json",org.json.JSONObject().put("flowCompleted",true).put("finishedAtMs",System.currentTimeMillis()).put("collection","https://www.yckceo.com/yuedu/shuyuans/json/id/1335.json").put("collectionSha256",java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString(""){"%02x".format(it)}).put("source",source.name).put("book",saved.book.name).put("toc",saved.chapters.size).put("freshChapterLength",fresh.length).put("offlineChapterNavigation",true).put("readerParityComplete",false).toString(2).toByteArray())
     }

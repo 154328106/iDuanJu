@@ -6,6 +6,16 @@ import org.junit.Test
 import java.nio.file.Files
 
 class NovelCacheTest {
+    @Test fun cachedBookSearchAndImportDateSurviveMetadataRefresh(){
+        val cache=NovelCache(java.nio.file.Files.createTempDirectory("novel-search").toFile())
+        val book=NovelHit("real-fixture-unit","","https://book.test/1");val toc=listOf(NovelChapter("一","https://book.test/c1"),NovelChapter("二","https://book.test/c2"))
+        cache.saveBook("s",book,toc);val added=cache.books().single().addedAt;assertTrue(added>0)
+        cache.save("s",book.url,toc[0].url,"  段落内容\n第二段命中")
+        cache.saveBook("s",book,toc)
+        assertEquals(added,cache.books().single().addedAt)
+        val hit=cache.search("s",book.url,toc,"命中").single();assertEquals(0,hit.chapter);assertTrue(hit.offset>0)
+        assertTrue(cache.search("s",book.url,toc,"不存在").isEmpty())
+    }
     @Test fun offlineReloadAndSourceIsolation() {
         val dir=Files.createTempDirectory("novel-cache").toFile()
         try {

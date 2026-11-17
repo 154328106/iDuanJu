@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 
 /// 小说 shelf → reader: page turning by tap, menu, 目录 jump, font size relayout.
 final class NovelUITests: XCTestCase {
@@ -8,6 +9,7 @@ final class NovelUITests: XCTestCase {
     func el(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     func shot(_ name: String) {
         guard let dir = ProcessInfo.processInfo.environment["STV_SHOT_DIR"] else { return }
+        Thread.sleep(forTimeInterval: 0.35) // Allow the app's 180ms native panel transition to settle before comparison.
         try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
     }
     func pageLabel() -> (Int, Int) {
@@ -281,6 +283,8 @@ final class NovelUITests: XCTestCase {
     /// Opt-in LIVE UI proof. Imports all 164 real sources, explicitly chooses 七猫 (default 猫扑 is Cloudflare-blocked).
     func testLiveRealRankToDetailAndTOC() throws {
         guard let file = ProcessInfo.processInfo.environment["STV_RANK_LIVE"] else { throw XCTSkip("live ranking") }
+        let bytes = try Data(contentsOf: URL(fileURLWithPath: file))
+        XCTAssertEqual(SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(), "874efe33cbe38b7dcf830704b5bd0614b9485fe1974a20d9c09030ebec07df30")
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment = ["STV_HOME_TAB": "novel", "STV_NOVEL_PAGE": "rank", "STV_LEGADO_IMPORT": file]
@@ -299,6 +303,8 @@ final class NovelUITests: XCTestCase {
         let ready = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: el("detail.read"))
         wait(for: [ready], timeout: 60)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "^共 [0-9,，]+ 章$")).firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["无敌天命"].exists)
+        XCTAssertTrue(app.staticTexts["青鸾峰上"].exists)
         shot("rank_ios_02_real_detail")
         el("detail.read").tap()
         XCTAssertTrue(el("novel.page").waitForExistence(timeout: 60))

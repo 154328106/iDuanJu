@@ -6,6 +6,9 @@ plugins {
 android {
     // Local color-bar fixture is Debug-only; no sample media is added to a Release artifact.
     sourceSets.getByName("debug").assets.srcDir("../../STVTests/Fixtures")
+    // Exact user collection supplied locally for native QA, never bundled in a release APK.
+    sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("generated/novel-qa-assets"))
+    sourceSets.getByName("androidTest").assets.srcDir("../../STVTests/Fixtures")
 
     namespace = "app.iduanju"
     compileSdk = 35
