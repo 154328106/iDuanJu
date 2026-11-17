@@ -222,7 +222,20 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                     this.player = player
                 }
             },
-            update = { it.resizeMode = if (fillMode) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT },
+            update = { view ->
+                view.resizeMode = if (fillMode) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                if (app.iduanju.BuildConfig.DEBUG) {
+                    // Inspect Media3's actual SurfaceView, not the Compose/PlayerView wrapper.
+                    val controls = showChrome
+                    view.postDelayed({
+                        val surface = view.videoSurfaceView
+                        val rect = android.graphics.Rect()
+                        surface?.getGlobalVisibleRect(rect)
+                        val value = "controls=$controls surface=$rect bounds=${surface?.width}x${surface?.height} viewport=${view.width}x${view.height}"
+                        android.util.Log.i("IDJ_RENDER", value)
+                    }, 250)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
         // official danmaku (红果 only), lanes under the top bar + tech strip, never into the bottom controls
@@ -304,16 +317,16 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         }
 
         // ── Chrome (redesign 14–17) ─────────────────────────────────────────────────────────────────────
-        // Title + progress row are always on screen; the rest fades with `showChrome`. The centre transport
+        // Compact title + 2dp edge progress stay visible; full controls are independent overlays. The centre transport
         // only appears once the current episode is actually playable, so switching episodes never flashes it.
         val pc = IdjDarkColors
         val chromeA by androidx.compose.animation.core.animateFloatAsState(if (showChrome || panel != null) 1f else 0f, DS.panel(), label = "chrome")
         val ready = status.isEmpty() && error == null && dur > 0
-        Box(Modifier.fillMaxWidth().height(if(landscape)140.dp else 170.dp)
-            .background(Brush.verticalGradient(listOf(Color.Black.copy(0.88f), Color.Black.copy(0.65f), Color.Transparent))))
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if(landscape)180.dp else 330.dp)
-            .background(Brush.verticalGradient(0f to Color.Transparent, 0.42f to Color.Black.copy(if(landscape)0.94f else 0.74f), 1f to Color.Black.copy(if(landscape)0.985f else 0.94f))))
-        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = if(landscape)64.dp else 16.dp).padding(top = if(landscape)14.dp else 6.dp).graphicsLayer { alpha = if(landscape)1f else chromeA }) {
+        Box(Modifier.fillMaxWidth().height(if(landscape)72.dp else 110.dp).graphicsLayer { alpha = chromeA }
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(0.45f), Color.Black.copy(0.16f), Color.Transparent))))
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if(landscape)100.dp else 150.dp).graphicsLayer { alpha = chromeA }
+            .background(Brush.verticalGradient(0f to Color.Transparent, 0.42f to Color.Black.copy(0.16f), 1f to Color.Black.copy(0.45f))))
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = if(landscape)64.dp else 16.dp).padding(top = if(landscape)14.dp else 6.dp).graphicsLayer { alpha = chromeA }) {
             Row(Modifier.height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircleBtn(Icons.AutoMirrored.Filled.ArrowBackIos, "返回", showChrome && !locked, onBack)
                 if(landscape) {
@@ -357,8 +370,8 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 Icon(Icons.Filled.Forward10, "前进10秒", tint = Color.White, modifier = Modifier.size(36.dp).pressClick(0.9f) { player.seekTo(player.currentPosition + 10_000) })
             }
         }
-        // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
+        // Expanded bottom controls overlay the video; never reserve space in its viewport.
+        if (showChrome || panel != null) Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().graphicsLayer { alpha = chromeA }
             .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 24.dp else 4.dp)) {
             val d = detail
             if (d != null && !landscape) {
@@ -414,6 +427,16 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 ActionBtn(Icons.Filled.ClosedCaption, "音轨字幕", null, panel == "audio", false, on) { panel = if (panel == "audio") null else "audio" }
             }
 
+        }
+        // Always-on title + edge progress are overlays, not a layout inset or a scrubber row.
+        if (!showChrome && panel == null) {
+            Text(detail?.title.orEmpty(), color = Color.White.copy(0.85f), fontSize = 12.sp,
+                fontWeight = FontWeight.Medium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.7f), blurRadius = 4f)),
+                modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(horizontal = if (landscape) 28.dp else 16.dp, vertical = 10.dp))
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(Color.White.copy(0.18f))) {
+                Box(Modifier.fillMaxWidth(if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f).fillMaxHeight().background(Color.White.copy(0.6f)))
+            }
         }
         // panels: one style for 选集 / 倍速 / 画质 / 音轨字幕, sitting just above the action row
         if (panel != null) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { panel = null } })

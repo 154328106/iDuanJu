@@ -74,10 +74,8 @@ struct PlayerScreen: View {
         return series.orientation == "portrait" || (!series.source.isLongVideo && series.orientation != "landscape") ? 9.0 / 16 : 16.0 / 9
     }
 
-    /// Where the player layer lives. Portrait + landscape-shaped video: the area above the bottom block
-    /// (design v3: video centred in the top H−156 pt); otherwise the whole screen.
+    /// Immutable render viewport. Expanded/compact controls are independent overlays, never an inset.
     private func videoArea(_ full: CGSize) -> CGRect {
-        if !landscape, aspect > 1, !fillScreen { return CGRect(x: 0, y: 0, width: full.width, height: max(200, full.height - 156)) }
         return CGRect(origin: .zero, size: full)
     }
 
@@ -100,7 +98,7 @@ struct PlayerScreen: View {
                     Color.black
                     // A single in-window layer remains the PiP source across paging, rotation and buffering.
                     PlayerLayerView(coordinator: co, fill: fillScreen, engine: co.engineKind)
-                        .accessibilityElement().accessibilityIdentifier("player.video").accessibilityValue(fillScreen ? "fill" : "fit")
+                        .accessibilityElement(children: .contain).accessibilityIdentifier("player.video").accessibilityValue(fillScreen ? "fill" : "fit")
                         .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(co.current ?? 0, page: full.height))
                         .allowsHitTesting(false)
                     if let held = co.heldFrame {
@@ -135,7 +133,8 @@ struct PlayerScreen: View {
                        let i = co.current, co.readyIndex == i, co.episodes.indices.contains(i) {
                         danmakuLayer(i, full: full, ins: ins)
                     }
-                    if !co.pipActive {
+                    // Expanded controls alone need contrast scrims. Compact always-on chrome is transparent.
+                    if !co.pipActive, controlsVisible && !locked {
                         gradients(full)
                     }
                     if panel != nil {
@@ -252,12 +251,12 @@ struct PlayerScreen: View {
 
     private func gradients(_ full: CGSize) -> some View {
         VStack(spacing: 0) {
-            LinearGradient(stops: [.init(color: .black.opacity(0.88), location: 0), .init(color: .black.opacity(0.65), location: 0.42), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
-                .frame(height: landscape ? 140 : 170)
+            LinearGradient(stops: [.init(color: .black.opacity(0.45), location: 0), .init(color: .black.opacity(0.16), location: 0.42), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
+                .frame(height: landscape ? 72 : 110)
             Spacer(minLength: 0)
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(landscape ? 0.94 : 0.74), location: 0.42),
-                                   .init(color: .black.opacity(landscape ? 0.985 : 0.94), location: 1)], startPoint: .top, endPoint: .bottom)
-                .frame(height: landscape ? 180 : 330)
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.16), location: 0.42),
+                                   .init(color: .black.opacity(0.45), location: 1)], startPoint: .top, endPoint: .bottom)
+                .frame(height: landscape ? 100 : 150)
         }
         .frame(width: full.width, height: full.height)
         .allowsHitTesting(false)
@@ -376,10 +375,38 @@ struct PlayerScreen: View {
     private var dim: Double { scrubbing ? 0.28 : 1 }
 
     /// `chrome`: auto-hiding controls (top bar, meta row, icon row) are shown.
-    /// `interactive`: the always-on progress bar accepts scrubbing.
+    /// `interactive`: the expanded scrubber accepts scrubbing; compact progress never intercepts gestures.
     @ViewBuilder private func controls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
-        if landscape { landscapeControls(full, ins: ins, chrome: chrome, interactive: interactive) }
-        else { portraitControls(full, ins: ins, chrome: chrome, interactive: interactive) }
+        ZStack(alignment: .topLeading) {
+            if landscape { landscapeControls(full, ins: ins, chrome: chrome, interactive: interactive) }
+            else { portraitControls(full, ins: ins, chrome: chrome, interactive: interactive) }
+            if !chrome { compactChrome(full, ins: ins) }
+        }
+    }
+
+    /// Unobtrusive always-on chrome. Pure overlay: no inset, spacer or video-area subtraction.
+    private func compactChrome(_ full: CGSize, ins: EdgeInsets) -> some View {
+        VStack(spacing: 0) {
+            Text(co.detail?.title ?? series.title)
+                .font(.system(size: 12, weight: .medium)).lineLimit(1)
+                .foregroundStyle(.white.opacity(0.85))
+                .shadow(color: .black.opacity(0.7), radius: 2, y: 1)
+                .padding(.horizontal, landscape ? max(24, ins.leading) : 16)
+                .padding(.top, landscape ? 12 : max(8, ins.top))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("player.compactTitle")
+            Spacer(minLength: 0)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Color.white.opacity(0.18)
+                    Color.white.opacity(0.6).frame(width: g.size.width * max(0, min(1, co.duration > 0 ? co.time / co.duration : 0)))
+                }
+            }
+            .frame(height: 2)
+            .accessibilityIdentifier("player.compactProgress")
+        }
+        .frame(width: full.width, height: full.height)
+        .allowsHitTesting(false)
     }
 
     private func portraitControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
@@ -432,11 +459,12 @@ struct PlayerScreen: View {
         }
         .foregroundStyle(.white)
         .frame(width: full.width, height: full.height)
+        .modifier(ChromeFade(on: chrome))
     }
 
     /// Redesign 17: title + episode sit beside 返回; tech line, 连播 switch, lock and exit on the right;
     /// full-width progress row, then 跳过片头 on the left and five labelled glass chips on the right.
-    /// The title block and the progress row never auto-hide.
+    /// Full title/info and scrubber auto-hide; compactChrome supplies the always-on overlay.
     private func landscapeControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
         let side = max(ins.leading, ins.trailing, 64) + 2
         return VStack(spacing: 0) {
@@ -505,6 +533,7 @@ struct PlayerScreen: View {
         }
         .foregroundStyle(.white)
         .frame(width: full.width, height: full.height)
+        .modifier(ChromeFade(on: chrome))
     }
 
     private func landSubline(_ i: Int) -> String {
@@ -1046,25 +1075,65 @@ struct PlayerLayerView: UIViewRepresentable {
     var fill: Bool = false
     var engine: PlayerEngineKind = .aether
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> PlayerRenderHost {
+        let view = PlayerRenderHost()
         view.backgroundColor = .black
         view.isUserInteractionEnabled = false
         mount(in: view)
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) { mount(in: view) }
+    func updateUIView(_ view: PlayerRenderHost, context: Context) { mount(in: view) }
 
-    private func mount(in container: UIView) {
+    private func mount(in container: PlayerRenderHost) {
         coordinator.fill = fill
         let surface = coordinator.engine.surface
-        guard surface.superview !== container else { return }
+        container.renderSurface = surface
+        guard surface.superview !== container else { container.setNeedsLayout(); return }
         container.subviews.forEach { $0.removeFromSuperview() }
         surface.frame = container.bounds
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         container.addSubview(surface)
     }
+}
+
+/// Pins the engine's *actual* UIView to the viewport on every native layout, including rotation.
+/// The Debug-only accessibility probe reads that render surface and its hosted video layers, not a SwiftUI wrapper.
+final class PlayerRenderHost: UIView {
+    weak var renderSurface: UIView?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        #if DEBUG
+        isAccessibilityElement = true
+        accessibilityIdentifier = "player.renderSurface"
+        #endif
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let surface = renderSurface else { return }
+        UIView.performWithoutAnimation { surface.frame = bounds; surface.layoutIfNeeded() }
+    }
+    #if DEBUG
+    override var accessibilityValue: String? {
+        get {
+            guard let surface = renderSurface, let window else { return "unmounted" }
+            var values = ["surface": NSCoder.string(for: surface.convert(surface.bounds, to: window)),
+                          "surfaceBounds": NSCoder.string(for: surface.bounds)]
+            func visit(_ layer: CALayer, _ path: String) {
+                if layer is AVPlayerLayer || layer is AVSampleBufferDisplayLayer {
+                    values[path] = NSCoder.string(for: layer.convert(layer.bounds, to: window.layer))
+                    if let av = layer as? AVPlayerLayer { values[path + ".videoRect"] = NSCoder.string(for: av.videoRect) }
+                }
+                for (i, child) in (layer.sublayers ?? []).enumerated() { visit(child, path + ".\(i)") }
+            }
+            visit(surface.layer, "renderLayer")
+            let d = try? JSONSerialization.data(withJSONObject: values, options: .sortedKeys)
+            return d.flatMap { String(data: $0, encoding: .utf8) }
+        }
+        set { }
+    }
+    #endif
 }
 
 // MARK: - Player touch catcher (UIKit)
