@@ -73,14 +73,14 @@ enum LegadoClient {
         var entries: [ExploreCategory] = []
         var group = "推荐"
         func add(_ title: String, _ url: String, _ action: String? = nil) {
-            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = stripInvisible(title).trimmingCharacters(in: .whitespacesAndNewlines)
             let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return }
             if let action, !action.isEmpty { entries.append(ExploreCategory(title: title, url: "", group: group, action: action)) }
             else if url.isEmpty { group = title }
             else { entries.append(ExploreCategory(title: title, url: url, group: group)) }
         }
-        if let data = raw.data(using: .utf8), let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+        if let array = lenientJSONArray(raw) {
             for item in array {
                 let type = item["type"] as? String
                 add((item["title"] as? String) ?? "", (item["url"] as? String) ?? "", type == "button" ? item["action"] as? String : nil)
@@ -103,6 +103,28 @@ enum LegadoClient {
         return entries.filter { seen.insert($0.id).inserted }
     }
 
+    /// Legado reads discovery JSON with Gson, which accepts raw line breaks / tabs inside strings (multi-line `@js:` urls).
+    static func lenientJSONArray(_ raw: String) -> [[String: Any]]? {
+        if let d = raw.data(using: .utf8), let a = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] { return a }
+        guard raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") else { return nil }
+        var out = "", inString = false, escaped = false
+        for c in raw {
+            if inString {
+                if escaped { escaped = false; out.append(c); continue }
+                switch c {
+                case "\\": escaped = true; out.append(c)
+                case "\"": inString = false; out.append(c)
+                case "\n": out += "\\n"
+                case "\r": out += "\\r"
+                case "\t": out += "\\t"
+                default: out.append(c)
+                }
+            } else { if c == "\"" { inString = true }; out.append(c) }
+        }
+        guard let d = out.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: d) as? [[String: Any]]
+    }
+
     static func exploreAction(_ source: LegadoSource, category: ExploreCategory) throws {
         guard let action = category.action else { return }
         _ = try LegadoContext(source: source).evalJS(action, result: nil, baseURL: source.bookSourceUrl)
@@ -115,13 +137,36 @@ enum LegadoClient {
         return try search(source, key: "", page: page, allowDetailFallback: false)
     }
 
+    /// Zero-width / soft-hyphen characters some sources sprinkle into titles to dodge keyword filters.
+    static func stripInvisible(_ s: String) -> String {
+        s.replacingOccurrences(of: "[\\u00AD\\u200B-\\u200F\\u2060\\uFEFF]", with: "", options: .regularExpression)
+    }
+
+    /// Legado runs the source's `loginCheckJs` on every search / explore / detail / toc / content response; it may
+    /// rewrite the body (decrypting APIs return `new StrResponse(url, decrypt(result.body()))`).
+    static func loginChecked(_ s: LegadoSource, _ resp: LegadoResponse, ctx: LegadoContext) throws -> LegadoResponse {
+        ctx.src = resp.text
+        guard let js = s.loginCheckJs?.trimmingCharacters(in: .whitespacesAndNewlines), !js.isEmpty else { return resp }
+        let code = "result = __strResponse(result);\n" + (js.hasPrefix("@js:") ? String(js.dropFirst(4)) : js.replacingOccurrences(of: "<js>", with: "").replacingOccurrences(of: "</js>", with: ""))
+        let value = try ctx.evalJS(code, result: ["url": resp.url.absoluteString, "body": resp.text, "code": resp.status], baseURL: resp.url.absoluteString)
+        var out = resp
+        if let d = value as? [String: Any], let body = d["__body"] as? String { out.text = body }
+        else if let body = value as? String, !body.isEmpty { out.text = body }
+        ctx.src = out.text
+        return out
+    }
+
+    static func firstLine(_ s: String) -> String {
+        s.split(whereSeparator: \.isNewline).lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+    }
+
     static func search(_ s: LegadoSource, key: String, page: Int = 1, allowDetailFallback: Bool = true) throws -> [LegadoSearchItem] {
         let ctx = LegadoContext(source: s)
         ctx.key = key
         ctx.page = page
         guard let url = s.searchUrl, !url.isEmpty else { return [] }
         let r = try LegadoURL.request(url, ctx: ctx, base: s.bookSourceUrl)
-        let resp = try r.fetch()
+        let resp = try loginChecked(s, try r.fetch(), ctx: ctx)
         let base = resp.url.absoluteString
         let rules = s.ruleSearch ?? [:]
         guard !(rules["bookList"] ?? "").isEmpty, !(rules["name"] ?? "").isEmpty, !(rules["bookUrl"] ?? "").isEmpty else {
@@ -133,13 +178,14 @@ enum LegadoClient {
         for el in list {
             let a = LegadoAnalyzer(el, baseURL: base, ctx: ctx)
             func f(_ k: String) -> String { (try? a.string(rules[k] ?? "")) ?? "" }
-            let name = clean(try a.string(rules["name"] ?? ""))
+            let name = clean(stripInvisible(try a.string(rules["name"] ?? "")))
             guard !name.isEmpty else { continue }
-            let rawBookURL = try a.string(rules["bookUrl"] ?? "")
+            // Legado reads URL rules with getString0: several matches (`a@href` hitting two links) give the first one.
+            let rawBookURL = Self.firstLine(try a.string(rules["bookUrl"] ?? ""))
             guard !rawBookURL.isEmpty else { continue }
             let bookURL = LegadoURL.absolute(rawBookURL, base: base)
             out.append(LegadoSearchItem(name: name, author: cleanAuthor(f("author")), kind: f("kind").replacingOccurrences(of: "\n", with: " · "),
-                    intro: f("intro"), cover: LegadoURL.absolute(f("coverUrl"), base: base), latest: f("lastChapter"),
+                    intro: f("intro"), cover: LegadoURL.absolute(Self.firstLine(f("coverUrl")), base: base), latest: f("lastChapter"),
                     bookURL: bookURL, sourceURL: s.bookSourceUrl, sourceName: s.bookSourceName))
         }
         // Some sites jump straight to the book page when there is one hit.
@@ -154,7 +200,7 @@ enum LegadoClient {
         let ctx = LegadoContext(source: s)
         ctx.book = ["bookUrl": bookURL]
         let r = try LegadoURL.request(bookURL, ctx: ctx, base: s.bookSourceUrl)
-        let resp = try r.fetch()
+        let resp = try loginChecked(s, try r.fetch(), ctx: ctx)
         return try info(s, html: resp.text, url: resp.url.absoluteString, ctx: ctx, original: bookURL)
     }
 
@@ -185,7 +231,7 @@ enum LegadoClient {
             next.removeFirst()
             guard seen.insert(u).inserted else { continue }
             let r = try LegadoURL.request(u, ctx: ctx, base: s.bookSourceUrl)
-            let resp = try r.fetch()
+            let resp = try loginChecked(s, try r.fetch(), ctx: ctx)
             let base = resp.url.absoluteString
             let page = LegadoAnalyzer(resp.text, baseURL: base, ctx: ctx)
             for el in try page.elements(rules["chapterList"] ?? "") {
@@ -218,7 +264,7 @@ enum LegadoClient {
         var seen = Set<String>()
         while let u = url, seen.count < 30, seen.insert(u).inserted {
             let r = try LegadoURL.request(u, ctx: ctx, base: s.bookSourceUrl)
-            let resp = try r.fetch()
+            let resp = try loginChecked(s, try r.fetch(), ctx: ctx)
             // Source rules use URL fragments as chapter IDs; HTTP never sends them to the server.
             var base = resp.url.absoluteString
             if let fragment = URL(string: u)?.fragment, !fragment.isEmpty {

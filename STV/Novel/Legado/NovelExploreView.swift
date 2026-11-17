@@ -4,7 +4,8 @@ import SwiftUI
 struct NovelExploreView: View {
     var onRead: (NovelBook) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var sourceID = ""
+    // Keep the user's choice instead of resetting to the first (possibly unavailable) source every visit.
+    @AppStorage("novel.rank.source") private var sourceID = ""
     @State private var categories: [LegadoClient.ExploreCategory] = []
     @State private var group = ""
     @State private var categoryID = ""

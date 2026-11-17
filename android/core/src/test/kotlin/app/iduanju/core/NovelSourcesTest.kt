@@ -13,7 +13,7 @@ class NovelSourcesTest {
         assertThrows(Exception::class.java){NovelSources.ruleValue("","@js:new Packages.java.security.SecureRandom().generateSeed(99999999)",s,s.id)}
         assertThrows(Exception::class.java){NovelSources.ruleValue("","@js:new Packages.java.net.URL('file:///etc/passwd').openConnection().getResponseCode()",s,s.id)}
     }
-    @After fun cleanup() { NovelSources.fixture = null }
+    @After fun cleanup() { NovelSources.fixture = null; NovelSources.fixturePage = null }
     @Test fun htmlDiscoverySearchAndRead() {
         val source = NovelSources.import("""{"bookSourceUrl":"https://book.example","bookSourceName":"书站","searchUrl":"/search?q={{key}}&page={{page}}","exploreUrl":"热门::/rank?page={{page}}&&最新::/new","ruleSearch":{"bookList":"class.books@tag.li","name":"tag.a@text","bookUrl":"tag.a@href","author":"tag.span@text"},"ruleBookInfo":{"tocUrl":"id.toc@href"},"ruleToc":{"chapterList":"tag.li","chapterName":"tag.a@text","chapterUrl":"tag.a@href"},"ruleContent":{"content":"id.content@html"}}""").single()
         val categories = NovelSources.categories(source)
@@ -92,5 +92,59 @@ class NovelSourcesTest {
         val cat = sources.first { it.name == "猫扑中文" }
         assertTrue(NovelSources.categories(cat).any { it.title == "排行榜" })
         assertFalse(NovelSources.categories(cat).any { it.url.isBlank() && it.action == null })
+    }
+}
+
+
+/** Offline pages actually captured from the user's 1335.json collection; source rules are unmodified. */
+class RealRankRegressionTest {
+    @After fun cleanup() { NovelSources.fixture = null; NovelSources.fixturePage = null }
+    private fun bytes(name: String) = javaClass.getResourceAsStream("/legado-rank/$name")!!.use { it.readBytes() }
+    @Test fun actualRankingToDetailAndTOCOffline() {
+        val sources = org.json.JSONArray(String(bytes("sources.json")))
+        for (n in 0 until sources.length()) {
+            val json = sources.getJSONObject(n); val id = json.getInt("rankFixtureIndex"); val source = NovelSource(json)
+            val routes = org.json.JSONArray(String(bytes("$id/routes.json")))
+            val used = hashSetOf<Int>()
+            fun stableURL(raw: String): String = java.net.URLDecoder.decode(raw, "UTF-8").let { u ->
+                val path = u.substringBefore('?'); val query = u.substringAfter('?', "").split('&').filter { it.isNotBlank() && it.substringBefore('=') !in listOf("t", "sign") }.sorted().joinToString("&")
+                path + if (query.isBlank()) "" else "?$query"
+            }
+            fun sameURL(a: String, b: String) = stableURL(a) == stableURL(b)
+            NovelSources.fixturePage = { url ->
+                val i = (0 until routes.length()).firstOrNull { it !in used && sameURL(routes.getJSONObject(it).getString("url"), url) }
+                    ?: (0 until routes.length()).firstOrNull { sameURL(routes.getJSONObject(it).getString("url"), url) }
+                    ?: error("unrecorded request $id $url")
+                used += i
+                val r = routes.getJSONObject(i)
+                NovelSources.PageResponse(NovelSources.decode(bytes("$id/" + r.getString("file")), null, r.getString("contentType")), r.optString("responseURL", url))
+            }
+            val cats = NovelSources.categories(source)
+            val c = cats.first { it.action == null && it.url.isNotBlank() }
+            val hits = NovelSources.search(source, "", category = c)
+            assertTrue("$id books", hits.size > 1)
+            val book = hits.first(); assertFalse(book.url.contains("\n"))
+            val toc = NovelSources.chapters(source, book.url)
+            assertTrue("$id toc", toc.size > 1)
+            assertTrue(toc.first().title.isNotBlank())
+            assertTrue(toc.first().url.startsWith("http"))
+            println("[rank-offline] $id ${source.name}: cats=${cats.size} books=${hits.size} toc=${toc.size} first=${toc.first().title} url=${toc.first().url}")
+        }
+    }
+
+    @Test fun liveRealCollectionRankingToTOC() {
+        val file = System.getenv("STV_RANK_LIVE")
+        org.junit.Assume.assumeTrue("set STV_RANK_LIVE to downloaded 1335.json", file != null)
+        NovelSources.fixture = null
+        val sources = org.json.JSONArray(java.io.File(file!!).readText())
+        for (id in listOf(7, 28, 30, 65)) {
+            val source = NovelSource(sources.getJSONObject(id))
+            val cats = NovelSources.categories(source)
+            val hits = NovelSources.search(source, "", category = cats.first { it.action == null && it.url.isNotBlank() })
+            assertTrue(hits.isNotEmpty())
+            val toc = NovelSources.chapters(source, hits.first().url)
+            assertTrue(toc.size > 1)
+            println("[rank-live] $id ${source.name}: cats=${cats.size} books=${hits.size} toc=${toc.size}")
+        }
     }
 }

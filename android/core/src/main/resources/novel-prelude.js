@@ -144,6 +144,8 @@ src.getKey = () => src.bookSourceUrl;
     src.put = (k, v) => call('sourcePut', {k:str(k),v:str(v)});
     src.getLoginInfo = () => call('loginInfo', null);
 src.getLoginInfoMap = () => __jmap(parseObj(call('loginInfo', null)));
+    // Newer Legado builds expose the login form values as `infoMap` (explore scripts read e.g. infoMap["分类"]).
+    if (!Object.getOwnPropertyDescriptor(globalThis, 'infoMap')) Object.defineProperty(globalThis, 'infoMap', { configurable: true, get: () => parseObj(call('loginInfo', null)) });
     src.putLoginInfo = (v) => { call('putLoginInfo', { v: str(v) }); return true; };
     src.removeLoginInfo = () => call('putLoginInfo', { v: '' });
     src.getLoginHeader = () => call('loginHeader', null);
@@ -190,6 +192,8 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     html: () => call('jsoup.html', { h: [h] }),
     outerHtml: () => call('jsoup.outer', { h: [h] }),
     toString: () => call('jsoup.outer', { h: [h] }),
+    // Returned elements leave the script as their HTML (Legado's Element.toString()).
+    toJSON: () => call('jsoup.outer', { h: [h] }),
   });
   const jsoupEls = (hs) => {
     const a = hs.map(jsoupEl);
@@ -207,7 +211,10 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     def('toString', () => call('jsoup.outer', { h: hs }));
     return a;
   };
-  globalThis.org = { jsoup: { Jsoup: { parse: (html) => jsoupEl(call('jsoup.parse', { html: str(html) })) } } };
+  // A list rule followed by JS hands the script Legado's Elements (`result.toArray()`, `el.attr(k)`).
+  globalThis.__nodeList = (hs) => jsoupEls(hs);
+  const jsoupParse = (html) => jsoupEl(call('jsoup.parse', { html: str(html) }));
+  globalThis.org = { jsoup: { Jsoup: { parse: jsoupParse, parseBodyFragment: jsoupParse } } };
   Object.assign(globalThis.java, {
     getElement: (rule) => jsoupEls(call('jsoup.rule', { rule: str(rule) })),
     getElements: (rule) => jsoupEls(call('jsoup.rule', { rule: str(rule) })),
@@ -261,9 +268,19 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
     return m;
   };
   globalThis.Packages = {
-                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, nio: { charset: { Charset: { forName: (name) => str(name) }, StandardCharsets: { UTF_8: 'UTF-8' } } }, util: { Arrays, Base64, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater, GZIPOutputStream, GZIPInputStream } }, security: { MessageDigest, SecureRandom }, io: { ByteArrayOutputStream, InputStreamReader, BufferedReader }, net: { URL: JURL }, math: { BigInteger: JBigInteger } },
+                    java: { lang: { String: JString, Thread: { sleep: () => {} } }, nio: { charset: { Charset: { forName: (name) => str(name) }, StandardCharsets: { UTF_8: 'UTF-8' } } }, util: { Arrays, Base64, ArrayList: function () { return []; }, HashMap: function () { const m = {}; Object.defineProperties(m, { put: { value: (k, v) => { m[k] = v; return v; } }, get: { value: (k) => m[k] } }); return m; }, UUID: { randomUUID: () => java.randomUUID() }, zip: { Inflater, GZIPOutputStream, GZIPInputStream } }, security: { MessageDigest, SecureRandom }, io: { ByteArrayOutputStream, InputStreamReader, BufferedReader }, net: { URL: JURL }, math: { BigInteger: JBigInteger } },
                     javax: { crypto: { Cipher, spec: { SecretKeySpec, IvParameterSpec } } },
                     cn: { hutool: { crypto: { digest: { DigestUtil: { md5Hex: (s) => java.md5Encode(s) } } } } },
+                    io: { legado: { app: { help: { http: { StrResponse: function (url, body) { return __strResponse({ url: url, body: body }); } } } } } },
+                };
+                // Legado's StrResponse as seen by loginCheckJs (`result.body()`, `new StrResponse(url, body)`). The plain
+                // `__url` / `__body` fields survive JSON so the host can read the checked response back.
+                globalThis.__strResponse = (r) => {
+                    const o = { __url: str(r && (typeof r.url === 'function' ? r.url() : r.url)), __body: str(r && (typeof r.body === 'function' ? r.body() : r.body)), __code: (r && r.code) || 200 };
+                    o.url = () => o.__url; o.body = () => o.__body; o.code = () => o.__code; o.message = () => '';
+                    o.headers = () => ({}); o.isSuccessful = () => o.__code < 400; o.toString = () => o.__body;
+                    o.raw = () => ({ request: () => ({ url: () => o.__url }), code: () => o.__code });
+                    return o;
                 };
                 const sym = (t, key, iv) => {
                     const k = bytesOf(key), v = iv == null ? null : bytesOf(iv), tt = str(t);
@@ -283,6 +300,7 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
                         aesDecodeToString: (d, k, t, iv) => sym(t, k, iv).decryptStr(d),
                         aesEncodeToBase64String: (d, k, t, iv) => sym(t, k, iv).encryptBase64(d),
                         hexDecodeToString: (s) => call('bytes.dec', { b: call('hex.dec', { s: str(s) }), cs: 'UTF-8' }),
+                        hexDecodeToByteArray: (s) => call('hex.dec', { s: str(s) }),
                         hexEncodeToString: (s) => call('hex.enc', { b: bytesOf(s) }),
                         base64DecodeToByteArray: (s) => call('b64.dec', { s: str(s) }),
                         strToBytes: (s, cs) => call('bytes.enc', { s: str(s), cs: cs || 'UTF-8' }),

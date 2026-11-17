@@ -351,7 +351,9 @@ function hello() { return 'hi' }
                                                     XCTAssertEqual(try a.string("@js:var J = org.jsoup.Jsoup.parse(result); J.select('a.x').attr('href') + ',' + J.select('a.x').size() + ',' + J.select('a.x').get(1).text()"), "/b/1,2,二")
                                                     XCTAssertEqual(try a.string("@js:java.getElement('id.n@tag.a.-1').text()"), "二")
                                                     XCTAssertEqual(try a.string("@js:java.getElement('@css:a.x').first().absUrl('href')"), "https://x.test/b/1")
-                                                    XCTAssertEqual(try a.string("tag.a@href<js>result.toArray().map(function (x) { return x.split('/').pop() }).join('+')</js>"), "1+2")
+                                                    // getStringList gives JS a list; getString gives it a newline-joined String (Legado semantics).
+                                                    XCTAssertEqual(try a.strings("tag.a@href<js>result.toArray().map(function (x) { return x.split('/').pop() }).join('+')</js>"), ["1+2"])
+                                                    XCTAssertEqual(try a.string("tag.a@href@js:result.replace(/\\n/g, ',')"), "/b/1,/b/2")
                                                 }
 
                                                 /// hutool AsymmetricCrypto("RSA").setPublicKey(x509).decryptStr(data): text "encrypted" with the private key,
@@ -364,3 +366,60 @@ function hello() { return 'hi' }
                                                     XCTAssertEqual(out, String(repeating: "雾港的灯塔在岛的最北边，白色的墙皮已经剥落了大半。守塔人每天傍晚爬上一百二十级台阶去点灯。", count: 2))
                                                 }
                                             }
+
+
+/// Captured public pages from the exact collection reported by the user, not a synthetic success fixture.
+final class RealRankRegressionTests: XCTestCase {
+    private var root: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/legado-rank") }
+    override func tearDown() { LegadoHTTP.transport = nil }
+    /// Timestamp/signature change on each run; all other request fields remain part of replay matching.
+    private static func stableURL(_ raw: String) -> String {
+        guard var u = URLComponents(string: raw) else { return raw }
+        u.queryItems = u.queryItems?.filter { !["t", "sign"].contains($0.name) }.sorted { $0.name < $1.name }
+        return u.string ?? raw
+    }
+
+    func testRealRankingThroughDetailAndTOCOffline() throws {
+        let sources = try LegadoSourceStore.parse(Data(contentsOf: root.appendingPathComponent("sources.json")))
+        let ids = [18, 28, 30, 59, 65, 109, 163]
+        for (index, source) in zip(ids, sources) {
+            let dir = root.appendingPathComponent(String(index))
+            let routes = try JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("routes.json"))) as! [[String: Any]]
+            LegadoHTTP.transport = { request in
+                let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+                let route = try XCTUnwrap(routes.first { Self.stableURL($0["url"] as? String ?? "") == Self.stableURL(request.url!.absoluteString) && ($0["body"] as? String) == body }, "unrecorded request \(request.url!)")
+                return (try Data(contentsOf: dir.appendingPathComponent(route["file"] as! String)), HTTPURLResponse(url: URL(string: route["responseURL"] as? String ?? request.url!.absoluteString)!, statusCode: route["status"] as! Int, httpVersion: nil, headerFields: ["Content-Type": route["contentType"] as! String])!)
+            }
+            let cats = try LegadoClient.exploreCategories(source)
+            let category = try XCTUnwrap(cats.first { $0.action == nil && !$0.url.isEmpty })
+            let hits = try LegadoClient.explore(source, category: category, page: 1)
+            XCTAssertGreaterThan(hits.count, 1, source.bookSourceName)
+            let hit = try XCTUnwrap(hits.first)
+            XCTAssertFalse(hit.bookURL.contains("\n"))
+            let info = try LegadoClient.info(source, bookURL: hit.bookURL)
+            XCTAssertFalse(info.name.isEmpty, source.bookSourceName)
+            let toc = try LegadoClient.toc(source, tocURL: info.tocURL)
+            XCTAssertGreaterThan(toc.count, 1, source.bookSourceName)
+            XCTAssertFalse(toc[0].title.isEmpty)
+            XCTAssertTrue(toc[0].url.contains("http"))
+            print("[rank-offline] \(index) \(source.bookSourceName): categories=\(cats.count) books=\(hits.count) detail=\(info.name) toc=\(toc.count) first=\(toc[0].title)")
+        }
+    }
+
+    func testRealCollectionLiveRankingToTOC() throws {
+        guard let file = ProcessInfo.processInfo.environment["STV_RANK_LIVE"] else { throw XCTSkip("set STV_RANK_LIVE to downloaded 1335.json") }
+        LegadoHTTP.transport = nil
+        let sources = try LegadoSourceStore.parse(Data(contentsOf: URL(fileURLWithPath: file)))
+        for index in [7, 28, 30, 65] {
+            let source = sources[index]
+            let cats = try LegadoClient.exploreCategories(source)
+            let category = try XCTUnwrap(cats.first { $0.action == nil && !$0.url.isEmpty })
+            let hits = try LegadoClient.explore(source, category: category, page: 1)
+            let hit = try XCTUnwrap(hits.first, source.bookSourceName)
+            let info = try LegadoClient.info(source, bookURL: hit.bookURL)
+            let toc = try LegadoClient.toc(source, tocURL: info.tocURL)
+            XCTAssertGreaterThan(toc.count, 1)
+            print("[rank-live] \(index) \(source.bookSourceName): cats=\(cats.count) books=\(hits.count) detail=\(info.name) toc=\(toc.count)")
+        }
+    }
+}

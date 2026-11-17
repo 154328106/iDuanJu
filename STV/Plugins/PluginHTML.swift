@@ -6,10 +6,11 @@ import libxml2
 enum CSSXPath {
     struct Bad: Error { let message: String }
 
-    static func convert(_ css: String) throws -> String {
+    /// `includeSelf`: the context node itself may match the first compound, like Jsoup's `Element.select`.
+    static func convert(_ css: String, includeSelf: Bool = false) throws -> String {
         let groups = split(css, by: ",")
         guard !groups.isEmpty else { throw Bad(message: "空选择器") }
-        return try groups.map { try one($0) }.joined(separator: " | ")
+        return try groups.map { try one($0, includeSelf: includeSelf) }.joined(separator: " | ")
     }
 
     static func literal(_ s: String) -> String {
@@ -32,7 +33,7 @@ enum CSSXPath {
         return out.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
-    private static func one(_ sel: String) throws -> String {
+    private static func one(_ sel: String, includeSelf: Bool = false) throws -> String {
         // Tokenize into compounds and combinators.
         var parts: [(comb: Character, compound: String)] = []
         var cur = "", depth = 0, pending: Character = " "
@@ -56,10 +57,24 @@ enum CSSXPath {
             case ">": x += "/\(tag)\(pr)"
             case "+": x += "/following-sibling::*[1]" + (tag == "*" ? "" : "[self::\(tag)]") + pr
             case "~": x += "/following-sibling::\(tag)\(pr)"
-            default: x += (i == 0 ? ".//" : "//") + tag + pr
+            default: x += (i == 0 ? (includeSelf ? "descendant-or-self::" : ".//") : "//") + tag + pr
             }
         }
         return x
+    }
+
+    /// `An+B` (`3`, `odd`, `even`, `2n+1`, `-n+3`) against a 1-based position expression.
+    static func nth(_ arg: String, _ pos: String) throws -> String {
+        let t = arg.replacingOccurrences(of: " ", with: "").lowercased()
+        var a = 0, b = 0
+        if t == "odd" { a = 2; b = 1 } else if t == "even" { a = 2; b = 0 }
+        else if let n = t.firstIndex(of: "n") {
+            let head = String(t[..<n]), tail = String(t[t.index(after: n)...])
+            guard let av = head.isEmpty || head == "+" ? 1 : head == "-" ? -1 : Int(head), let bv = tail.isEmpty ? 0 : Int(tail) else { throw Bad(message: ":nth 参数无效：\(arg)") }
+            a = av; b = bv
+        } else if let v = Int(t) { b = v } else { throw Bad(message: ":nth 参数无效：\(arg)") }
+        if a == 0 { return "\(pos) = \(b)" }
+        return "((\(pos) - \(b)) mod \(a) = 0) and ((\(pos) - \(b)) div \(a) >= 0)"
     }
 
     /// One compound selector → (tag, predicates).
@@ -103,9 +118,8 @@ enum CSSXPath {
                 case "first-child": preds.append("not(preceding-sibling::*)")
                 case "last-child": preds.append("not(following-sibling::*)")
                 case "only-child": preds.append("not(preceding-sibling::*) and not(following-sibling::*)")
-                case "nth-child":
-                    guard let n = Int(arg.trimmingCharacters(in: .whitespaces)), n > 0 else { throw Bad(message: ":nth-child 只支持数字") }
-                    preds.append("count(preceding-sibling::*) = \(n - 1)")
+                case "nth-child": preds.append(try nth(arg, "count(preceding-sibling::*) + 1"))
+                case "nth-last-child": preds.append(try nth(arg, "count(following-sibling::*) + 1"))
                 case "not":
                     let (t, p) = try compound(arg.trimmingCharacters(in: .whitespaces))
                     var all = p
@@ -119,9 +133,7 @@ enum CSSXPath {
                     preds.append(arg.trimmingCharacters(in: .whitespaces).hasPrefix(">") ? "./" + inner.dropFirst(3) : inner)
                 case "first-of-type": preds.append(tag == "*" ? "not(preceding-sibling::*)" : "not(preceding-sibling::\(tag))")
                 case "last-of-type": preds.append(tag == "*" ? "not(following-sibling::*)" : "not(following-sibling::\(tag))")
-                case "nth-of-type":
-                    guard let n = Int(arg.trimmingCharacters(in: .whitespaces)), n > 0 else { throw Bad(message: ":nth-of-type 只支持数字") }
-                    preds.append("count(preceding-sibling::\(tag == "*" ? "*" : tag)) = \(n - 1)")
+                case "nth-of-type": preds.append(try nth(arg, "count(preceding-sibling::\(tag == "*" ? "*" : tag)) + 1"))
                 // jsoup :eq / :lt / :gt compare the element's index among its siblings (0-based).
                 case "eq", "lt", "gt":
                     guard let n = Int(arg.trimmingCharacters(in: .whitespaces)) else { throw Bad(message: ":\(name) 只支持数字") }

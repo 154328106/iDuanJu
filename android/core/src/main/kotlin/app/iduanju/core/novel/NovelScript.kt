@@ -16,6 +16,8 @@ internal class NovelScript(private val source: NovelSource, private val base: St
     companion object {
         @Volatile var storage: MutableMap<String, String> = ConcurrentHashMap()
         internal val bookURL = ThreadLocal<String?>()
+        /** Raw body of the page being parsed (Legado's JS `src`). */
+        internal val src = ThreadLocal<String?>()
         private var stateFile: java.io.File? = null
         @Synchronized fun configure(root: java.io.File) {
             val file = java.io.File(root,"novel-script-state.json")
@@ -38,6 +40,24 @@ internal class NovelScript(private val source: NovelSource, private val base: St
             val scope = bookURL.get()?.let { "$source|book|$it|$key" } ?: "$source|$key"
             put(scope, value)
         }
+        private val libraries = ConcurrentHashMap<String, String>()
+        /** Legado also accepts jsLib as a JSON map `{"name": "https://…/lib.js"}`: download once, run before the source code. */
+        internal fun libraryCode(lib: String): String {
+            val t = lib.trim()
+            if (!t.startsWith("{") || !t.endsWith("}")) return lib
+            val map = runCatching { JSONObject(t) }.getOrNull() ?: return lib
+            if (map.length() == 0 || map.keys().asSequence().any { map.opt(it) !is String }) return lib
+            return map.keys().asSequence().sorted().joinToString("\n;\n") { k ->
+                val v = map.getString(k).trim()
+                if (!v.startsWith("http://") && !v.startsWith("https://")) v
+                else libraries.getOrPut(v) {
+                    val r = NovelSources.fetchBytes(v, "GET", null, byteArrayOf())
+                    require(r.status in 200..299) { "jsLib 下载失败：HTTP ${r.status}" }
+                    require(r.bytes.size < 4 shl 20) { "jsLib 脚本过大" }
+                    String(r.bytes, Charsets.UTF_8)
+                }
+            }
+        }
         private val prelude by lazy { NovelScript::class.java.getResourceAsStream("/novel-prelude.js")!!.bufferedReader().use { it.readText() } }
         // JSONObject.valueToString exists on desktop org.json but not Android's framework class.
         private fun jsonValue(value: Any?): String = JSONArray().put(value ?: JSONObject.NULL).toString().let { it.substring(1,it.length-1) }
@@ -55,7 +75,9 @@ internal class NovelScript(private val source: NovelSource, private val base: St
     private var content = ""
     fun eval(code: String, result: Any? = null): Any? = factory.call(ContextAction { cx ->
         val scope = cx.initSafeStandardObjects()
-        content = result?.toString() ?: ""
+        // A list rule followed by JS hands the script Legado's Elements (`result.toArray()`, `el.attr(k)`).
+        val nodeList = (result as? List<*>)?.takeIf { l -> l.isNotEmpty() && l.all { it is org.jsoup.nodes.Element } }?.map { it as org.jsoup.nodes.Element }
+        content = nodeList?.joinToString("\n") { it.outerHtml() } ?: result?.toString() ?: ""
         val host = object : BaseFunction() {
             override fun call(context: Context, s: Scriptable, thisObj: Scriptable, args: Array<out Any>): Any {
                 val method = Context.toString(args.getOrNull(0))
@@ -71,9 +93,9 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         }
         ScriptableObject.putProperty(scope, "__host", host)
         cx.evaluateString(scope, "var globalThis=this;\n" + compatible(prelude), "novel-host", 1, null)
-        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${jsonValue(result)};"
+        val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${if (nodeList != null) "__nodeList(" + JSONArray(nodeList.map { handle(it) }) + ")" else jsonValue(result)}; var src=${JSONObject.quote(srcText ?: src.get().orEmpty())};"
         cx.evaluateString(scope, globals, "novel-context", 1, null)
-        val lib = source.json.optString("jsLib")
+        val lib = libraryCode(source.json.optString("jsLib"))
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)
         val value = cx.evaluateString(scope, compatible(code), "source-rule", 1, null)
         ScriptableObject.putProperty(scope, "__result", value)
@@ -91,6 +113,12 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         else -> a.toString().toByteArray()
     }
     private fun jsonBytes(b: ByteArray) = JSONArray(b.map { it.toInt() })
+    /** Jsoup elements handed to scripts as indexes into this table (same contract as the iOS libxml handles). */
+    private val handles = ArrayList<org.jsoup.nodes.Element>()
+    /** JS `src` for this evaluation (falls back to the page body). */
+    var srcText: String? = null
+    private fun handle(e: org.jsoup.nodes.Element): Int { handles += e; return handles.size - 1 }
+    private fun elements(h: Any?): List<org.jsoup.nodes.Element> = (h as? JSONArray)?.let { arr -> (0 until arr.length()).mapNotNull { handles.getOrNull(arr.optInt(it, -1)) } }.orEmpty()
     private fun invoke(name: String, a: JSONObject): Any? {
         fun str(k: String) = a.optString(k).takeUnless { it == "null" } ?: ""
         when (name) {
@@ -150,7 +178,8 @@ internal class NovelScript(private val source: NovelSource, private val base: St
             "hex.enc" -> return bytes(a.opt("b")).joinToString(""){"%02x".format(it)}
             "digest" -> return jsonBytes(MessageDigest.getInstance(str("alg").replace("SHA256","SHA-256").replace("SHA512","SHA-512")).digest(bytes(a.opt("b"))))
             "cipher" -> {
-                val transformation = str("t").replace("PKCS7Padding","PKCS5Padding")
+                // JCE only names PKCS5Padding (identical for AES); sources write PKCS7Padding / Pkcs7Padding.
+                val transformation = str("t").replace(Regex("(?i)pkcs7padding"),"PKCS5Padding")
                 val cipher = Cipher.getInstance(transformation)
                 val secret = SecretKeySpec(bytes(a.opt("key")), transformation.substringBefore('/'))
                 val iv = bytes(a.opt("iv"))
@@ -196,9 +225,26 @@ internal class NovelScript(private val source: NovelSource, private val base: St
                     return jsonBytes(out.toByteArray())
                 } finally { inflater.end() }
             }
+            "jsoup.parse" -> return handle(org.jsoup.Jsoup.parse(str("html"), base))
+            "jsoup.select" -> {
+                val hits = elements(a.opt("h")).flatMap { it.select(str("q")).toList() }
+                return JSONArray((if (a.optBoolean("first")) hits.take(1) else hits).map { handle(it) })
+            }
+            "jsoup.children" -> return JSONArray(elements(a.opt("h")).flatMap { it.children().toList() }.map { handle(it) })
+            "jsoup.rule" -> return JSONArray(NovelSources.nodes(content, str("rule"), source, base, key, page).filterIsInstance<org.jsoup.nodes.Element>().map { handle(it) })
+            "jsoup.text" -> return elements(a.opt("h")).map { it.text() }.filter { it.isNotEmpty() }.joinToString(" ")
+            "jsoup.ownText" -> return elements(a.opt("h")).joinToString(" ") { it.ownText() }
+            "jsoup.textNodes" -> return JSONArray(elements(a.opt("h")).flatMap { e -> e.textNodes().map { it.text().trim() }.filter { it.isNotEmpty() } })
+            "jsoup.attr" -> {
+                val k = str("k"); val abs = k.startsWith("abs:"); val name = k.removePrefix("abs:")
+                val v = elements(a.opt("h")).map { it.attr(name) }.firstOrNull { it.isNotEmpty() }.orEmpty()
+                return if (abs && v.isNotEmpty()) runCatching { NovelSources.absolute(v, base) }.getOrDefault(v) else v
+            }
+            "jsoup.html" -> return elements(a.opt("h")).joinToString("\n") { it.html() }
+            "jsoup.outer" -> return elements(a.opt("h")).joinToString("\n") { it.outerHtml() }
             "encodeURI" -> return java.net.URLEncoder.encode(str("s"),str("cs").ifBlank{"UTF-8"}).replace("+","%20")
             "htmlFormat" -> return NovelSources.cleanText(str("s"))
-            "headers" -> return source.json.optJSONObject("header") ?: runCatching { JSONObject(source.json.optString("header")) }.getOrDefault(JSONObject())
+            "headers" -> return NovelSources.headers(source)
             "cookie", "log" -> return ""
             "convert" -> return str("s")
             "browser", "webView" -> error("此书源需要网页登录，请更换书源")

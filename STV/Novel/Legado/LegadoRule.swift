@@ -54,6 +54,8 @@ final class LegadoContext {
         vars[k] ?? bookScope.flatMap { LegadoVars.get($0, k) } ?? LegadoVars.get(sourceScope, k) ?? ""
     }
     var book: [String: Any] = [:]
+    /// Raw body of the page being parsed (Legado's JS `src`).
+    var src: String?
     var chapter: [String: Any]?
     var key: String?
     var page: Int?
@@ -242,6 +244,13 @@ final class LegadoContext {
     func evalJS(_ code: String, result: Any?, baseURL: String, extra: [String: Any] = [:]) throws -> Any? {
         var b: [String: Any] = ["baseUrl": baseURL, "source": sourceJSON, "book": book]
         b["result"] = LegadoAnalyzer.jsonable(result)
+        // Legado's `src` is the analyzer content: the item for item rules, the raw body for page rules.
+        if let cur = stack.last { b["src"] = LegadoAnalyzer.jsonable(cur.content) } else if let src { b["src"] = src }
+        var code = code
+        if let list = result as? [Any], !list.isEmpty, list.allSatisfy({ $0 is LegadoNode }) {
+            b["__resultNodes"] = list.map { handle($0 as! LegadoNode) }
+            code = "result = __nodeList(__resultNodes);\n" + code
+        }
         if let key { b["key"] = key }
         if let page { b["page"] = page }
         if let chapter { b["chapter"] = chapter; b["title"] = chapter["title"] ?? "" }
@@ -295,10 +304,12 @@ final class LegadoAnalyzer {
     }
 
     func string(_ rule0: String) throws -> String {
-        try strings(rule0).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        try strings(rule0, textForJS: true).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func strings(_ rule0: String) throws -> [String] {
+    /// `textForJS`: Legado's getString hands each `@js:` step a String (several matches joined by newlines),
+    /// so `result.replace(...)` works; getStringList hands it the list.
+    func strings(_ rule0: String, textForJS: Bool = false) throws -> [String] {
         var rule = rule0.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rule.isEmpty else { return [] }
         // A rule that is only `@get:{k}` is the stored value itself.
@@ -311,7 +322,7 @@ final class LegadoAnalyzer {
         var touched = false
         for seg in Self.jsSegments(rule) {
             switch seg {
-            case .js(let code): cur = try ctx.evalJS(try fillJS(code), result: touched ? cur : Self.textOf(cur), baseURL: baseURL) ?? ""
+            case .js(let code): cur = try ctx.evalJS(try fillJS(code), result: !touched || !textForJS ? cur : Self.textOf(cur), baseURL: baseURL) ?? ""
             case .rule(let r):
                 let target = LegadoAnalyzer(cur, baseURL: baseURL, ctx: ctx)
                 cur = try target.stringsCombined(r)
@@ -412,7 +423,7 @@ final class LegadoAnalyzer {
             if r.count == 1, let a = r[0] as? [Any] { return a }
             return r
         case .xpath:
-            return doc.xpathRaw(rule).nodes.filter(\.isElement)
+            return doc.xpathRaw(scopedXPath(rule)).nodes.filter(\.isElement)
         case .css:
             let (sel, _) = Self.splitCSSAttr(rule, forList: true)
             return doc.css(sel)
@@ -441,7 +452,7 @@ final class LegadoAnalyzer {
                 else if let j = json { out = LegadoJSONPath.read(j, rule).flatMap { ($0 as? [Any]) ?? [$0] }.map(LegadoJSONPath.text) }
                 else { out = [] }
             case .xpath:
-                let (nodes, scalar) = doc.xpathRaw(rule)
+                let (nodes, scalar) = doc.xpathRaw(scopedXPath(rule))
                 out = scalar.map { [$0] } ?? nodes.map(\.stringValue)
             case .css:
                 let (sel, attr) = Self.splitCSSAttr(rule, forList: false)
@@ -449,7 +460,8 @@ final class LegadoAnalyzer {
             case .jsoup:
                 var segs = Self.splitAt(rule)
                 guard !segs.isEmpty else { out = [Self.textOf(content)]; break }
-                let attr = segs.count > 1 || Self.attributeNames.contains(segs[0]) ? segs.removeLast() : "text"
+                // `@onclick`: an empty selector before `@` is the current element, the rest its attribute.
+                let attr = segs.count > 1 || rule.hasPrefix("@") || Self.attributeNames.contains(segs[0]) ? segs.removeLast() : "text"
                 var nodes = [doc]
                 for seg in segs { nodes = Self.select(seg, nodes) }
                 out = Self.values(nodes, attr)
@@ -529,6 +541,13 @@ final class LegadoAnalyzer {
 
     // MARK: Content forms
 
+    /// Legado (JsoupXpath) roots an item rule at the item: `/a/@href` is its child link and `//p` stays inside it.
+    /// libxml2 would read both from the page root, so give them a `.` context when the content is an element.
+    private func scopedXPath(_ rule: String) -> String {
+        guard let n = content as? LegadoNode, n.isElement, rule.hasPrefix("/") else { return rule }
+        return "." + rule
+    }
+
     private var doc: LegadoNode {
         if let n = content as? LegadoNode { return n }
         if let d = parsedDoc { return d }
@@ -604,15 +623,10 @@ final class LegadoAnalyzer {
         }
         let typed = ["class.", "id.", "tag.", "text."].first { body.hasPrefix($0) }
         var name = body
-        if let t = typed {
-            name = String(body.dropFirst(t.count))
-            if index == nil {
-                if let bang = name.lastIndex(of: "!") { index = "!" + name[name.index(after: bang)...]; name = String(name[..<bang]) }
-                else if let dot = name.lastIndex(of: "."), name[name.index(after: dot)...].allSatisfy({ "0123456789-:".contains($0) }), !name[name.index(after: dot)...].isEmpty {
-                    index = String(name[name.index(after: dot)...]); name = String(name[..<dot])
-                }
-            }
-        } else if body == "children" || body.hasPrefix("children.") {
+        if let t = typed { name = String(body.dropFirst(t.count)) }
+        // Legado reads a trailing `.N` / `!N` index on every segment, CSS ones too: `a.0`, `.c_value.1`, `li!0`.
+        if index == nil, body != "children", !body.hasPrefix("children."), let (rest, spec) = trailingIndex(name) { name = rest; index = spec }
+        if typed == nil, body == "children" || body.hasPrefix("children.") {
             if body.hasPrefix("children."), index == nil { index = String(body.dropFirst(9)) }
             return parents.flatMap { pick($0.children, index) }
         }
@@ -621,14 +635,24 @@ final class LegadoAnalyzer {
             switch typed {
             case "class.":
                 let want = name.split(separator: " ").map(String.init)
-                found = p.descendants.filter { n in let c = Set(n.attr("class").split(separator: " ").map(String.init)); return want.allSatisfy(c.contains) }
-            case "id.": found = p.descendants.filter { $0.attr("id") == name }
-            case "tag.": found = p.descendants.filter { $0.name == name.lowercased() }
-            case "text.": found = p.descendants.filter { $0.ownText.contains(name) }
+                found = p.selfAndDescendants.filter { n in let c = Set(n.attr("class").split(separator: " ").map(String.init)); return want.allSatisfy(c.contains) }
+            case "id.": found = p.selfAndDescendants.filter { $0.attr("id") == name }
+            case "tag.": found = p.selfAndDescendants.filter { $0.name == name.lowercased() }
+            case "text.": found = p.selfAndDescendants.filter { $0.ownText.contains(name) }
             default: found = p.css(name)
             }
             return pick(found, index)
         }
+    }
+
+    /// `name.0` → (`name`, `0`), `name!0:2` → (`name`, `!0:2`); nil when the segment has no index suffix.
+    static func trailingIndex(_ s: String) -> (String, String)? {
+        var i = s.endIndex
+        while i > s.startIndex, "0123456789-:, ".contains(s[s.index(before: i)]) { i = s.index(before: i) }
+        guard i > s.startIndex, i < s.endIndex, s[i...].contains(where: \.isNumber) else { return nil }
+        let mark = s.index(before: i)
+        guard s[mark] == "." || s[mark] == "!", mark > s.startIndex else { return nil }
+        return (String(s[..<mark]), (s[mark] == "!" ? "!" : "") + s[i...].trimmingCharacters(in: .whitespaces))
     }
 
     /// Legado indexes: `0`, `-1`, `1,3`, `1:3` (inclusive), `!0` (exclude).
@@ -779,10 +803,11 @@ enum LegadoURL {
             rule = LegadoAnalyzer.textOf(cur)
         }
         // <1,2,3> page lists
-        if let page = ctx.page, let re = try? NSRegularExpression(pattern: "<([^<>]+,[^<>]+)>") {
+        // Legado keeps empty entries: `/type/1<,_{{page}}>.html` is `/type/1.html` on page 1 and `/type/1_2.html` after.
+        if let page = ctx.page, let re = try? NSRegularExpression(pattern: "<([^<>]*,[^<>]*)>") {
             for m in re.matches(in: rule, range: NSRange(rule.startIndex..., in: rule)).reversed() {
                 guard let whole = Range(m.range, in: rule), let inner = Range(m.range(at: 1), in: rule) else { continue }
-                let items = rule[inner].split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                let items = rule[inner].split(separator: ",", omittingEmptySubsequences: false).map { String($0).trimmingCharacters(in: .whitespaces) }
                 rule.replaceSubrange(whole, with: items[min(max(0, page - 1), items.count - 1)])
             }
         }

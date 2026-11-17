@@ -278,4 +278,33 @@ final class NovelUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["长夜星河"].waitForExistence(timeout: 20))
     }
 
+    /// Opt-in LIVE UI proof. Imports all 164 real sources, explicitly chooses 七猫 (default 猫扑 is Cloudflare-blocked).
+    func testLiveRealRankToDetailAndTOC() throws {
+        guard let file = ProcessInfo.processInfo.environment["STV_RANK_LIVE"] else { throw XCTSkip("live ranking") }
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchEnvironment = ["STV_HOME_TAB": "novel", "STV_NOVEL_PAGE": "rank", "STV_LEGADO_IMPORT": file]
+        app.launch()
+        XCTAssertTrue(el("novel.rank.source").waitForExistence(timeout: 20))
+        el("novel.rank.source").tap()
+        let source = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "七猫小说")).firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        source.tap()
+        XCTAssertTrue(el("novel.rank.category.爽文").waitForExistence(timeout: 40))
+        XCTAssertTrue(el("novel.rank.book.0").waitForExistence(timeout: 40))
+        shot("rank_ios_01_real_categories_books")
+        el("novel.rank.book.0").tap()
+        XCTAssertTrue(el("detail.read").waitForExistence(timeout: 40))
+        let ready = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: el("detail.read"))
+        wait(for: [ready], timeout: 60)
+        shot("rank_ios_02_real_detail")
+        el("detail.read").tap()
+        XCTAssertTrue(el("novel.page").waitForExistence(timeout: 60))
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(el("novel.menu.目录").waitForExistence(timeout: 10))
+        el("novel.menu.目录").tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "天命")).firstMatch.waitForExistence(timeout: 40))
+        shot("rank_ios_03_real_toc")
+    }
+
 }

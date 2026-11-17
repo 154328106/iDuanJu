@@ -47,7 +47,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("novel", 0) }
     val sources = remember { mutableStateListOf<NovelSource>().apply { addAll(runCatching { NovelSources.import(prefs.getString("sources", "[]")!!) }.getOrDefault(emptyList())) } }
-    var selected by remember { mutableStateOf(sources.firstOrNull()?.id ?: "") }
+    var selected by remember { mutableStateOf(prefs.getString("rankSource", null)?.takeIf { id -> sources.any { it.id == id } } ?: sources.firstOrNull()?.id ?: "") }
     var query by remember { mutableStateOf("") }
     var importText by remember { mutableStateOf("") }
     var importing by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="import") }
@@ -165,6 +165,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
         }
     }
     LaunchedEffect(selected) {
+        prefs.edit().putString("rankSource", selected).apply()
         hits = emptyList(); categories = emptyList(); category = null; more = false; error = null
         if (source != null) try {
             categories = withContext(Dispatchers.IO) { NovelSources.categories(source) }
