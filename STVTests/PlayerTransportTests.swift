@@ -59,6 +59,22 @@ import AVKit
         XCTAssertFalse(co.paused); XCTAssertFalse(e.isPaused)
     }
 
+    func testOldPiPStopDoesNotTearDownTheReplacementEpisode() async throws {
+        let e = TestPlayerEngine(); e.exposePiP = true
+        let co = coordinator(e); defer { co.teardown() }
+        co.select(0); try await ready(co,0)
+        guard let old = e.lastPiP else { throw XCTSkip("PiP controller unavailable in this simulator") }
+        co.pictureInPictureControllerWillStartPictureInPicture(old)
+        co.didEnterBackground()
+        e.replacePiPOnLoad = true
+        e.onEnded?(); try await ready(co,1)
+        co.pictureInPictureControllerDidStopPictureInPicture(old)
+        XCTAssertTrue(e.pictureIsActive,"stopping the old window must not release the replacement renderer")
+        XCTAssertFalse(co.paused); XCTAssertFalse(e.isPaused)
+        co.didBecomeActive()
+        XCTAssertFalse(e.pictureIsActive,"foreground inline playback no longer needs the handover flag")
+    }
+
     func testInterruptedIconShowsPausedAndOneExplicitPlayRecovers() async throws {
         let e = TestPlayerEngine(); let co = coordinator(e)
         defer { co.teardown() }
@@ -166,7 +182,12 @@ import AVKit
     var selectedSubtitle: Int?
     var subtitleText: String?
     var avPlayer: AVPlayer? { nil }
-    var pipIdentity: ObjectIdentifier? { nil }
+    var exposePiP = false
+    var replacePiPOnLoad = false
+    var pictureIsActive = false
+    var pipLayer = AVPlayerLayer()
+    var lastPiP: AVPictureInPictureController?
+    var pipIdentity: ObjectIdentifier? { exposePiP ? ObjectIdentifier(pipLayer) : nil }
     var routeLabel: String { "test" }
     var loadDelay: Duration = .zero
     var notifyInternalPause = false
@@ -175,6 +196,7 @@ import AVKit
     func load(_ src: PlaybackCoordinator.Source, stream: HGStream?, start: Double?, title: String) async throws {
         try await Task.sleep(for:loadDelay); isPaused = true
         if failLoad { throw URLError(.cannotOpenFile) }
+        if replacePiPOnLoad { pipLayer = AVPlayerLayer() }
     }
     func play(rate: Double) { isPaused = false }
     func pause() { isPaused = true; if notifyInternalPause { onPlaybackRequested?(false) } }
@@ -184,6 +206,9 @@ import AVKit
     func selectAudio(_ id: Int) {}
     func selectSubtitle(_ id: Int?) {}
     func tech(stream: HGStream?) async -> PlayerTech { PlayerTech() }
-    func makePiPController() -> AVPictureInPictureController? { nil }
-    func setPiPActive(_ active: Bool) {}
+    func makePiPController() -> AVPictureInPictureController? {
+        lastPiP = AVPictureInPictureController(playerLayer:pipLayer)
+        return lastPiP
+    }
+    func setPiPActive(_ active: Bool) { pictureIsActive = active }
 }

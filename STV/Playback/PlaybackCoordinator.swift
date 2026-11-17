@@ -312,7 +312,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         pip = nil
         pipPossible = false
         guard id != nil, AVPictureInPictureController.isPictureInPictureSupported(),
-              let controller = engine.makePiPController() else { return }
+              let controller = engine.makePiPController() else {
+            cancelPiPHandover()
+            return
+        }
         controller.delegate = self
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         pip = controller
@@ -340,6 +343,12 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         }
     }
 
+    private func cancelPiPHandover() {
+        guard continuePiP else { return }
+        continuePiP = false
+        engine.setPiPActive(false)
+    }
+
     func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
         guard controller === pip else { return }
         pipActive = true
@@ -363,13 +372,17 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         guard controller === pip else { return }
         pipActive = false
-        engine.setPiPActive(false)
         // A software source or fallback can replace the PiP content during an episode load.
         // That stop belongs to the handover, not to the user pressing the close button.
         if continuePiP {
+            // Keep the replacement renderer alive until its own PiP controller starts. Clearing
+            // this flag here can tear down the newly loaded video while still backgrounded.
             if readyIndex != nil { refreshPiP() }
-        } else if !restoringPiP { setPaused(true) }
-        else { resumeIfRequested() }
+        } else {
+            engine.setPiPActive(false)
+            if !restoringPiP { setPaused(true) }
+            else { resumeIfRequested() }
+        }
         restoringPiP = false
     }
 
@@ -382,6 +395,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         guard backgrounded else { return }
         backgrounded = false
         continuePiP = false
+        if !pipActive { engine.setPiPActive(false) }
         if pip?.isPictureInPictureActive == true {
             restoringPiP = true
             pip?.stopPictureInPicture()
@@ -553,6 +567,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 #endif
                 next.muted = muted
                 readyIndex = i
+                if continuePiP { engine.setPiPActive(true) }
                 refreshPiP()
                 if wantsPlayback, !interrupted { play() }
                 if pipActive, engine.pipIdentity == pipIdentity { continuePiP = false }
@@ -574,6 +589,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 guard activation == token else { return }
                 errors[i] = error.localizedDescription
                 verifyTargets[i] = error.verifyTarget
+                cancelPiPHandover()
             }
         }
     }
@@ -625,6 +641,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         prepared[i] = nil
         chosen[i] = nil
         errors[i] = Self.failureText(error)
+        cancelPiPHandover()
     }
 
     /// What the video surface shows right now (Metal / sample-buffer layers included).
