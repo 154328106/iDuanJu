@@ -203,7 +203,8 @@ struct NovelHomeView: View {
             LegadoSourceStore.shared.remove(Set(LegadoSourceStore.shared.sources.map(\.id)))
             LegadoSourceStore.shared.add(list)
         }
-        let requested = ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE"]
+        let preview = ProcessInfo.processInfo.environment["STV_UI_PREVIEW"] == "1"
+        let requested = preview ? Bundle.main.resourceURL?.appendingPathComponent("ui_novel_preview").path : ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE"]
         let fixtureDir = requested.map { FileManager.default.fileExists(atPath: $0) ? $0 : (Bundle.main.resourceURL?.appendingPathComponent("ui_legado").path ?? $0) }
         if let dir = fixtureDir, !dir.isEmpty,
         let rd = FileManager.default.contents(atPath: dir + "/routes.json"),
@@ -221,6 +222,10 @@ struct NovelHomeView: View {
                 LegadoSourceStore.shared.remove(Set(LegadoSourceStore.shared.sources.map(\.id)))
                 LegadoSourceStore.shared.add(list)
             }
+        }
+        if preview {
+            // Synthetic .invalid source state only; no real account, login or credential.
+            LegadoSourceState.setLoginInfo("https://a.source.invalid", ["离线合成状态": "界面验收"])
         }
         let requestedBook = ProcessInfo.processInfo.environment["STV_NOVEL_SEED"]
         let seedPath = requestedBook.map { FileManager.default.fileExists(atPath: $0) ? $0 : (Bundle.main.url(forResource: "novel_sample_gbk", withExtension: "txt")?.path ?? $0) }

@@ -11,8 +11,18 @@ final class PlayerUITests: XCTestCase {
     var isLandscape: Bool { let f = app.windows.firstMatch.frame; return f.width > f.height }
     func waitOrientation(landscape: Bool, timeout: TimeInterval = 6) -> Bool {
         let end = Date().addingTimeInterval(timeout)
-        while Date() < end { if isLandscape == landscape { return true }; Thread.sleep(forTimeInterval: 0.25) }
-        return isLandscape == landscape
+        var stableSince: Date?
+        var previous = CGRect.zero
+        while Date() < end {
+            let frame = app.windows.firstMatch.frame
+            if (frame.width > frame.height) == landscape && frame == previous {
+                if let since = stableSince, Date().timeIntervalSince(since) >= 0.6 { return true }
+                if stableSince == nil { stableSince = Date() }
+            } else { stableSince = nil }
+            previous = frame
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return false
     }
     func shot(_ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
@@ -232,7 +242,10 @@ final class PlayerUITests: XCTestCase {
         window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.65 : 0.35))
             .press(forDuration: 0.05, thenDragTo:
                 window.coordinate(withNormalizedOffset: CGVector(dx: x, dy: next ? 0.2 : 0.8)))
-        Thread.sleep(forTimeInterval: 0.5) // let paging/boundary bounce settle before the next gesture
+        // Wait for the native scroll phase, not a fixed 500ms that can interrupt the previous bounce under load.
+        let idle = NSPredicate(format: "value == %@", "idle")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: idle, evaluatedWith: el("player.feed"))], timeout: 6), .completed,
+                       "episode paging did not settle before the next gesture")
     }
 
     func testLandscapeEpisodePagingAndRotation() {

@@ -260,4 +260,22 @@ final class NovelUITests: XCTestCase {
         print("[ui-search] \(header.label)")
         shot("legado_07_collection_search")
     }
+    /// Layout/data-path QA uses only bundled .invalid synthetic sources, never live accounts.
+    func testPopulatedPreviewSearchSourcesAndRank() {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchEnvironment = ["STV_HOME_TAB": "novel", "STV_NOVEL_PAGE": "search", "STV_UI_PREVIEW": "1", "STV_NOVEL_QUERY": "长夜"]
+        app.launch()
+        XCTAssertTrue(el("search.result.长夜星河").waitForExistence(timeout: 20))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        el("search.sources").tap()
+        XCTAssertTrue(app.staticTexts["共 23 个书源 · 已启用 18 个"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["合成书源 · 甲"].exists)
+        app.terminate()
+        app.launchEnvironment["STV_NOVEL_PAGE"] = "rank"
+        app.launchEnvironment.removeValue(forKey: "STV_NOVEL_QUERY")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["长夜星河"].waitForExistence(timeout: 20))
+    }
+
 }

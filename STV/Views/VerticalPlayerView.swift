@@ -255,8 +255,8 @@ struct PlayerScreen: View {
             LinearGradient(stops: [.init(color: .black.opacity(0.88), location: 0), .init(color: .black.opacity(0.65), location: 0.42), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
                 .frame(height: landscape ? 140 : 170)
             Spacer(minLength: 0)
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.74), location: 0.45),
-                                   .init(color: .black.opacity(0.94), location: 1)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(landscape ? 0.94 : 0.74), location: 0.42),
+                                   .init(color: .black.opacity(landscape ? 0.985 : 0.94), location: 1)], startPoint: .top, endPoint: .bottom)
                 .frame(height: landscape ? 180 : 330)
         }
         .frame(width: full.width, height: full.height)
@@ -301,6 +301,8 @@ struct PlayerScreen: View {
         .sensoryFeedback(.selection, trigger: co.current)
         .onChange(of: co.readyIndex) { _, _ in releaseHeldIfSettled() }
         .onScrollPhaseChange { _, phase in feedSettled = phase == .idle; releaseHeldIfSettled() }
+        .accessibilityIdentifier("player.feed")
+        .accessibilityValue(feedSettled ? "idle" : "scrolling")
         .onChange(of: co.current) { old, new in
             if old != nil, let new, co.episodes.indices.contains(new) { showOSD("第\(co.episodes[new].ep)集") }
         }

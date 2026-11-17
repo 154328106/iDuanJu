@@ -202,7 +202,14 @@ struct NovelSearchView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Group.self) { g in NovelWebDetailView(items: g.items, onRead: onRead).toolbar(.visible, for: .navigationBar) }
             .fullScreenCover(isPresented: $manage) { NovelSourcesView() }
-            .onAppear { if query.isEmpty { focused = true } }
+            .onAppear {
+                #if DEBUG
+                if let q = ProcessInfo.processInfo.environment["STV_NOVEL_QUERY"], !q.isEmpty, submitted.isEmpty {
+                    query = q; focused = false; run(); return
+                }
+                #endif
+                if query.isEmpty { focused = true }
+            }
         }
     }
 
