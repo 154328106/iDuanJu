@@ -81,6 +81,18 @@ import AVKit
         XCTAssertTrue(co.paused); XCTAssertTrue(e.isPaused)
     }
 
+    func testExplicitPlayDuringInterruptedLoadIsAppliedWhenReady() async throws {
+        let e = TestPlayerEngine(); e.loadDelay = .milliseconds(100)
+        let co = coordinator(e); defer { co.teardown() }
+        co.select(0)
+        NotificationCenter.default.post(name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(),
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+        XCTAssertTrue(co.paused)
+        co.togglePause()
+        try await ready(co,0)
+        XCTAssertFalse(e.isPaused); XCTAssertFalse(co.paused)
+    }
+
     func testForegroundRecoveryDoesNotUndoNewPause() async throws {
         let e = TestPlayerEngine(); let co = coordinator(e)
         defer { co.teardown() }

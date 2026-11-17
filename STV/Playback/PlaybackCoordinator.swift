@@ -157,6 +157,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private var restoringPiP = false
     private var backgrounded = false
     private var interrupted = false
+    private var recoverInterruptedTransport = false
     private var audioSessionActive = false
     private var continuePiP = false
     @ObservationIgnored private let suppliedEngine: PlayerEngine?
@@ -283,6 +284,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         current = nil
         backgrounded = false
         interrupted = false
+        recoverInterruptedTransport = false
         continuePiP = false
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
@@ -400,6 +402,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         if type == AVAudioSession.InterruptionType.began.rawValue {
             audioSessionActive = false
             interrupted = true
+            recoverInterruptedTransport = false
             save(force: true)
         } else {
             interrupted = false
@@ -795,6 +798,11 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func setPaused(_ value: Bool) {
+        let wasInterrupted = interrupted
+        if !value {
+            interrupted = false
+            if wasInterrupted { recoverInterruptedTransport = true; audioSessionActive = false }
+        } else { recoverInterruptedTransport = false }
         wantsPlayback = !value
         transportPaused = value
         if value { continuePiP = false }
@@ -804,17 +812,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         } else if readyIndex != nil {
             // An explicit play wins over a stale interruption: iOS does not promise an `.ended` (another app's
             // audio, PiP interrupted by another app), and waiting for it left ▶ dead until the player was reopened.
-            let wasInterrupted = interrupted
-            interrupted = false
             if duration > 0, engine.currentTime >= duration - 0.15, engine.kind == .avplayer { seek(fraction: 0) }
-            if wasInterrupted, let a = engine as? AetherPlayerEngine {
-                activateAudioSession()
-                a.playThroughInterruption(rate: min(playbackRate, engine.maxRate))
-            } else {
-                play()
-            }
+            play()
         } else if let current, errors[current] != nil {
-            interrupted = false
             activate(current)
         }
         publishNowPlaying()
@@ -822,7 +822,11 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     private func play() {
         activateAudioSession()
-        engine.play(rate: min(playbackRate, engine.maxRate))
+        let rate = min(playbackRate, engine.maxRate)
+        let recover = recoverInterruptedTransport
+        recoverInterruptedTransport = false
+        if recover, let a = engine as? AetherPlayerEngine { a.playThroughInterruption(rate: rate) }
+        else { engine.play(rate: rate) }
     }
 
     private func bindTransportRequests(_ target: PlayerEngine) {
