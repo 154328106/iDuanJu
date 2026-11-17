@@ -80,9 +80,11 @@ targets:
     platform: iOS
     sources:
       - path: STVTests
-        excludes:
-          - "Fixtures/Plugins/**"
-          - "Fixtures/ui_novel_preview/**"
+        includes:
+          - "**/*.swift"
+      # Preserve fixture subdirectories (000.bin/routes.json recur per source); never flatten or omit them.
+      - path: STVTests/Fixtures
+        type: folder
     dependencies:
       - target: STV
     settings:
