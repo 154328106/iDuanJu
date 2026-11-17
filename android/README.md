@@ -2,12 +2,11 @@
 
 原生 Kotlin + Jetpack Compose，目标与 iOS 功能对齐。计划见 [PLAN_ZH.md](PLAN_ZH.md)，进度见 [PROGRESS.md](PROGRESS.md)。
 
-当前版本：**1.5.9-android (1509)**。
+当前版本：**1.5.10-android (1510)**。
 
-下载 [1.5.9 小说增强版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.9-novel-android)：包含小说改动及上一版红果修复；与 1.5.8 分发签名相同，可覆盖安装。下载 APK，SHA-256 见 Release 附件。
+下载 [1.5.10 小说统一主题版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android)：包含小说改动及上一版红果修复；与 1.5.8 分发签名相同，可覆盖安装。下载 APK，SHA-256 见 Release 附件。
 
-本轮新增：剧星榜、小说 TXT / 基础阅读书源（导入、搜索、发现、目录、章节阅读与续读）、预加载开关、缓存上限。
-修复 CMS 分类反馈、CENC 元数据解析、去广告开关持久化和缓存保存检查。
+本轮修复番茄脚本兼容及 Android ICU 正则、JSON 桥接差异；番茄、书旗的榜单、搜索、目录、前三章正文及离线缓存已在 Android 模拟器实网验证。榜单、搜索、书源配置、缓存下载统一使用应用主题，书源配置与下载改为完整页面。详见 [本轮验收记录](../docs/novel-followup-20261117.md)。
 
 小说支持 CSS/Jsoup、JSONPath、部分 XPath / JS、GET/POST、分页、分组发现、预取、离线下载与同书换源。已用用户提供的合集 1335 检查；不是全部书源都可用，详见 [验收记录](../docs/novel-validation-20261117.md)。完整 Java/WebView 兼容、EPUB 文件导入与朗读尚未完成。旧 `hgfix` APK 不含上述小说改动。
 

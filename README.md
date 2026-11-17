@@ -8,8 +8,8 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 [Android 版](#android-版)。App 本身**不托管任何内容**，所有数据都由你的设备直接向各个公开站点请求。
 
 **下载**：到 [Releases](https://github.com/my-name-is-alan/iDuanJu/releases) 获取 iOS 未签名 IPA 和 Android APK
-（[Android 1.5.9 小说增强版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.9-novel-android)、
-[iOS 1.5 build 9 小说增强版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b9-novel)）。
+（[Android 1.5.10 小说统一主题版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5.10-novel-android)、
+[iOS 1.5 build 10 小说统一主题版](https://github.com/my-name-is-alan/iDuanJu/releases/tag/v1.5b10-novel)）。
 
 新版包含小说改动和上一版红果取流、筛选修复。Android 与 1.5.8 使用同一分发签名，可下载 APK 覆盖安装；iOS IPA 需自行重签侧载。请下载 Assets 中的 APK / IPA，SHA-256 见同页附件。
 
@@ -17,7 +17,7 @@ i短剧 是一个原生 SwiftUI 编写的 iOS 多源短剧 / 视频 / 漫画 / T
 
 - 按真实合集 1335 修复发现分组、JS 生成请求、部分脚本与正文兼容，榜单改为顶部分组＋左侧栏目＋封面排名列表。
 - 详情和阅读页加入缓存 / 下载、预取章数设置、同书换源与章节进度接续；已缓存文字可离线读取，失败后可继续下载。
-- 七猫、乐读、望书阁抽样正文与缓存已验证；番茄复杂 Java I/O、图片正文、部分被 403 拦截的源仍不完整支持。完整范围见 [真实合集验收记录](docs/novel-validation-20261117.md)。旧 `hgfix` 安装包不含小说改动，请使用上方新版。
+- 番茄《十日终焉》、书旗《凡人修仙传》的榜单、搜索、目录、前三章正文及离线缓存已实际验证，并修复 Android 设备上的 ICU 正则与 JSON 桥接差异。小说榜单、搜索、书源配置和缓存页统一使用应用蓝色主题及浅深色背景。完整范围见 [本轮验收记录](docs/novel-followup-20261117.md)；图片正文和部分 403 来源仍不支持。旧 `hgfix` 安装包不含小说改动，请使用上方新版。
 
 使用：小说 → 书源 → 导入自己的 Legado 合集 → 在榜单顶部选源、左侧选栏目。详情或阅读页进入“下载 / 缓存”，可缓存后 50 / 200 章或全本、调整提前缓存章数；“换源”会查找同名同作者书籍并接续章节。下载时保持应用前台，已缓存文字可离线阅读。本轮用 [合集 1335](https://www.yckceo.com/yuedu/shuyuans/json/id/1335.json) 做测试，不把第三方书源内置到安装包。
 
@@ -115,7 +115,7 @@ scripts/package.sh            # 输出到 ./dist/STV-<版本>-unsigned.ipa
 ## Android 版
 
 位于 [`android/`](android/)：原生 **Kotlin + Jetpack Compose + Media3（ExoPlayer）**，插件运行时为 QuickJS，
-目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.9**（预发布）。
+目标与 iOS 功能对齐。**minSdk 26（Android 8.0）/ targetSdk 35**。当前版本 **1.5.10**（预发布）。
 
 ```bash
 # 要求 JDK 21 + Android SDK（platform 35）

@@ -27,6 +27,21 @@ iOS 的榜单不再自带独立红色主题；搜索与榜单复用书籍行，�
 
 布局验收使用明确标注的合成数据；真实网络结果单独记录。尚未进行真机验收。
 
+## 构建、原生操作与发布
+
+- [44009268349](https://github.com/my-name-is-alan/iDuanJu/actions/runs/44009268349)：Android 模拟器实网执行两源榜单、搜索、目录、前三章正文和离线回读；浅色、深色两项界面操作测试均通过，包含搜索、书源配置、详情和下载 50 章。iOS 模拟器启动曾遇到系统后台断言失败，重试后通过。
+- 最终功能构建 [44011435053](https://github.com/my-name-is-alan/iDuanJu/actions/runs/44011435053) 双端成功，源码为 `0c072389e56789e0ffff29e804ad2952eab4e6b8`。后续提交仅修改测试截图导出，不影响安装包功能。
+- [44024300977](https://github.com/my-name-is-alan/iDuanJu/actions/runs/44024300977) 核验 APK 固定签名、版本和 IPA 结构后发布上述构建，无重复编译；Android 1.5.10（1510）、iOS 1.5 build 10 已公开，下载链接均已核验 HTTP 200。
+- APK SHA-256：`ceed9e4b2807f083f2fe680df7e52dab2e0f7d1c49cb6ae942dfdf2d6f5c07dc`。
+- IPA SHA-256：`caf0c6979675151f08bb822f6a70903e303323b96ca5800bdb8010de46b9928d`。
+
+原生主题截图（合成数据）：
+
+<img src="screenshots/novel-rank.png" width="240" alt="统一主题的榜单">
+<img src="screenshots/novel-download.png" width="240" alt="统一主题的缓存下载">
+<img src="screenshots/novel-sources.png" width="240" alt="统一主题的书源配置">
+<img src="screenshots/novel-search.png" width="240" alt="统一主题的搜索">
+
 ## 复现
 
 Android：先将合集保存到本地，不提交文件。
