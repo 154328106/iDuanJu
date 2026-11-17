@@ -79,6 +79,8 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     var switchBusy by remember { mutableStateOf(false) }
     var switchJob by remember { mutableStateOf<Job?>(null) }
     var readGeneration by remember { mutableIntStateOf(0) }
+    var rankGeneration by remember { mutableIntStateOf(0) }
+    var rankJob by remember { mutableStateOf<Job?>(null) }
     var prefetchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="search") }
@@ -103,6 +105,16 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
             finally { busy = false }
         }
     }
+    // Rank/search jobs are cancellable and generation-scoped. An old source response (including
+    // A → B → A switches) must not replace the newest filter selection or clear its busy state.
+    fun rankWork(block:suspend (Int)->Unit) {
+        rankJob?.cancel();val token=++rankGeneration;busy=true;error=null
+        rankJob=scope.launch {
+            try{block(token)}catch(e:CancellationException){throw e}catch(e:Exception){if(token==rankGeneration)error=e.message?:"操作失败"}
+            finally{if(token==rankGeneration)busy=false}
+        }
+    }
+    DisposableEffect(Unit){onDispose{rankGeneration++;rankJob?.cancel()}}
     fun saveSources() { prefs.edit().putString("sources", JSONArray(sources.map { it.json }).toString()).apply() }
     fun addSources(raw: String) {
         val parsed = NovelSources.import(raw)
@@ -146,13 +158,13 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     }
     fun search(reset: Boolean, cat: NovelCategory? = null) {
         if(searching){keyboard?.hide();focus.clearFocus()}
-        work {
+        rankWork { token ->
         val s = source ?: error("请先导入并选择书源")
         val nextPage = if (reset) 1 else page
         val chosen = if (reset) cat else category
         if (reset) { hits = emptyList(); more = false; category = chosen }
         val result = withContext(Dispatchers.IO) { NovelSources.search(s, query, nextPage, chosen) }
-        if (selected != s.id) return@work
+        if (selected != s.id || token != rankGeneration) return@rankWork
         val existing = if (reset) emptyList() else hits
         val fresh = result.filter { r -> existing.none { it.url == r.url } }
         hits = existing + fresh; page = nextPage + 1; more = fresh.isNotEmpty(); category = chosen
@@ -176,30 +188,46 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
         }
     }
     fun filterAction(control:NovelCategory,value:String?) {
-        work {
-            val sc=source?:return@work
+        rankWork { token ->
+            val sc=source?:return@rankWork
             val previous=category
             hits=emptyList();more=false;page=1
             val refreshed=withContext(Dispatchers.IO){NovelSources.categoryAction(sc,control,value);NovelSources.categories(sc)}
-            if(selected!=sc.id)return@work
+            if(selected!=sc.id || token!=rankGeneration)return@rankWork
             categories=refreshed
             val chosen=NovelSources.refreshedCategory(previous,refreshed,selectedGroup)
             category=chosen
             if(chosen!=null){
                 selectedGroup=chosen.group
                 val result=withContext(Dispatchers.IO){NovelSources.search(sc,"",1,chosen)}
-                if(selected!=sc.id)return@work
+                if(selected!=sc.id || token!=rankGeneration)return@rankWork
                 hits=result.distinctBy{it.url};page=2;more=result.isNotEmpty()
             }
         }
     }
-    LaunchedEffect(selected) {
+    LaunchedEffect(selected,shelf,searching) {
+        rankJob?.cancel();val token=++rankGeneration
         prefs.edit().putString("rankSource", selected).apply()
-        hits = emptyList(); categories = emptyList(); category = null; more = false; error = null
-        if (source != null) try {
-            categories = withContext(Dispatchers.IO) { NovelSources.categories(source) }
-            selectedGroup = categories.firstOrNull()?.group.orEmpty()
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message }
+        hits=emptyList();categories=emptyList();category=null;more=false;page=1;error=null;busy=false
+        val sc=source
+        // Match iOS: entering discovery and changing source opens its first real URL category.
+        // Previously Android stopped after loading category buttons and left a blank results panel.
+        if(sc!=null&&!shelf&&!searching){
+            busy=true
+            try{
+                val loaded=withContext(Dispatchers.IO){NovelSources.categories(sc)}
+                if(token!=rankGeneration||selected!=sc.id)return@LaunchedEffect
+                categories=loaded
+                val first=loaded.firstOrNull{!it.isControl&&it.url.isNotBlank()}
+                selectedGroup=first?.group?:loaded.firstOrNull()?.group.orEmpty();category=first
+                if(first!=null){
+                    val result=withContext(Dispatchers.IO){NovelSources.search(sc,"",1,first)}
+                    if(token!=rankGeneration||selected!=sc.id)return@LaunchedEffect
+                    hits=result.distinctBy{it.url};page=2;more=result.isNotEmpty()
+                }
+            }catch(e:CancellationException){throw e}catch(e:Exception){if(token==rankGeneration)error=e.message}
+            finally{if(token==rankGeneration)busy=false}
+        }
     }
     fun download(count: Int?) {
         val book = currentBook ?: return; val s = source ?: return; val toc = chapters.toList();val metadata=bookDetails

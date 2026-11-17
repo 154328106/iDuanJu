@@ -67,6 +67,9 @@ enum LegadoClient {
     }
 
     static func exploreCategories(_ s: LegadoSource) throws -> [ExploreCategory] {
+        try exploreCategories(s, repairPass: 0)
+    }
+    private static func exploreCategories(_ s: LegadoSource, repairPass: Int) throws -> [ExploreCategory] {
         guard var raw = s.exploreUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
         if raw.hasPrefix("@js:") || raw.hasPrefix("<js>") {
             let code = raw.hasPrefix("@js:") ? String(raw.dropFirst(4)) : raw.replacingOccurrences(of: "<js>", with: "").replacingOccurrences(of: "</js>", with: "")
@@ -80,8 +83,19 @@ enum LegadoClient {
         let parsed = try parseExploreCategories(raw)
         let initial = exploreInfo(s)
         var info = initial
-        for c in parsed where c.isControl && info[c.title] == nil { info[c.title] = c.defaultValue.isEmpty ? (c.chars.first ?? "") : c.defaultValue }
+        var repairedDependentValue = false
+        for c in parsed where c.isControl {
+            let invalid = ["select", "toggle"].contains(c.type) && !c.chars.isEmpty && info[c.title].map { !c.chars.contains($0) } == true
+            if info[c.title] == nil || invalid {
+                let fallback = c.defaultValue.isEmpty ? (c.chars.first ?? "") : c.defaultValue
+                info[c.title] = !c.chars.isEmpty && ["select", "toggle"].contains(c.type) && !c.chars.contains(fallback) ? c.chars.first : fallback
+                repairedDependentValue = repairedDependentValue || invalid
+            }
+        }
         mergeExploreInfo(s, initial: initial, changed: info)
+        // Dependent options may have changed. Re-evaluate source-generated URLs with the repaired
+        // source-defined default instead of displaying a new chip beside an old request URL.
+        if repairedDependentValue && repairPass < 3 { return try exploreCategories(s, repairPass: repairPass + 1) }
         return parsed.map { c in
             var c = c; c.value = info[c.title] ?? ""; c.displayTitle = c.title
             if !c.viewName.isEmpty { c.displayTitle = (try? LegadoContext(source: s).evalJS(c.viewName, result: nil, baseURL: s.bookSourceUrl)).map { LegadoAnalyzer.textOf($0) } ?? c.title }
@@ -212,6 +226,15 @@ enum LegadoClient {
         return out
     }
 
+    // A URL rule can be a complete multiline POST request, not a newline-joined link list.
+    // Truncating it at the first newline drops its body and merges all books into one identity.
+    static func firstRequestURL(_ raw: String) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = text.range(of: ",\\s*\\{", options: .regularExpression),
+           !text[..<range.lowerBound].contains(where: { $0.isNewline }) { return text }
+        return firstLine(text)
+    }
+
     static func firstLine(_ s: String) -> String {
         s.split(whereSeparator: \.isNewline).lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
     }
@@ -237,7 +260,7 @@ enum LegadoClient {
             let name = clean(stripInvisible(try a.string(rules["name"] ?? "")))
             guard !name.isEmpty else { continue }
             // Legado reads URL rules with getString0: several matches (`a@href` hitting two links) give the first one.
-            let rawBookURL = Self.firstLine(try a.string(rules["bookUrl"] ?? ""))
+            let rawBookURL = Self.firstRequestURL(try a.string(rules["bookUrl"] ?? ""))
             guard !rawBookURL.isEmpty else { continue }
             let bookURL = LegadoURL.absolute(rawBookURL, base: base)
             out.append(LegadoSearchItem(name: name, author: cleanAuthor(f("author")), kind: f("kind").replacingOccurrences(of: "\n", with: " · "),

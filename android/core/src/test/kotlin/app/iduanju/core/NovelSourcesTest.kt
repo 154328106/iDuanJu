@@ -6,6 +6,34 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NovelSourcesTest {
+    @Test fun multilinePostBookURLRetainsDistinctIdentity() {
+        val raw="""https://example.org/detail,{
+          "method":"POST",
+          "body":"book_id=12"
+        }"""
+        assertEquals(raw,NovelSources.firstRequestURL(raw))
+        assertTrue(NovelSources.firstRequestURL(raw)!=NovelSources.firstRequestURL(raw.replace("book_id=12","book_id=13")))
+        assertEquals("/one",NovelSources.firstRequestURL(" /one\n /two "))
+    }
+
+    @Test fun dependentSourceFilterDefaultsRegenerateUrlsAndStayScoped() {
+        val json=org.json.JSONObject().put("bookSourceUrl","https://dependent-"+java.util.UUID.randomUUID()+".example").put("exploreUrl","""@js:var g=infoMap.gender||'male';var ks=g==='female'?['romance','history']:['fantasy','scifi'];JSON.stringify([{title:'gender',type:'select',chars:['male','female'],default:'male'},{title:'kind',type:'select',chars:ks,default:ks[0]},{title:'list',url:'/list?gender='+g+'&kind='+(infoMap.kind||ks[0])+'&page={{page}}'}]);""")
+        val source=NovelSource(json)
+        var cats=NovelSources.categories(source)
+        assertEquals("fantasy",cats.first{it.title=="kind"}.value)
+        NovelSources.categoryAction(source,cats.first{it.title=="kind"},"scifi")
+        cats=NovelSources.categories(source)
+        NovelSources.categoryAction(source,cats.first{it.title=="gender"},"female")
+        cats=NovelSources.categories(source)
+        assertEquals("romance",cats.first{it.title=="kind"}.value)
+        assertTrue(cats.first{it.title=="list"}.url.contains("kind=romance"))
+        assertFalse(cats.first{it.title=="list"}.url.contains("scifi"))
+        assertEquals("female",NovelSources.categories(NovelSource(org.json.JSONObject(json.toString()))).first{it.title=="gender"}.value)
+        val other=NovelSource(org.json.JSONObject(json.toString()).put("bookSourceUrl","https://other-"+java.util.UUID.randomUUID()+".example"))
+        assertEquals("male",NovelSources.categories(other).first{it.title=="gender"}.value)
+        assertTrue(NovelSources.categories(NovelSource(org.json.JSONObject().put("bookSourceUrl","https://no-filter.example").put("exploreUrl","热门::/rank"))).none{it.isControl})
+    }
+
     @Test fun boundedStreamsGzipAndBigIntegers() {
         val s=NovelSource(org.json.JSONObject().put("bookSourceUrl","https://compat.test"))
         val code="""@js:var B=Packages.java.math.BigInteger;var out=new Packages.java.io.ByteArrayOutputStream();var gzip=new Packages.java.util.zip.GZIPOutputStream(out);gzip.write(new Packages.java.lang.String('中文 stream').getBytes());gzip.close();var reader=new Packages.java.io.BufferedReader(new Packages.java.io.InputStreamReader(new Packages.java.util.zip.GZIPInputStream({bytes:out.toByteArray()}),'UTF-8'));reader.readLine()+'|'+new B('12345678901234567890').modPow(new B('65537'),new B('999999999999999999989')).toString()+'|'+new B('128').toByteArray().join(',');"""

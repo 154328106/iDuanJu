@@ -14,3 +14,8 @@ xcuserdata/
 *.p12
 *.mobileprovision
 *.cer
+
+# Local native source compatibility evidence and Python fixture cache
+/artifacts/source-compat/
+/scripts/source-compat/__pycache__/
+/android/app/src/androidTest/assets/source-compat/filter-sources.json

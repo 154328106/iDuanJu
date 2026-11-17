@@ -201,6 +201,7 @@ struct NovelExploreView: View {
             .padding(.horizontal, 16)
         }
         .frame(height: min(240, controlHeight))
+        .accessibilityIdentifier("novel.rank.controls")
         .scrollBounceBehavior(.basedOnSize)
     }
 
