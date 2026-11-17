@@ -51,10 +51,11 @@ struct NovelSourceLoginView: View {
                 }
                 if let message { Section { Text(message).font(.callout) } }
             }
+            .novelScreen()
             .navigationTitle(source.bookSourceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { NovelBackButton { dismiss() } }
                 if !fields.filter({ $0.type != "button" }).isEmpty {
                     ToolbarItem(placement: .topBarTrailing) { Button("保存") { save(); message = "已保存" } }
                 }

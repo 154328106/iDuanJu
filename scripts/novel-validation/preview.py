@@ -106,6 +106,10 @@ schemes:
                 NavigationStack { NovelWebDetailView(items: [Self.previewItem], onRead: { _ in }) }
             } else if ProcessInfo.processInfo.environment["NOVEL_ROUTE"] == "download", let book = NovelStore.shared.webBook(source: Self.previewItem.sourceURL, url: Self.previewItem.bookURL) {
                 NovelDownloadView(book: book)
+            } else if ProcessInfo.processInfo.environment["NOVEL_ROUTE"] == "sources" {
+                NovelSourcesView()
+            } else if ProcessInfo.processInfo.environment["NOVEL_ROUTE"] == "search" {
+                NovelSearchView(onRead: { _ in })
             } else { NovelExploreView(onRead: { _ in }) }
         }
     }

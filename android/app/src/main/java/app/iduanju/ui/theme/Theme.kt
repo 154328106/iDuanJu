@@ -49,8 +49,7 @@ private val Light = IdjColors(
 )
 
 @Composable
-fun IdjTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun IdjTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val colors = if (dark) Dark else Light.copy(accentWarm = Color(0xFFD58514))
     val scheme = if (dark) darkColorScheme(
         primary = colors.accent, onPrimary = colors.bg, background = colors.bg,

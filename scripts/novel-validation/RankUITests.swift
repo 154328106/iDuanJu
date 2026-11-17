@@ -1,6 +1,21 @@
 import XCTest
 
 final class RankUITests: XCTestCase {
+    func testSourceConfigurationAndSearchShareNavigation() {
+        let app = XCUIApplication()
+        app.launchEnvironment["NOVEL_PREVIEW"] = "1"
+        app.launchEnvironment["NOVEL_ROUTE"] = "search"
+        app.launch()
+        XCTAssertTrue(app.navigationBars["小说搜索"].waitForExistence(timeout:10))
+        app.buttons["search.sources"].tap()
+        XCTAssertTrue(app.navigationBars["书源配置"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.buttons["sources.add"].exists)
+        app.buttons["返回"].firstMatch.tap()
+        let query = app.searchFields.firstMatch
+        XCTAssertTrue(query.waitForExistence(timeout:5))
+        query.tap(); query.typeText("雾港\n")
+        XCTAssertTrue(app.buttons["search.result.雾港"].waitForExistence(timeout:15))
+    }
     func testInitialRankCategorySwitchAndDownloadEntry() {
         let app = XCUIApplication()
         app.launchEnvironment["NOVEL_PREVIEW"] = "1"
@@ -18,5 +33,7 @@ final class RankUITests: XCTestCase {
         download.tap()
         XCTAssertTrue(app.navigationBars["缓存与下载"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["缓存后 50 章"].exists)
+        app.buttons["缓存后 50 章"].tap()
+        XCTAssertTrue(app.staticTexts["下载完成，已可离线阅读"].waitForExistence(timeout:15))
     }
 }

@@ -16,7 +16,7 @@ struct NovelExploreView: View {
     @State private var managing = false
     @State private var choosingSource = false
     @State private var generation = UUID()
-    private let accent = Color(red: 0.85, green: 0.20, blue: 0.25)
+    private let accent = STVTheme.accent
     private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && ($0.bookSourceType ?? 0) == 0 && !($0.exploreUrl ?? "").isEmpty } }
     private var groups: [String] { categories.reduce(into: [String]()) { if !$0.contains($1.group) { $0.append($1.group) } } }
 
@@ -33,10 +33,11 @@ struct NovelExploreView: View {
                     HStack(spacing: 0) { categoryRail; results.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }
             }
-            .background(Color(.systemBackground))
+            .background(STVTheme.surface)
+            .novelScreen()
             .navigationTitle("小说榜单").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button { dismiss() } label: { Image(systemName: "chevron.left") }.accessibilityLabel("返回") }
+                ToolbarItem(placement: .topBarLeading) { NovelBackButton { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) { Button("书源") { managing = true } }
             }
             .sheet(isPresented: $managing) { NovelSourcesView() }
@@ -68,7 +69,7 @@ struct NovelExploreView: View {
                         Task { await resetAndLoad() }
                     } label: {
                         VStack(spacing: 8) {
-                            Text(title).font(.system(size: 17, weight: group == title ? .bold : .regular)).foregroundStyle(group == title ? Color.primary : Color.secondary)
+                            Text(title).font(.system(size: 17, weight: group == title ? .semibold : .regular)).foregroundStyle(group == title ? STVTheme.text : STVTheme.secondary)
                             Capsule().fill(group == title ? accent : .clear).frame(height: 3)
                         }
                     }.buttonStyle(.plain)
@@ -83,15 +84,15 @@ struct NovelExploreView: View {
                 ForEach(categories.filter { $0.group == group }) { category in
                     Button { select(category) } label: {
                         Text(category.title).font(.system(size: 14, weight: category.id == categoryID ? .semibold : .regular))
-                            .foregroundStyle(category.id == categoryID ? accent : Color.primary)
+                            .foregroundStyle(category.id == categoryID ? accent : STVTheme.text)
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity, minHeight: 52).padding(.vertical, 3)
-                            .background(category.id == categoryID ? Color(.systemBackground) : .clear)
+                            .background(category.id == categoryID ? STVTheme.surface : .clear)
                             .overlay(alignment: .leading) { if category.id == categoryID { Rectangle().fill(accent).frame(width: 3, height: 22) } }
                     }.buttonStyle(.plain)
                     .accessibilityIdentifier("novel.rank.category.\(category.title)")
                 }
             }
-        }.frame(width: 92).background(Color(.secondarySystemBackground))
+        }.frame(width: 92).background(STVTheme.bg)
     }
     private var results: some View {
         ScrollView {
@@ -118,14 +119,7 @@ struct NovelExploreView: View {
         }.id(categoryID)
     }
     private func bookRow(_ item: LegadoSearchItem, rank: Int) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            WebCover(url: item.cover.isEmpty ? nil : item.cover, title: item.name).frame(width: 58, height: 80)
-            VStack(alignment: .leading, spacing: 7) {
-                Text("\(rank). \(item.name)").font(.system(size: 17, weight: .semibold)).foregroundStyle(.primary).lineLimit(2)
-                Text([item.author, item.kind].filter { !$0.isEmpty }.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                if !item.latest.isEmpty { Text(item.latest).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1) }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.vertical, 16)
+        NovelBookRow(title: item.name, author: item.author, kind: item.kind, cover: item.cover, latest: item.latest, rank: rank)
     }
     private var sourceSheet: some View {
         NavigationStack {
@@ -133,7 +127,8 @@ struct NovelExploreView: View {
                 Button { sourceID = source.id; choosingSource = false } label: {
                     HStack { Text(source.bookSourceName); Spacer(); if source.id == sourceID { Image(systemName: "checkmark") } }
                 }
-            }.navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { choosingSource = false } } }
+                .listRowBackground(STVTheme.surface)
+            }.novelScreen().navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .topBarLeading) { NovelBackButton { choosingSource = false } } }
         }
     }
     private func select(_ category: LegadoClient.ExploreCategory) {

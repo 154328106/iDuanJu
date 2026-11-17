@@ -69,6 +69,7 @@ fun NovelScreen(onBack: () -> Unit) {
     var readGeneration by remember { mutableIntStateOf(0) }
     var prefetchJob by remember { mutableStateOf<Job?>(null) }
     var selectedGroup by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
     val cache = remember { NovelCache(File(context.filesDir,"novel-cache-v2")) }
     var font by remember { mutableFloatStateOf(prefs.getFloat("font", 20f)) }
     val scope = rememberCoroutineScope()
@@ -194,12 +195,12 @@ fun NovelScreen(onBack: () -> Unit) {
             } finally {switchBusy=false}
         }
     }
-    fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else onBack() }
+    fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else if(searching) { searching=false;hits=emptyList();category=null;more=false } else onBack() }
     androidx.activity.compose.BackHandler { back() }
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Column(Modifier.fillMaxSize().background(IdjThemeColors.bg).statusBarsPadding().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min=56.dp), horizontalArrangement = Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
             TextButton(onClick = { back() }) { Text("返回") }
-            Text(if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else "小说", color = IdjThemeColors.text, modifier = Modifier.weight(1f).padding(12.dp), maxLines = 1)
+            Text(if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else if(currentBook!=null) "书籍详情" else if(searching) "小说搜索" else "小说榜单", fontSize=17.sp,fontWeight=FontWeight.SemiBold,color = IdjThemeColors.text, modifier = Modifier.weight(1f).padding(12.dp), maxLines = 1)
             TextButton(onClick = { importing = true }, enabled = !busy) { Text("书源") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -236,7 +237,7 @@ fun NovelScreen(onBack: () -> Unit) {
             }
             LazyColumn(Modifier.weight(1f)) {
                 items(chapters.size) { i -> Text(chapters[i].title, color = IdjThemeColors.text, modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) { work { read(i) } }.padding(14.dp)) }
-                if (!busy && chapters.isEmpty()) item { Text("目录为空，请检查书源规则", color = IdjThemeColors.secondary) }
+                if (!busy && chapters.isEmpty()) item { Text("这本书没有可读目录，可能已下架、受限或书源失效。可换一本书或切换书源后重试。", color = IdjThemeColors.secondary) }
             }
         } else {
             Row {
@@ -260,9 +261,10 @@ fun NovelScreen(onBack: () -> Unit) {
                     sources.filter { it.enabled }.forEach { s -> DropdownMenuItem(text = { Text(s.name) }, onClick = { selected = s.id; expanded = false }) }
                 }
             }
-            Row { OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("书名 / 作者") }, singleLine = true)
+            if(searching) Row(Modifier.padding(bottom=12.dp),verticalAlignment=Alignment.CenterVertically) { OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("书名 / 作者") }, singleLine = true)
                 TextButton(onClick = { search(true) }, enabled = !busy && query.isNotBlank()) { Text("搜索") } }
-            if(categories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
+            else OutlinedButton(onClick={searching=true;hits=emptyList();more=false;category=null},modifier=Modifier.fillMaxWidth().padding(bottom=12.dp)) {Text("搜索书名或作者")}
+            if(!searching && categories.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 categories.map{it.group}.distinct().forEach { group ->
                     TextButton(onClick={
                         selectedGroup=group
@@ -273,20 +275,20 @@ fun NovelScreen(onBack: () -> Unit) {
                 }
             }
             Row(Modifier.weight(1f)) {
-            if(categories.isNotEmpty()) LazyColumn(Modifier.width(92.dp).fillMaxHeight().background(IdjThemeColors.elevated)) {
+            if(!searching && categories.isNotEmpty()) LazyColumn(Modifier.width(92.dp).fillMaxHeight().background(IdjThemeColors.bg)) {
                 items(categories.filter{it.group==selectedGroup},key={it.id}) { cat ->
-                    Text(cat.title,color=if(cat==category)IdjThemeColors.accentWarm else IdjThemeColors.text,fontSize=14.sp,
+                    Text(cat.title,color=if(cat==category)IdjThemeColors.accent else IdjThemeColors.text,fontSize=14.sp,
                         fontWeight=if(cat==category)FontWeight.Bold else FontWeight.Normal,
-                        modifier=Modifier.fillMaxWidth().clickable(enabled=!busy) {
+                        modifier=Modifier.fillMaxWidth().background(if(cat==category)IdjThemeColors.surface else IdjThemeColors.bg).clickable(enabled=!busy) {
                             if(cat.action!=null)work{withContext(Dispatchers.IO){NovelSources.categoryAction(source!!,cat)};categories=withContext(Dispatchers.IO){NovelSources.categories(source!!)}}
                             else search(true,cat)
                         }.padding(horizontal=10.dp,vertical=18.dp))
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxHeight().padding(start=12.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxHeight().background(IdjThemeColors.surface).padding(horizontal=12.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
                 if (hits.isEmpty()) {
-                    item { Text("发现 · 书源推荐与榜单", color = IdjThemeColors.text, modifier = Modifier.padding(vertical = 12.dp)) }
-                    item { Text(if(categories.isEmpty())"此书源没有发现栏目，可搜索或导入其他书源。" else "选择左侧栏目，查看书源实时榜单", color = IdjThemeColors.secondary) }
+                    item { Text(if(searching)"搜索你的下一本书" else "书源推荐与榜单",fontSize=17.sp,fontWeight=FontWeight.SemiBold, color = IdjThemeColors.text, modifier = Modifier.padding(vertical = 14.dp)) }
+                    item { Text(if(searching)"输入书名或作者，搜索当前书源。" else if(categories.isEmpty())"此书源没有发现栏目，可搜索或导入其他书源。" else "选择左侧栏目，查看书源实时榜单",fontSize=13.sp, color = IdjThemeColors.secondary) }
                     items(cache.books(),key={it.source+it.book.url}) { saved ->
                         Text("离线 · ${saved.book.name}",color=IdjThemeColors.text,modifier=Modifier.fillMaxWidth().clickable{
                             selected=saved.source;currentBook=saved.book;chapters=saved.chapters;cachedCount=cache.count(saved.source,saved.book.url,saved.chapters)
@@ -304,7 +306,7 @@ fun NovelScreen(onBack: () -> Unit) {
                             Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                                 coil.compose.AsyncImage(book.cover,null,Modifier.size(58.dp,80.dp).background(IdjThemeColors.elevated),contentScale=ContentScale.Crop)
                                 Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
-                                    Text("${hits.indexOf(book)+1}. ${book.name}",color=IdjThemeColors.text,fontSize=17.sp,fontWeight=FontWeight.SemiBold,maxLines=2)
+                                    Text(if(searching)book.name else "${hits.indexOf(book)+1}. ${book.name}",color=IdjThemeColors.text,fontSize=17.sp,fontWeight=FontWeight.SemiBold,maxLines=2)
                                     Text(listOf(book.author,book.kind).filter{it.isNotBlank()}.joinToString(" · "),color=IdjThemeColors.secondary,fontSize=12.sp,maxLines=2)
                                     if(book.latest.isNotBlank())Text(book.latest,color=IdjThemeColors.secondary,fontSize=11.sp,maxLines=1)
                                 }
@@ -317,14 +319,34 @@ fun NovelScreen(onBack: () -> Unit) {
             }
         }
     }
-    if(showDownload) AlertDialog(onDismissRequest={showDownload=false},title={Text("缓存与下载")},text={Column{
-        Text("已缓存 $cachedCount / ${chapters.size} 章")
-        if(downloadBusy){Text("本次 $downloadDone / $downloadTotal");TextButton(onClick={downloadJob?.cancel()}){Text("暂停")}}
-        else {TextButton(onClick={download(50)}){Text("缓存后 50 章")};TextButton(onClick={download(200)}){Text("缓存后 200 章")};TextButton(onClick={download(null)}){Text("下载全本 / 继续")}}
-        Text("提前缓存")
-        Row {listOf(0,3,10,20).forEach{n->TextButton(onClick={prefetch=n;prefs.edit().putInt("prefetch",n).apply()}){Text(if(n==0)"关" else "$n 章",fontWeight=if(prefetch==n)FontWeight.Bold else FontWeight.Normal)}}}
-        Text("保持应用前台，已完成章节可离线阅读。",fontSize=12.sp)
-    }},confirmButton={TextButton(onClick={showDownload=false}){Text("完成")}})
+    if(showDownload) NovelPage("缓存与下载",{showDownload=false}) {
+        NovelPanel {
+            Text(currentBook?.name.orEmpty(),fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            Text("已缓存 $cachedCount / ${chapters.size} 章",fontSize=13.sp,color=IdjThemeColors.secondary)
+            if(downloadBusy){
+                LinearProgressIndicator(progress={if(downloadTotal==0)0f else downloadDone.toFloat()/downloadTotal},modifier=Modifier.fillMaxWidth())
+                Text("本次 $downloadDone / $downloadTotal",fontSize=13.sp)
+                OutlinedButton(onClick={downloadJob?.cancel()}){Text("暂停下载")}
+            }
+            error?.let {Text(it,fontSize=13.sp,color=MaterialTheme.colorScheme.error)}
+        }
+        NovelPanel {
+            Text("离线下载",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick={download(50)},enabled=!downloadBusy,modifier=Modifier.weight(1f)){Text("缓存后 50 章")}
+                OutlinedButton(onClick={download(200)},enabled=!downloadBusy,modifier=Modifier.weight(1f)){Text("缓存后 200 章")}
+            }
+            Button(onClick={download(null)},enabled=!downloadBusy,modifier=Modifier.fillMaxWidth()){Text("下载全本 / 继续未完成下载")}
+        }
+        NovelPanel {
+            Text("提前缓存",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {listOf(0,3,10,20).forEach{n->
+                FilterChip(selected=prefetch==n,onClick={prefetch=n;prefs.edit().putInt("prefetch",n).apply()},label={Text(if(n==0)"关闭" else "$n 章")})
+            }}
+            Text("阅读时自动预取后续章节，减少翻页等待。",fontSize=12.sp,color=IdjThemeColors.secondary)
+        }
+        Text("保持应用前台下载。已缓存章节可断网阅读，暂停或中断后可继续，已完成章节不会重复请求。",fontSize=12.sp,color=IdjThemeColors.secondary)
+    }
     if(showSwitch)AlertDialog(onDismissRequest={switchJob?.cancel();showSwitch=false},title={Text("切换书籍来源")},text={LazyColumn{
         if(switchBusy)item{Text("正在搜索同名书籍…")}
         items(alternatives,key={it.first.id+it.second.url}){(s,book)->TextButton(onClick={work{
@@ -337,14 +359,36 @@ fun NovelScreen(onBack: () -> Unit) {
         }}){Text(s.name)}}
         if(!switchBusy&&alternatives.isEmpty())item{Text("未找到同名同作者书籍，可启用更多书源后重试")}
     }},confirmButton={TextButton(onClick={switchJob?.cancel();showSwitch=false}){Text("关闭")}})
-    if (importing) AlertDialog(onDismissRequest = { importing = false }, title = { Text("导入阅读书源") },
-        text = { Column { Text("粘贴 Legado JSON 或书源订阅 URL")
-            OutlinedTextField(importText, { importText = it }, maxLines = 8)
-            if (source != null) TextButton(onClick = { sources.removeAll { it.id == selected }; saveSources(); selected = sources.firstOrNull()?.id ?: "" }) { Text("删除当前书源") }
-        } },
-        confirmButton = { TextButton(onClick = { work {
+    if (importing) NovelPage("书源配置",{importing=false}) {
+        NovelPanel {
+            Text("导入书源",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            Text("粘贴 Legado JSON 或书源订阅网址",fontSize=13.sp,color=IdjThemeColors.secondary)
+            OutlinedTextField(importText, { importText = it }, Modifier.fillMaxWidth(),minLines=3,maxLines=7,label={Text("网址 / JSON")})
+            error?.let { Text(it,color=MaterialTheme.colorScheme.error,fontSize=13.sp) }
+            if(busy)LinearProgressIndicator(Modifier.fillMaxWidth())
+            Button(onClick = { work {
             val raw = importText.trim()
             val data = if (raw.startsWith("https://") || raw.startsWith("http://")) withContext(Dispatchers.IO) { NovelSources.fetch(raw, NovelSource(JSONObject().put("bookSourceUrl", raw))) } else raw
             addSources(data)
-        } }, enabled = !busy) { Text("导入") } }, dismissButton = { TextButton(onClick = { importing = false }) { Text("取消") } })
+            } }, enabled = !busy,modifier=Modifier.fillMaxWidth()) { Text("导入") }
+            OutlinedButton(onClick={filePicker.launch(arrayOf("application/json","text/*"))},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("从文件导入")}
+        }
+        NovelPanel {
+            Text("已安装 ${sources.size} 个 · 启用 ${sources.count{it.enabled}} 个",fontSize=17.sp,fontWeight=FontWeight.SemiBold)
+            if(sources.isEmpty())Text("还没有书源，导入后即可搜索和浏览榜单。",fontSize=13.sp,color=IdjThemeColors.secondary)
+            sources.toList().forEach { s ->
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name,fontSize=16.sp)
+                        Text(runCatching{java.net.URI(s.id).host}.getOrNull().orEmpty(),fontSize=12.sp,color=IdjThemeColors.secondary,maxLines=1)
+                    }
+                    Switch(checked=s.enabled,onCheckedChange={on->
+                        val i=sources.indexOfFirst{it.id==s.id};if(i>=0)sources[i]=NovelSource(JSONObject(s.json.toString()).put("enabled",on));saveSources()
+                    })
+                    TextButton(onClick={sources.removeAll{it.id==s.id};saveSources();if(selected==s.id)selected=sources.firstOrNull()?.id.orEmpty()}){Text("删除")}
+                }
+                HorizontalDivider(color=IdjThemeColors.elevated)
+            }
+        }
+    }
 }

@@ -23,7 +23,7 @@ struct NovelSourcesView: View {
                     }
                 }
                 Section {
-                    ForEach(store.sources) { s in row(s) }
+                    ForEach(store.sources) { s in row(s).listRowBackground(STVTheme.surface) }
                         .onDelete { idx in store.remove(Set(idx.map { store.sources[$0].id })) }
                 } footer: {
                     if !store.sources.isEmpty {
@@ -31,11 +31,12 @@ struct NovelSourcesView: View {
                     }
                 }
             }
-            .navigationTitle("书源")
+            .novelScreen()
+            .navigationTitle("书源配置")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $login) { s in NovelSourceLoginView(source: s) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { NovelBackButton { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("网络导入", systemImage: "link") { urlText = ""; askURL = true }
@@ -77,7 +78,7 @@ struct NovelSourcesView: View {
         }
         .disabled(!s.supported)
         .swipeActions(edge: .leading) {
-            if s.hasLogin { Button("登录") { login = s }.tint(.blue) }
+            if s.hasLogin { Button("登录") { login = s }.tint(STVTheme.accent) }
         }
         .contextMenu {
             if s.hasLogin { Button("登录", systemImage: "person.crop.circle") { login = s } }
@@ -146,6 +147,7 @@ struct NovelSearchView: View {
                         ForEach(groups) { g in
                             NavigationLink(value: g) { resultRow(g) }
                                 .accessibilityIdentifier("search.result.\(g.name)")
+                                .listRowBackground(STVTheme.surface)
                         }
                     } header: {
                         HStack {
@@ -153,16 +155,22 @@ struct NovelSearchView: View {
                             if done < total { ProgressView().controlSize(.small) }
                         }
                     }
+                    if done >= total && groups.isEmpty {
+                        ContentUnavailableView("没有找到书籍", systemImage: "magnifyingglass", description: Text("换个关键词，或在书源配置中启用其他来源。"))
+                    }
+                } else {
+                    ContentUnavailableView("搜索你的下一本书", systemImage: "magnifyingglass", description: Text("输入书名或作者，同时搜索已启用的书源。相同书籍会合并显示。"))
                 }
             }
             .listStyle(.plain)
-            .navigationTitle("搜书")
+            .novelScreen()
+            .navigationTitle("小说搜索")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "书名或作者")
             .onSubmit(of: .search) { run() }
             .navigationDestination(for: Group.self) { g in NovelWebDetailView(items: g.items, onRead: onRead) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("关闭") { task?.cancel(); dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { NovelBackButton { task?.cancel(); dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) { Button("书源") { manage = true }.accessibilityIdentifier("search.sources") }
             }
             .sheet(isPresented: $manage) { NovelSourcesView() }
@@ -171,16 +179,8 @@ struct NovelSearchView: View {
 
     private func resultRow(_ g: Group) -> some View {
         let first = g.items[0]
-        return HStack(alignment: .top, spacing: 12) {
-            WebCover(url: g.items.first { !$0.cover.isEmpty }?.cover, title: g.name).frame(width: 56, height: 76)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(g.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                Text([g.author, first.kind].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if !first.latest.isEmpty { Text("最新：" + first.latest).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                Text("\(g.items.count) 个书源 · \(first.sourceName)").font(.caption2).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 4)
+        return NovelBookRow(title: g.name, author: g.author, kind: first.kind, cover: g.items.first { !$0.cover.isEmpty }?.cover,
+                            latest: first.latest, subtitle: "\(g.items.count) 个书源 · \(first.sourceName)")
     }
 
     private func run() {
@@ -237,10 +237,8 @@ struct WebCover: View {
         AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
             if let img = phase.image { img.resizable().scaledToFill() }
             else {
-                let h = abs(title.hashValue % 360)
-                LinearGradient(colors: [Color(hue: Double(h) / 360, saturation: 0.35, brightness: 0.72), Color(hue: Double(h) / 360, saturation: 0.45, brightness: 0.48)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .overlay(Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).multilineTextAlignment(.center).padding(4))
+                STVTheme.accent.opacity(0.12)
+                    .overlay(Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(STVTheme.accent).multilineTextAlignment(.center).padding(4))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -290,7 +288,7 @@ struct NovelWebDetailView: View {
                     Button("搜索其他书源") { sourceTask?.cancel(); sourceTask = Task { await findSources() } }
                 } label: {
                     HStack { Text("书源：\(item.sourceName)"); Spacer(); Text("换源（\(allItems.count)）").foregroundStyle(.secondary); Image(systemName: "chevron.up.chevron.down") }
-                        .font(.system(size: 14)).padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                        .font(.system(size: 14)).padding(14).background(RoundedRectangle(cornerRadius: NovelStyle.radius).fill(STVTheme.surface))
                 }
                 .accessibilityIdentifier("detail.source")
                 if findingSources { HStack { ProgressView("正在查找同名书籍的其他来源…"); Button("停止") { sourceTask?.cancel() } } }
@@ -326,6 +324,7 @@ struct NovelWebDetailView: View {
             .padding(.horizontal, 20).padding(.vertical, 10).background(.bar)
         }
         .navigationTitle(item.name)
+        .novelScreen()
         .navigationBarTitleDisplayMode(.inline)
         .task(id: pick) { await load() }
         .onDisappear { sourceTask?.cancel() }
@@ -367,7 +366,7 @@ struct NovelWebDetailView: View {
             let book: [String: String] = ["name": i.name, "author": i.author, "bookUrl": it.bookURL]
             let t = try await LegadoClient.run { try LegadoClient.toc(source, tocURL: i.tocURL, book: book) }
             guard token == loadGeneration, !Task.isCancelled else { return }
-            if t.isEmpty { error = "这个书源没有返回目录" } else { toc = t }
+            if t.isEmpty { error = "这本书没有可读目录，可能已下架、受限或书源失效。可换一本书或切换书源后重试。" } else { toc = t }
         } catch {
             if token == loadGeneration, !Task.isCancelled { self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
         }
