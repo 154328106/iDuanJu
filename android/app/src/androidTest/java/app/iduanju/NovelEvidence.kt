@@ -7,7 +7,8 @@ import android.os.ParcelFileDescriptor
 internal fun saveNovelEvidence(name:String, bytes:ByteArray) {
     require(name.matches(Regex("[a-z0-9.-]+")))
     val automation=InstrumentationRegistry.getInstrumentation().uiAutomation
-    val pipes=automation.executeShellCommandRw("sh -c 'mkdir -p /sdcard/Download/novel-qa; cat > /sdcard/Download/novel-qa/$name'")
+    ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa")).use{it.readBytes()}
+    val pipes=automation.executeShellCommandRw("dd of=/sdcard/Download/novel-qa/$name status=none")
     ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use{it.write(bytes)}
     ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use{it.readBytes()}
 }
