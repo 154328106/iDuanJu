@@ -43,7 +43,7 @@ import java.io.File
 /** Imported sources and reading progress are private to this installation. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false) {
+fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChange: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("novel", 0) }
     val sources = remember { mutableStateListOf<NovelSource>().apply { addAll(runCatching { NovelSources.import(prefs.getString("sources", "[]")!!) }.getOrDefault(emptyList())) } }
@@ -88,6 +88,9 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false) {
     val scope = rememberCoroutineScope()
     val readerState = rememberLazyListState()
     val source = sources.firstOrNull { it.id == selected }
+    val fullScreen = searching || !shelf || sourcePage || currentBook != null || text.isNotEmpty()
+    LaunchedEffect(fullScreen) { if (embedded) onFullScreenChange(fullScreen) }
+    DisposableEffect(Unit) { onDispose { if (embedded) onFullScreenChange(false) } }
     fun work(block: suspend () -> Unit) {
         if (busy) return
         busy = true; error = null

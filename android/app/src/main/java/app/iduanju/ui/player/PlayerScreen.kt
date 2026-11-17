@@ -307,7 +307,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         val pc = IdjDarkColors
         val chromeA by androidx.compose.animation.core.animateFloatAsState(if (showChrome || panel != null) 1f else 0f, DS.panel(), label = "chrome")
         val ready = status.isEmpty() && error == null && dur > 0
-        Box(Modifier.fillMaxWidth().height(if(landscape)140.dp else 170.dp).graphicsLayer { alpha = chromeA }
+        Box(Modifier.fillMaxWidth().height(if(landscape)140.dp else 170.dp)
             .background(Brush.verticalGradient(listOf(Color.Black.copy(0.88f), Color.Black.copy(0.65f), Color.Transparent))))
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if(landscape)180.dp else 330.dp)
             .background(Brush.verticalGradient(0f to Color.Transparent, 0.45f to Color.Black.copy(0.74f), 1f to Color.Black.copy(0.94f))))
@@ -357,7 +357,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         }
         // bottom block: meta (fades) · title (always) · progress row (always) · actions (fade)
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding()
-            .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 8.dp else 4.dp)) {
+            .padding(horizontal = if (landscape) 64.dp else 20.dp).padding(bottom = if (landscape) 16.dp else 4.dp)) {
             val d = detail
             if (d != null && !landscape) {
                 Row(Modifier.graphicsLayer { alpha = chromeA }.heightIn(min = 28.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -388,9 +388,11 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered) { if(!locked){player.seekTo(it); showChrome = true} } }
                 Spacer(Modifier.width(10.dp))
                 Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
-                Spacer(Modifier.width(10.dp))
-                Icon(if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (landscape) "退出横屏" else "横屏全屏", tint = Color.White,
-                    modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(!landscape) })
+                if (!landscape) {
+                    Spacer(Modifier.width(10.dp))
+                    Icon(Icons.Filled.Fullscreen, "横屏全屏", tint = Color.White,
+                        modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(true) })
+                }
             }
             if(landscape) Row(Modifier.fillMaxWidth().padding(top=12.dp).graphicsLayer{alpha=if(locked)0f else chromeA},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(pos<15000&&dur>45000) LandChip(Icons.Filled.PlayArrow,"跳过片头",null,false,showChrome&&!locked){player.seekTo(15000)}

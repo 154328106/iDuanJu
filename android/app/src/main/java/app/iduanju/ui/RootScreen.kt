@@ -33,10 +33,11 @@ val LocalNavigate = androidx.compose.runtime.staticCompositionLocalOf<(String) -
 @Composable
 fun RootScreen(initialRoute: String? = null) {
     val nav = rememberNavController()
-    LaunchedEffect(initialRoute) { initialRoute?.let { runCatching { nav.navigate(it) } } }
+    LaunchedEffect(initialRoute) { initialRoute?.takeUnless { it == "home" }?.let { runCatching { nav.navigate(it) } } }
     val updater = app.iduanju.IdjApp.instance.updater
     LaunchedEffect(Unit) { updater.autoCheck() }
     var tab by remember { mutableIntStateOf(0) }
+    var novelImmersive by remember { mutableStateOf(false) }
     val back = nav.currentBackStackEntryAsState().value
     val route = back?.destination?.route ?: "home"
     LaunchedEffect(route) { when(route) { "home" -> tab=0; "search" -> tab=1; "category" -> tab=2; "profile" -> tab=3 } }
@@ -55,7 +56,7 @@ fun RootScreen(initialRoute: String? = null) {
         }
         androidx.compose.runtime.CompositionLocalProvider(LocalNavigate provides navigate) {
             NavHost(nav, startDestination = "home", modifier = Modifier.fillMaxSize().hazeSource(haze)) {
-                composable("home") { HomeScreen(onOpenDetail = { nav.navigate("detail/$it") }, onSearch = { nav.navigate("search") }, onPlay = { nav.navigate("player/$it/0") }, onOpenManga = { nav.navigate("manga/" + android.net.Uri.encode(it)) }) }
+                composable("home") { HomeScreen(onOpenDetail = { nav.navigate("detail/$it") }, onSearch = { nav.navigate("search") }, onPlay = { nav.navigate("player/$it/0") }, onOpenManga = { nav.navigate("manga/" + android.net.Uri.encode(it)) }, onImmersiveChanged = { novelImmersive = it }) }
                 composable("search") { SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("category") { CategoryScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("library/{kind}") { e -> app.iduanju.ui.library.LibraryListScreen(e.arguments!!.getString("kind")!!, onBack = { nav.popBackStack() }, onOpenDetail = { nav.navigate("detail/$it") }) }
@@ -97,7 +98,7 @@ fun RootScreen(initialRoute: String? = null) {
             }
 
         }
-        if (atRoot) {
+        if (atRoot && !(route == "home" && novelImmersive)) {
             GlassTabBar(
                 selected = tab,
                 items = listOf(

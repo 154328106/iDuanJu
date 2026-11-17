@@ -119,7 +119,7 @@ object HomeFmt {
 fun formatCount(n: Long) = HomeFmt.count(n)
 
 @Composable
-fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay: (String) -> Unit = {}, onOpenManga: (String) -> Unit = {}) {
+fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay: (String) -> Unit = {}, onOpenManga: (String) -> Unit = {}, onImmersiveChanged: (Boolean) -> Unit = {}) {
     val c = IdjThemeColors
     // iOS HomeSource.all: [红果, 黄果, AI剧] + visible sites (采集站 / plugins) + [频道, 漫画]
     val sites = IdjApp.instance.cms.visibleSites
@@ -135,6 +135,10 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
     val heroCovers = remember { mutableStateMapOf<String, String>() }
     val source = pages[pager.currentPage.coerceIn(0, pages.size - 1)]
     val sourceKey = labels[pager.currentPage.coerceIn(0, pages.size - 1)]
+    var novelFullScreen by remember { mutableStateOf(false) }
+    val immersive = source == HomeSource.novel && novelFullScreen
+    LaunchedEffect(immersive) { onImmersiveChanged(immersive) }
+    DisposableEffect(Unit) { onDispose { onImmersiveChanged(false) } }
     val onPoster = heroCovers[sourceKey] != null
     val ink = if (onPoster) Color.White else c.text
 
@@ -158,7 +162,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
         }
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             // header: search + filter capsule
-            Column(Modifier.padding(top = 6.dp)) {
+            if (!immersive) Column(Modifier.padding(top = 6.dp)) {
                 Row(
                     Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(46.dp)
                         .clip(RoundedCornerShape(50))
@@ -187,7 +191,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                     scope.launch { pager.animateScrollToPage(page) }
                 }
             }
-            HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
+            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !immersive, beyondViewportPageCount = 0) { page ->
                 val any = pages[page]
                 if (any is app.iduanju.core.cms.CMSSite) { SiteFeedPage(any, onOpenDetail); return@HorizontalPager }
                 if (any is app.iduanju.plugin.PluginStore.Installed) { PluginFeedPage(any, onOpenDetail); return@HorizontalPager }
@@ -195,7 +199,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                 if (s == HomeSource.huangguo) { app.iduanju.huangguo.HuangguoFeedPage(onOpenDetail); return@HorizontalPager }
                 if (s == HomeSource.manga) { app.iduanju.manga.MangaHomePage(onOpenManga); return@HorizontalPager }
                 if (s == HomeSource.novel) {
-                    app.iduanju.novel.NovelScreen(onBack = {}, embedded = true)
+                    app.iduanju.novel.NovelScreen(onBack = {}, embedded = true, onFullScreenChange = { novelFullScreen = it })
                     return@HorizontalPager
                 }
                 if (s == HomeSource.channels) { app.iduanju.tg.ChannelFeedPage(onPlay); return@HorizontalPager }

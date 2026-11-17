@@ -54,8 +54,9 @@ class NovelThemeTest {
     }
     private fun verify(dark:Boolean){
         val style=if(dark)"dark" else "light"
-        ui.setContent{IdjTheme(dark=dark){NovelScreen(onBack={})}}
-        ui.onNodeWithText("书架").assertIsDisplayed()
+        app.iduanju.ui.home.HomeJump.label="小说"
+        ui.setContent{IdjTheme(dark=dark){app.iduanju.ui.RootScreen()}}
+        ui.onNodeWithText("我的书架").assertIsDisplayed()
         screenshot("$style-04-shelf-fixture")
         ui.onNodeWithText("排行榜").performClick()
         ui.waitUntil(10000){ui.onAllNodesWithText("月票榜").fetchSemanticsNodes().isNotEmpty()}
