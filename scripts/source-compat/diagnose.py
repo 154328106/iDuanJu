@@ -9,6 +9,8 @@ URLS = [
  "https://www.zggdwx.com/", "https://www.librivox.org/", "https://www.bilibili.com/",
 ]
 SAFE = {"server", "content-type", "location", "cf-ray", "cf-mitigated", "retry-after", "via"}
+def redact(text):
+ return re.sub(r'([?&](?:auth_key|token|access_token|signature|sig|key)=)[^&\s"<>]+',r'\1[redacted]',text,flags=re.I)
 def probe(url):
  with tempfile.TemporaryDirectory() as d:
   h,b=pathlib.Path(d)/"headers",pathlib.Path(d)/"body"
@@ -21,7 +23,7 @@ def probe(url):
   raw=b.read_bytes() if b.exists() else b""; text=raw.decode("utf-8",errors="replace");low=text.lower()
   markers=[m for m in ["cf-chl-", "/cdn-cgi/challenge-platform/", "challenge-form", "cf-turnstile", "just a moment", "attention required", "sorry, you have been blocked", "why have i been blocked", "cf-chl-widget", "cloudflare ray id", "access denied", "service unavailable", "bad gateway", "err_name_not_resolved", "robots_denied"] if m in low]
   title=re.search(r"<title[^>]*>(.*?)</title>",text,re.I|re.S)
-  return dict(url=url,status=meta.get("http_code",0),final_url=meta.get("url_effective"),content_type=meta.get("content_type"),curl_exit=p.returncode,error=p.stderr.strip(),headers=headers,title=re.sub(r"\s+"," ",title.group(1)).strip() if title else None,markers=markers,bytes=len(raw),snippet=re.sub(r"\s+"," ",re.sub(r"<[^>]*>"," ",text))[:400])
+  return dict(url=url,status=meta.get("http_code",0),final_url=meta.get("url_effective"),content_type=meta.get("content_type"),curl_exit=p.returncode,error=p.stderr.strip(),headers=headers,title=re.sub(r"\s+"," ",title.group(1)).strip() if title else None,markers=markers,bytes=len(raw),snippet=redact(re.sub(r"\s+"," ",re.sub(r"<[^>]*>"," ",text))[:400]))
 if __name__ == "__main__":
  import sys
  result={"time_shanghai":datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),"method":"GET; no Cookie/Authorization; ordinary curl UA; TLS verification on", "results":list(concurrent.futures.ThreadPoolExecutor(max_workers=4).map(probe,URLS))}

@@ -277,6 +277,13 @@ final class PluginTests: XCTestCase {
         }
     }
 
+    func testAIMirrorRequiresCatalogNotLandingPage() {
+        XCTAssertFalse(HuangguoClient.isAICatalogResponse(status:200,data:Data("<title>最新地址入口</title><div class='hg-drama-card'>".utf8)))
+        XCTAssertFalse(HuangguoClient.isAICatalogResponse(status:404,data:Data(#"{"data":{"items":[]}}"#.utf8)))
+        XCTAssertFalse(HuangguoClient.isAICatalogResponse(status:200,data:Data(#"{"data":{}}"#.utf8)))
+        XCTAssertTrue(HuangguoClient.isAICatalogResponse(status:200,data:Data(#"{"data":{"items":[]}}"#.utf8)))
+    }
+
     func testOptInHuangguoAIReadOnlyPipeline() async throws {
         guard ProcessInfo.processInfo.environment["STV_COMPAT_AI"] == "1" else { throw XCTSkip("set STV_COMPAT_AI") }
         let channel = try XCTUnwrap(HuangguoClient.aiChannels.first { $0.slug == "ai-duanju" })
