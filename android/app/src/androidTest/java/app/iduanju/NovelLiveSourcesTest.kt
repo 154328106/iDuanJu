@@ -41,6 +41,10 @@ class NovelLiveSourcesTest {
             report.put(JSONObject().put("name",name).put("categories",categories.size).put("rank",rank.size).put("search",hits.size).put("toc",toc.size)
                 .put("chapterLengths",org.json.JSONArray(texts.map{it.length})).put("offlineCache",3))
         }
-        File(context.getExternalFilesDir(null),"novel-real-sources.json").writeText(report.toString(2))
+        val output=File(context.getExternalFilesDir(null),"novel-real-sources.json")
+        output.writeText(report.toString(2))
+        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa; cp ${output.absolutePath} /sdcard/Download/novel-qa/").use {
+            java.io.FileInputStream(it.fileDescriptor).use { stream -> stream.readBytes() }
+        }
     }
 }

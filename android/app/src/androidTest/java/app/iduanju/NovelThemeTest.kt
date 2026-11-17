@@ -44,6 +44,9 @@ class NovelThemeTest {
         val bitmap=instrumentation.uiAutomation.takeScreenshot()
         try { path.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)} }
         finally {bitmap.recycle()}
+        instrumentation.uiAutomation.executeShellCommand("mkdir -p /sdcard/Download/novel-qa; cp ${path.absolutePath} /sdcard/Download/novel-qa/").use {
+            java.io.FileInputStream(it.fileDescriptor).use { stream -> stream.readBytes() }
+        }
     }
     private fun verify(dark:Boolean){
         val style=if(dark)"dark" else "light"
@@ -64,8 +67,11 @@ class NovelThemeTest {
         screenshot("$style-search")
         ui.onAllNodesWithText("雾港",substring=false).onLast().performClick()
         ui.waitUntil(10000){ui.onAllNodesWithText("缓存 / 下载").fetchSemanticsNodes().isNotEmpty()}
+        ui.waitUntil(10000){runCatching{ui.onNodeWithText("缓存 / 下载").assertIsEnabled()}.isSuccess}
+        screenshot("$style-detail")
         ui.onNodeWithText("缓存 / 下载").performClick()
-        ui.waitUntil(5000){ui.onAllNodesWithText("缓存与下载").fetchSemanticsNodes().isNotEmpty()}
+        try {ui.waitUntil(5000){ui.onAllNodesWithText("缓存与下载").fetchSemanticsNodes().isNotEmpty()}}
+        catch(e:Exception){screenshot("$style-download-failed");ui.onRoot().printToLog("NovelUI");throw e}
         screenshot("$style-download")
         ui.onNodeWithText("缓存与下载").assertIsDisplayed()
         ui.onNodeWithText("缓存后 50 章").performClick()

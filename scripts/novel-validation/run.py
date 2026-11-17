@@ -40,3 +40,10 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
 (out / 'report.json').write_text(json.dumps({'bundle_sha256': hashlib.sha256(bundle.read_bytes()).hexdigest(), 'source_count': len(sources), 'results': results}, ensure_ascii=False, indent=2), 'utf8')
 for result in results:
     print(json.dumps(result, ensure_ascii=False))
+
+# These two sources are release acceptance targets, not optional discovery statistics.
+for name in ('番茄小说', '书旗小说'):
+    result = next(r for r in results if r.get('name') == name)
+    for stage in ('explore', 'search', 'toc', 'chapter1', 'chapter2', 'chapter3', 'offlineCache'):
+        if result.get(stage, {}).get('status') != 'ok':
+            raise SystemExit(f'{name}: {stage} did not pass; see report.json')

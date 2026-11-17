@@ -77,10 +77,10 @@ jobs:
           disable-animations: true
           script: |
             chmod +x android/gradlew
-            if android/gradlew -p android :app:connectedDebugAndroidTest --console=plain; then RESULT=0; else RESULT=$?; fi; adb pull /sdcard/Android/data/app.iduanju/files/ "$RUNNER_TEMP/android-novel" || true; exit $RESULT
+            if android/gradlew -p android :app:connectedDebugAndroidTest --console=plain; then RESULT=0; else RESULT=$?; fi; adb pull /sdcard/Download/novel-qa/ "$RUNNER_TEMP/android-novel" || true; exit $RESULT
       - name: Collect native screenshots
         if: always()
-        run: adb pull /sdcard/Android/data/app.iduanju/files/ "$RUNNER_TEMP/android-novel" || true
+        run: adb pull /sdcard/Download/novel-qa/ "$RUNNER_TEMP/android-novel" || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
