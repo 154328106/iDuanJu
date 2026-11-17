@@ -2,7 +2,7 @@ name: player regression
 on:
   workflow_dispatch:
   push:
-    branches: [codex/player-pip-recovery]
+    branches: [codex/player-pip-recovery, codex/ui-redesign]
 permissions:
   contents: read
 jobs:

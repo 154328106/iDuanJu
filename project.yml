@@ -32,7 +32,7 @@ targets:
       PRODUCT_BUNDLE_IDENTIFIER: com.local.STV
       GENERATE_INFOPLIST_FILE: YES
       MARKETING_VERSION: "1.5"
-      CURRENT_PROJECT_VERSION: "10"
+      CURRENT_PROJECT_VERSION: "11"
       SWIFT_EMIT_LOC_STRINGS: YES
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -45,6 +45,8 @@ targets:
             cp "$SRCROOT/STVTests/Fixtures/novel_sample_gbk.txt" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/novel_sample_gbk.txt"
             mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_legado"
             cp -R "$SRCROOT/STVTests/Fixtures/legado/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_legado/"
+            mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_novel_preview"
+            cp -R "$SRCROOT/STVTests/Fixtures/ui_novel_preview/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ui_novel_preview/"
           fi
     info:
       path: STV/Info.plist
@@ -80,6 +82,7 @@ targets:
       - path: STVTests
         excludes:
           - "Fixtures/Plugins/**"
+          - "Fixtures/ui_novel_preview/**"
     dependencies:
       - target: STV
     settings:
