@@ -1,4 +1,7 @@
 import Foundation
+#if DEBUG
+import AVFoundation
+#endif
 
 /// Telegram videos reuse the long-video player (`VerticalPlayerView`, landscape + loopback pre-buffer).
 /// `seriesId` = "<channel>/<msgId>/<mediaIndex>", `page` = direct MP4 URL (or a downloaded file URL).
@@ -58,8 +61,21 @@ struct TGVideoProvider: SiteProvider {
                let fresh = try? await TGClient.shared.post(String(parts[0]), id), fresh.media.indices.contains(i),
                let v = fresh.media[i].video { url = v }
         }
-        let stream = HGStream(streamId: "tg", quality: "原画", url: url, key: "", kind: .mp4Clear,
+        var stream = HGStream(streamId: "tg", quality: "原画", url: url, key: "", kind: .mp4Clear,
                               headers: url.hasPrefix("file://") ? [:] : ["User-Agent": TGClient.userAgent])
+        #if DEBUG
+        // Local QA media has one real stream. Report its probed dimensions; never invent variants.
+        if s.seriesId.hasPrefix("fixture/"), let localURL = URL(string: url), localURL.isFileURL {
+            let tracks = try? await AVURLAsset(url: localURL).loadTracks(withMediaType: .video)
+            if let track = tracks?.first, let size = try? await track.load(.naturalSize) {
+                let width = Int(abs(size.width)), height = Int(abs(size.height))
+                if width > 0 && height > 0 {
+                    stream.width = width; stream.height = height
+                    stream.quality = "\(min(width, height))P"
+                }
+            }
+        }
+        #endif
         return HGResolvedVideo(vid: s.seriesId, url: url, key: nil, duration: Double(s.duration), expiresAt: nil, err: nil, streams: [stream])
     }
 }

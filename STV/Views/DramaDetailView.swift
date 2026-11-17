@@ -10,7 +10,7 @@ struct EpisodeRange: Hashable {
 enum EpisodeGroups {
     /// Group size: 30 (≤300 eps), 50 (≤600), 60 (more). Small totals stay in one group.
     static func size(for total: Int) -> Int {
-        if total <= 60 { return max(total, 1) }
+        if total <= 30 { return max(total, 1) }
         if total <= 300 { return 30 }
         if total <= 600 { return 50 }
         return 60

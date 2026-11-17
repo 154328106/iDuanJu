@@ -36,8 +36,8 @@ struct PlayerTechStrip: View {
                      tech.fps > 0 ? "\(tech.fps) fps" : ""] .filter { !$0.isEmpty }
         HStack(spacing: 6) {
             Text(parts.joined(separator: " · "))
-            if !tech.engine.isEmpty { Text(tech.engine).accessibilityIdentifier("player.engine").opacity(0.7) }
-            if tech.network > 0 { Text(PlayerTech.speed(tech.network)).monospacedDigit() }
+            if !landscape && !tech.engine.isEmpty { Text(tech.engine).accessibilityIdentifier("player.engine").opacity(0.7) }
+            if !landscape && tech.network > 0 { Text(PlayerTech.speed(tech.network)).monospacedDigit() }
         }
         .font(.system(size: 11, weight: .medium)).tracking(0.3).foregroundStyle(.white.opacity(0.55))
         .lineLimit(1).fixedSize().shadow(color: .black.opacity(0.4), radius: 2)

@@ -156,7 +156,7 @@ struct DebugRouteHost: View {
         case .siteLog: NavigationStack { SiteLogView().routes() }
         case .fixturePlay(let path):
             NavigationStack {
-                VerticalPlayerView(series: HGSeries(source: .telegram, seriesId: "fixture/1/0", title: ProcessInfo.processInfo.environment["STV_FX_TITLE"] ?? "公开测试流 · 横版 1280×720", cover: "",
+                VerticalPlayerView(series: HGSeries(source: .telegram, seriesId: "fixture/1/0", title: ProcessInfo.processInfo.environment["STV_FX_TITLE"] ?? "本地彩条测试 · 非真实片源", cover: "",
                                                     duration: 60, onlineTime: 1_586_390_400, orientation: "landscape", page: URL(fileURLWithPath: path).absoluteString),
                                    startIndex: Int(ProcessInfo.processInfo.environment["STV_FX_START"] ?? "") ?? 0).routes()
             }

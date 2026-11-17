@@ -436,7 +436,7 @@ struct PlayerScreen: View {
     /// full-width progress row, then 跳过片头 on the left and five labelled glass chips on the right.
     /// The title block and the progress row never auto-hide.
     private func landscapeControls(_ full: CGSize, ins: EdgeInsets, chrome: Bool, interactive: Bool) -> some View {
-        let side = max(ins.leading, ins.trailing, 48) + 16
+        let side = max(ins.leading, ins.trailing, 64) + 2
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
                 PlayerIconButton(symbol: "chevron.left", label: "返回") { dismiss() }
@@ -473,7 +473,7 @@ struct PlayerScreen: View {
                 .opacity(dim).modifier(ChromeFade(on: chrome))
             }
             .frame(height: 44)
-            .padding(.horizontal, side - 4).padding(.top, 14)
+            .padding(.horizontal, side).padding(.top, 16)
             Spacer(minLength: 0)
             if let i = co.current, co.episodes.indices.contains(i) {
                 VStack(spacing: 12) {
@@ -498,7 +498,7 @@ struct PlayerScreen: View {
                     .opacity(dim).modifier(ChromeFade(on: chrome))
                 }
                 .padding(.horizontal, side)
-                .padding(.bottom, max(ins.bottom, 8) + 6)
+                .padding(.bottom, max(ins.bottom, 8) + 4)
             }
         }
         .foregroundStyle(.white)
