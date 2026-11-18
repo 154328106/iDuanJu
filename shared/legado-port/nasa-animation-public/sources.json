@@ -29,12 +29,12 @@
       "author": "$.collection.items[0].data[0].center",
       "intro": "$.collection.items[0].data[0].description",
       "coverUrl": "$.collection.items[0].links[0].href",
-      "tocUrl": "$.collection.items[0].href"
+      "tocUrl": "$.collection.items[0].href@js:encodeURI(result)"
     },
     "ruleToc": {
       "chapterList": "@js:JSON.parse(result).filter(function(u){return /~small\\.mp4$/.test(u)}).slice(0,1)",
       "chapterName": "@js:'Public NASA animation'",
-      "chapterUrl": "@js:String(result).replace(/^http:/,'https:')"
+      "chapterUrl": "@js:encodeURI(String(result).replace(/^http:/,'https:'))"
     }
   }
 ]

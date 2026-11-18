@@ -10,6 +10,7 @@ class LegadoRealMediaTest {
   val path=System.getenv("IDJ_PERSONAL_AUDIO_JSON");Assume.assumeTrue(!path.isNullOrBlank())
   val source=NovelSources.import(File(path!!).readText()).single();assertTrue(source.isMedia)
   NovelSources.requestObserver={method,url,_->println("ACTUAL_REQUEST $method ${url.substringBefore('?')}")}
+  val catalog=NovelSources.search(source,"",category=NovelSources.categories(source).first());assertTrue(catalog.isNotEmpty());println("REAL_AUDIO_DISCOVERY count=${catalog.size}")
   val hits=NovelSources.search(source,"论语");assertTrue(hits.isNotEmpty())
   val hit=hits.first{it.name=="《论语》朗读与讲解"};val detail=NovelSources.details(source,hit.url);assertTrue(detail.chapters.isNotEmpty())
   val media=LegadoMedia.resolve(source,detail.chapters.first(),hit.url);assertTrue(media.url.startsWith("http"));println("REAL_FREE_AUDIO title=${hit.name} chapters=${detail.chapters.size} mediaHost=${java.net.URI(media.url).host}")
@@ -18,7 +19,9 @@ class LegadoRealMediaTest {
   Assume.assumeTrue(System.getenv("IDJ_REAL_NASA_VIDEO")=="1")
   val source=NovelSources.import(javaClass.getResource("/nasa-animation-public/sources.json")!!.readText()).single()
   val hits=NovelSources.search(source,"",category=NovelSources.categories(source).first());assertTrue(hits.isNotEmpty())
-  val detail=NovelSources.details(source,hits.first().url);assertTrue(detail.chapters.isNotEmpty())
-  val media=LegadoMedia.resolve(source,detail.chapters.first(),hits.first().url);assertEquals("images-assets.nasa.gov",java.net.URI(media.url).host);println("REAL_NASA_ANIMATION title=${hits.first().name} chapters=${detail.chapters.size}")
+  for(hit in hits.take(3)){
+   val detail=NovelSources.details(source,hit.url);assertTrue(detail.chapters.isNotEmpty())
+   val media=LegadoMedia.resolve(source,detail.chapters.first(),hit.url);assertEquals("images-assets.nasa.gov",java.net.URI(media.url).host);assertEquals("https",java.net.URI(media.url).scheme);println("REAL_NASA_ANIMATION title=${hit.name} chapters=${detail.chapters.size}")
+  }
  }
 }
