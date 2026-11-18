@@ -18,13 +18,40 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import app.iduanju.core.novel.NovelMedia
+import app.iduanju.core.novel.LegadoMedia
 import app.iduanju.core.util.NetGuard
 import okhttp3.Dns
 import okhttp3.OkHttpClient
-import java.net.URI
 import java.net.UnknownHostException
+import java.net.Socket
+import java.net.SocketAddress
+import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.io.IOException
+import javax.net.SocketFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+
+/** Defense before TCP connect (network interceptors run after connect, and IP literals may skip Dns). */
+internal class GuardedMediaSocketFactory:SocketFactory(){
+ override fun createSocket():Socket=object:Socket(){
+  override fun connect(endpoint:SocketAddress?,timeout:Int){
+   val target=endpoint as? InetSocketAddress
+   if(target?.address==null || target.port !in listOf(80,443) || NetGuard.isBlockedIP(target.address.hostAddress.orEmpty()))throw IOException("媒体连接拒绝内网地址或非标准端口")
+   super.connect(endpoint,timeout)
+  }
+ }
+ override fun createSocket(host:String,port:Int):Socket=createSocket().apply{connect(InetSocketAddress(host,port))}
+ override fun createSocket(host:String,port:Int,local:InetAddress,localPort:Int):Socket=createSocket().apply{bind(InetSocketAddress(local,localPort));connect(InetSocketAddress(host,port))}
+ override fun createSocket(host:InetAddress,port:Int):Socket=createSocket().apply{connect(InetSocketAddress(host,port))}
+ override fun createSocket(host:InetAddress,port:Int,local:InetAddress,localPort:Int):Socket=createSocket().apply{bind(InetSocketAddress(local,localPort));connect(InetSocketAddress(host,port))}
+}
+
+/** Validate each request, not just DNS lookup: OkHttp may bypass Dns for IP-literal redirects. */
+internal fun guardedMediaRequest(req:okhttp3.Request,origin:String):okhttp3.Request {
+ LegadoMedia.checkedURL(req.url.toString())
+ return if(LegadoMedia.sameOrigin(req.url.toString(),origin))req else req.newBuilder().removeHeader("Authorization").removeHeader("Cookie").build()
+}
 
 /** Native Media3 consumer, separate from text cache/TTS. No untrusted WebView or DRM helper. */
 @Composable
@@ -33,9 +60,8 @@ fun NovelMediaPlayer(media:NovelMedia,title:String,onClose:()->Unit,onPrevious:(
  var failure by remember(media){mutableStateOf<String?>(null)}
  var progress by remember(media){mutableStateOf("正在缓冲") }
  val player=remember(media){
-  val root=URI(media.url).host
-  fun strip(req:okhttp3.Request):okhttp3.Request = if(req.url.host.equals(root,true))req else req.newBuilder().removeHeader("Authorization").removeHeader("Cookie").build()
-  val client=OkHttpClient.Builder().dns(object:Dns { override fun lookup(hostname:String):List<java.net.InetAddress> =
+  fun strip(req:okhttp3.Request)=guardedMediaRequest(req,media.url)
+  val client=OkHttpClient.Builder().socketFactory(GuardedMediaSocketFactory()).dns(object:Dns { override fun lookup(hostname:String):List<java.net.InetAddress> =
    Dns.SYSTEM.lookup(hostname).also { addresses -> if(addresses.any{NetGuard.isBlockedIP(it.hostAddress.orEmpty())})throw UnknownHostException("媒体请求拒绝内网地址") }
   }).addInterceptor { chain->chain.proceed(strip(chain.request())) }
    .addNetworkInterceptor { chain->chain.proceed(strip(chain.request())) }.build()

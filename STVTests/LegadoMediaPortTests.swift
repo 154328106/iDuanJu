@@ -24,6 +24,8 @@ final class LegadoMediaPortTests:XCTestCase {
  }
  func testDirectMediaAndSafetyContract()throws{
   NetGuard.resolverOverride={_ in ["8.8.8.8"]}
+  XCTAssertTrue(LegadoMedia.sameOrigin(URL(string:"https://media.example.org/file")!,URL(string:"https://media.example.org:443/root")!))
+  XCTAssertFalse(LegadoMedia.sameOrigin(URL(string:"https://media.example.org/file")!,URL(string:"http://media.example.org/root")!))
   let s=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://direct.example.org","bookSourceType":1}"#.utf8)).first!
   XCTAssertEqual(try LegadoMedia.resolve(s,chapter:.init(title:"one",url:"https://direct.example.org/one.mp3")).url.absoluteString,"https://direct.example.org/one.mp3")
   for raw in ["file:///etc/passwd","http://127.0.0.1/x","http://[::1]/x","https://u:p@example.org/x","https://example.org:80/x"]{XCTAssertThrowsError(try LegadoMedia.checkedURL(raw))}

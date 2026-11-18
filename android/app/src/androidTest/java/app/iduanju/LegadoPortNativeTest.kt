@@ -4,6 +4,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import app.iduanju.core.novel.*
 import app.iduanju.novel.NovelScreen
+import app.iduanju.novel.guardedMediaRequest
 import app.iduanju.ui.theme.IdjTheme
 import org.json.*
 import org.junit.*
@@ -61,4 +62,20 @@ class LegadoPortNativeTest {
   val raw=String(android.util.Base64.decode(encoded,android.util.Base64.DEFAULT),Charsets.UTF_8)
   flow("personal-yck-rss",null,false,publicSource=true,sourceOverride=raw)
  }
+ @Test fun mediaRedirectGuardChecksOriginLiteralIPAndPortBeforeNetwork(){
+  val old=app.iduanju.core.util.NetGuard.resolverOverride;app.iduanju.core.util.NetGuard.resolverOverride={listOf("8.8.8.8")}
+  try{
+   fun request(url:String)=okhttp3.Request.Builder().url(url).header("Authorization","fixture-not-a-secret").header("Cookie","fixture=true").build()
+   val factory=app.iduanju.novel.GuardedMediaSocketFactory()
+   for(endpoint in listOf(java.net.InetSocketAddress("127.0.0.1",80),java.net.InetSocketAddress("::1",443),java.net.InetSocketAddress("8.8.8.8",444))){
+    val failure=runCatching{factory.createSocket().use{it.connect(endpoint,50)}}.exceptionOrNull()
+    assertTrue(failure?.message.orEmpty().contains("媒体连接拒绝"))
+   }
+   val origin="https://media.example.org/start"
+   assertEquals("fixture-not-a-secret",guardedMediaRequest(request("https://media.example.org/file"),origin).header("Authorization"))
+   assertNull(guardedMediaRequest(request("http://media.example.org/file"),origin).header("Authorization"))
+   for(url in listOf("http://127.0.0.1/x","http://[::1]/x","http://192.168.1.1/x","https://media.example.org:444/x"))assertTrue(url,runCatching{guardedMediaRequest(request(url),origin)}.isFailure)
+  }finally{app.iduanju.core.util.NetGuard.resolverOverride=old}
+ }
+
 }

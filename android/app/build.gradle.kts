@@ -38,7 +38,10 @@ android {
         }
         debug {
             // Opt-in parallel QA install; never re-sign/uninstall or overwrite the owner's existing app.
-            if (providers.gradleProperty("idjIsolatedQa").orNull == "true") applicationIdSuffix = ".legadoport"
+            when (providers.gradleProperty("idjIsolatedQa").orNull) {
+                "true" -> applicationIdSuffix = ".legadoport"
+                "mac" -> applicationIdSuffix = ".legadoportmac" // separate local signer; preserve existing QA/user apps
+            }
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

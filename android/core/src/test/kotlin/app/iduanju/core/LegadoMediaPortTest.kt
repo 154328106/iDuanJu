@@ -27,6 +27,8 @@ class LegadoMediaPortTest {
  }
  @Test fun directMediaAndSafetyContract(){
   NetGuard.resolverOverride={listOf("8.8.8.8")}
+  assertTrue(LegadoMedia.sameOrigin("https://media.example.org/file","https://media.example.org:443/root"))
+  assertFalse(LegadoMedia.sameOrigin("https://media.example.org/file","http://media.example.org/root"))
   val s=NovelSources.import("""{"bookSourceUrl":"https://direct.example.org","bookSourceType":1}""").single()
   assertEquals("https://direct.example.org/one.mp3",LegadoMedia.resolve(s,NovelChapter("one","https://direct.example.org/one.mp3")).url)
   for(url in listOf("file:///etc/passwd","http://127.0.0.1/x","http://[::1]/x","https://u:p@example.org/x","https://example.org:80/x"))assertTrue(url,runCatching{LegadoMedia.checkedURL(url)}.isFailure)

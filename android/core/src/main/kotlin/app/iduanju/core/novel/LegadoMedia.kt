@@ -9,6 +9,11 @@ import java.net.URI
 
 data class NovelMedia(val url:String,val headers:Map<String,String>,val sourceType:Int)
 object LegadoMedia {
+    fun sameOrigin(first:String,second:String):Boolean=runCatching{
+        val a=URI(first);val b=URI(second)
+        fun port(u:URI)=if(u.port!=-1)u.port else if(u.scheme.equals("https",true))443 else 80
+        a.scheme.equals(b.scheme,true)&&a.host.equals(b.host,true)&&port(a)==port(b)
+    }.getOrDefault(false)
     fun checkedURL(raw:String):String {
         val u=URI(raw);require(u.scheme in listOf("https","http")&&!u.host.isNullOrBlank()&&u.userInfo==null&&(u.port == -1 || u.port == (if(u.scheme=="https")443 else 80))){"媒体地址/端口或凭证不允许"}
         require(!u.host.equals("localhost",true)&&!(if(NetGuard.isIPLiteral(u.host))NetGuard.isBlockedIP(u.host)else NetGuard.resolvesToBlocked(u.host))){"媒体地址指向内网"}
@@ -31,7 +36,7 @@ object LegadoMedia {
         val url=checkedURL(NovelSources.absolute(pieces[0],source.id))
         val headers=NovelSources.headers(source)
         options.optJSONObject("headers")?.let{extra->for(k in extra.keys())headers.put(k,extra.get(k))}
-        val same=URI(url).host.equals(URI(source.id.substringBefore(',')).host,true)
+        val same=sameOrigin(url,source.id.substringBefore(','))
         val forbidden=setOf("host","connection","content-length","transfer-encoding","proxy-authorization")
         val projected=headers.keys().asSequence().associateWith{headers.get(it).toString()}.filter { (k,v)->
             require(k.none{it<=' '||it==':'}&&v.none{it=='\r'||it=='\n'||it=='\u0000'}){"媒体header含控制字符"}

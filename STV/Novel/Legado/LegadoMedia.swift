@@ -8,6 +8,10 @@ struct LegadoMedia:Identifiable {
     let headers:[String:String]
     let sourceType:Int
     var id:String{url.absoluteString}
+    static func sameOrigin(_ a:URL,_ b:URL)->Bool{
+        func port(_ u:URL)->Int{u.port ?? (u.scheme?.lowercased()=="https" ? 443 : 80)}
+        return a.scheme?.lowercased()==b.scheme?.lowercased() && a.host?.lowercased()==b.host?.lowercased() && port(a)==port(b)
+    }
     static func checkedURL(_ raw:String)throws->URL {
         guard let url=URL(string:raw),let rawHost=url.host,["https","http"].contains(url.scheme ?? ""),url.user==nil,url.password==nil,
             url.port==nil || url.port == (url.scheme=="https" ? 443 : 80) else{throw LegadoError.rule("媒体地址、端口或凭证不允许")}
@@ -31,7 +35,7 @@ struct LegadoMedia:Identifiable {
         guard request.request.httpMethod==nil || request.request.httpMethod=="GET" else{throw LegadoError.rule("媒体暂不支持POST，不会忽略请求方法")}
         guard let requestURL=request.request.url else{throw LegadoError.rule("媒体地址为空")}
         let url=try checkedURL(requestURL.absoluteString)
-        let same=url.host==URL(string:source.id)?.host
+        let same=URL(string:source.id).map{sameOrigin(url,$0)} ?? false
         let headers=(request.request.allHTTPHeaderFields ?? [:]).filter{ key,value in
             !["host","connection","content-length","transfer-encoding","proxy-authorization"].contains(key.lowercased()) && (same || !["authorization","cookie"].contains(key.lowercased()))
         }
