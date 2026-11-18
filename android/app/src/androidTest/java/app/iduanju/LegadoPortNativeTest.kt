@@ -15,14 +15,14 @@ class LegadoPortNativeTest {
  @get:Rule val ui=createAndroidComposeRule<androidx.activity.ComponentActivity>()
  private fun asset(path:String)=InstrumentationRegistry.getInstrumentation().context.assets.open(path).bufferedReader().use{it.readText()}
  private fun shot(name:String){ui.waitForIdle();val b=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot();try{val o=java.io.ByteArrayOutputStream();b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,o);saveNovelEvidence(name,o.toByteArray())}finally{b.recycle()}}
- private fun flow(folder:String,title:String?,media:Boolean,publicSource:Boolean=false,sourceOverride:String?=null){
+ private fun flow(folder:String,title:String?,media:Boolean,publicSource:Boolean=false,sourceOverride:String?=null,searchQuery:String?=null){
   val ctx=InstrumentationRegistry.getInstrumentation().targetContext;val prefs=ctx.getSharedPreferences("novel",0);val old=prefs.all;val oldPage=app.iduanju.ui.UiEvidence.page
   val raw=sourceOverride?:asset("$folder/sources.json")
   if(publicSource){NovelSources.fixture=null}else{val routes=JSONObject(asset("$folder/routes.json"));NovelSources.fixture={url->asset(folder+"/"+routes.getString(url))}}
   NovelSources.configureStorage(java.io.File(ctx.cacheDir,"legado-port-$folder"));app.iduanju.ui.UiEvidence.page="import"
   try{
    val s=NovelSources.import(raw).single()
-   val liveHit=if(publicSource)NovelSources.search(s,"",category=NovelSources.categories(s).first()).first()else null
+   val liveHit=if(publicSource){if(searchQuery!=null)NovelSources.search(s,searchQuery).first{it.name==title}else NovelSources.search(s,"",category=NovelSources.categories(s).first()).first()}else null
    val actualTitle=title?:liveHit!!.name
    prefs.edit().putString("sources","[]").remove("rankSource").commit()
    ui.setContent{IdjTheme(dark=false){NovelScreen({})}}
@@ -32,6 +32,7 @@ class LegadoPortNativeTest {
    assertEquals(1,JSONArray(prefs.getString("sources","[]")).length())
    ui.onNodeWithContentDescription("关闭").performClick()
    ui.onNodeWithText("排行榜").performClick()
+   if(searchQuery!=null){ui.onNodeWithContentDescription("搜书").performClick();ui.onNode(hasSetTextAction()).performTextInput(searchQuery);ui.onNode(hasSetTextAction()).performImeAction()}
    ui.waitUntil(20000){ui.onAllNodesWithText(actualTitle,substring=false).fetchSemanticsNodes().isNotEmpty()}
    shot("port-android-$folder-catalog.png")
    // Public demo source and book deliberately share a title; first match is the source picker.
@@ -39,7 +40,7 @@ class LegadoPortNativeTest {
    ui.waitUntil(20000){runCatching{ui.onNodeWithTag("novel.detail.read").assertIsEnabled();true}.getOrDefault(false)}
    shot("port-android-$folder-detail.png");ui.onNodeWithTag("novel.detail.read").performClick()
    if(media){
-    val minimum=if(s.json.optInt("bookSourceType")==4)2.0 else 0.2
+    val minimum=if(s.json.optInt("bookSourceType")==4 || (sourceOverride!=null && s.isMedia))2.0 else 0.2
     ui.waitUntil(60000){
      val node=ui.onAllNodesWithTag("novel.media.status").fetchSemanticsNodes().firstOrNull()
      val text=node?.config?.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text){emptyList()}?.firstOrNull()?.text.orEmpty()
@@ -49,7 +50,7 @@ class LegadoPortNativeTest {
    }else{ui.waitUntil(20000){ui.onAllNodesWithTag("novel.reader").fetchSemanticsNodes().isNotEmpty()}}
    if(publicSource&&s.isRSS){assertTrue(LegadoRss.article(s,liveHit!!.url).getBoolean("read"));NovelSources.search(s,"",category=NovelSources.categories(s).first());assertTrue(LegadoRss.article(s,liveHit.url).getBoolean("read"))}
    shot("port-android-$folder-consumed.png")
-   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)if(s.json.optInt("bookSourceType")==4)"public video timeline >=2s and playing" else "public audio timeline >=0.2s"else "reader body visible").toString().toByteArray())
+   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else if(sourceOverride!=null || folder=="nasa-animation-public")"actual public media library, HTTP, no fixture" else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)if(s.json.optInt("bookSourceType")==4)"public video timeline >=2s and playing" else "public audio timeline >=0.2s"else "reader body visible").toString().toByteArray())
   }finally{
    NovelSources.fixture=null;NovelSources.configureStorage(ctx.filesDir);app.iduanju.ui.UiEvidence.page=oldPage
    val edit=prefs.edit().clear();for((k,v)in old)when(v){is String->edit.putString(k,v);is Int->edit.putInt(k,v);is Boolean->edit.putBoolean(k,v);is Float->edit.putFloat(k,v);is Long->edit.putLong(k,v)};edit.commit()
@@ -83,4 +84,10 @@ class LegadoPortNativeTest {
  @Test fun standalonePublicAudioConfigNativePlayback()=flow("audio-static-public",null,true,publicSource=true)
  @Test fun standalonePublicVideoConfigNativePlayback()=flow("video-static-public",null,true,publicSource=true)
 
+ @Test fun personalYckFreeAudioSearchDetailTocNativePlayback(){
+  val encoded=InstrumentationRegistry.getArguments().getString("personalAudioBase64");Assume.assumeTrue(!encoded.isNullOrBlank())
+  val raw=String(android.util.Base64.decode(encoded,android.util.Base64.DEFAULT),Charsets.UTF_8)
+  flow("personal-yck-audio","《论语》朗读与讲解",true,publicSource=true,sourceOverride=raw,searchQuery="论语")
+ }
+ @Test fun nasaRealAnimationLibraryNativePlayback()=flow("nasa-animation-public",null,true,publicSource=true)
 }

@@ -3,9 +3,9 @@ final class LegadoPortUITests:XCTestCase {
  var app:XCUIApplication!
  func el(_ name:String)->XCUIElement{app.descendants(matching:.any)[name].firstMatch}
  func shot(_ name:String){if let p=ProcessInfo.processInfo.environment["STV_SHOT_DIR"]{try? app.screenshot().pngRepresentation.write(to:URL(fileURLWithPath:p).appendingPathComponent(name+".png"))}}
- func flow(_ folder:String,media:Bool,publicSource:Bool=false,sourceFile:URL?=nil)throws {
+ func flow(_ folder:String,media:Bool,publicSource:Bool=false,sourceFile:URL?=nil,searchQuery:String?=nil,expectedTitle:String?=nil)throws {
   continueAfterFailure=false
-  let evidenceName=sourceFile == nil ? folder : "personal-yck-rss"
+  let evidenceName=sourceFile == nil ? folder : (media ? "personal-yck-audio" : "personal-yck-rss")
   let root=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("shared/legado-port/"+folder)
   app=XCUIApplication();app.launchEnvironment=["STV_HOME_TAB":"novel","STV_NOVEL_PAGE":"import","STV_LEGADO_FIXTURE":root.path,"STV_LEGADO_FIXTURE_IMPORT":"0","STV_LEGADO_IMPORT":root.appendingPathComponent("empty-sources.json").path]
   if publicSource{app.launchEnvironment.removeValue(forKey:"STV_LEGADO_FIXTURE")}
@@ -17,7 +17,8 @@ final class LegadoPortUITests:XCTestCase {
   el("import.close").tap();app.terminate()
   app.launchEnvironment.removeValue(forKey:"STV_LEGADO_IMPORT");app.launchEnvironment["STV_NOVEL_PAGE"]="rank";app.launch()
   XCTAssertTrue(el("novel.rank.source").waitForExistence(timeout:20))
-  let first=el("novel.rank.book.0");XCTAssertTrue(first.waitForExistence(timeout:30));shot("port-ios-"+evidenceName+"-catalog");first.tap()
+  if let query=searchQuery{el("novel.rank.search").tap();let input=el("search.field");XCTAssertTrue(input.waitForExistence(timeout:15));input.tap();input.typeText(query+"\n")}
+  let first=el(expectedTitle.map{"search.result."+$0} ?? "novel.rank.book.0");XCTAssertTrue(first.waitForExistence(timeout:30));shot("port-ios-"+evidenceName+"-catalog");first.tap()
   let read=el("detail.read");XCTAssertTrue(read.waitForExistence(timeout:20));let ready=expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:read);wait(for:[ready],timeout:30)
   shot("port-ios-"+evidenceName+"-detail");read.tap()
   if media{
@@ -25,7 +26,7 @@ final class LegadoPortUITests:XCTestCase {
    let advancing=expectation(for:NSPredicate {object,_ in
     guard let e=object as? XCUIElement else{return false}
     let value=e.label.components(separatedBy:" ").compactMap(Double.init).first ?? 0
-    return value>=0.2
+    return value >= (sourceFile != nil ? 2.0 : 0.2)
    },evaluatedWith:status);wait(for:[advancing],timeout:60);XCTAssertTrue(el("novel.media.player").exists)
   }else{
    let body=el("novel.page.body");XCTAssertTrue(body.waitForExistence(timeout:30))
@@ -47,4 +48,9 @@ final class LegadoPortUITests:XCTestCase {
  func testStandalonePublicAudioConfigNativePlayback()throws{try flow("audio-static-public",media:true,publicSource:true)}
  func testStandalonePublicVideoConfigNativePlayback()throws{try flow("video-static-public",media:true,publicSource:true)}
 
+ func testPersonalYckFreeAudioSearchDetailTocPlayback()throws{
+  guard let p=ProcessInfo.processInfo.environment["IDJ_PERSONAL_AUDIO_JSON"]else{throw XCTSkip("private definition opt-in")}
+  try flow("nasa-public",media:true,publicSource:true,sourceFile:URL(fileURLWithPath:p),searchQuery:"论语",expectedTitle:"《论语》朗读与讲解")
+ }
+ func testNasaRealAnimationLibraryNativePlayback()throws{try flow("nasa-animation-public",media:true,publicSource:true)}
 }
