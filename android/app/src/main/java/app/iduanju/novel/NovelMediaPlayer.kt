@@ -74,12 +74,14 @@ fun NovelMediaPlayer(media:NovelMedia,title:String,onClose:()->Unit,onPrevious:(
  LaunchedEffect(player){while(isActive){progress="已播放 %.2f 秒 · %s".format(java.util.Locale.ROOT,player.currentPosition/1000.0,if(player.playbackState==Player.STATE_ENDED)"结束"else if(player.isPlaying)"播放中"else "缓冲/暂停");delay(200)}}
  DisposableEffect(player){onDispose{player.release()}}
  BackHandler{onClose()}
- Column(Modifier.fillMaxSize().testTag("novel.media.player")){
+ Surface(Modifier.fillMaxSize().testTag("novel.media.player")){
+ Column(Modifier.fillMaxSize().safeDrawingPadding()){
   Row(Modifier.fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(title,Modifier.weight(1f));TextButton(onClick=onClose){Text("关闭播放")}}
   if(media.sourceType==1)Text("有声书 · 原生音频播放",Modifier.padding(12.dp))
   AndroidView(factory={ctx->PlayerView(ctx).apply{this.player=player;useController=true;controllerShowTimeoutMs=0;layoutParams=ViewGroup.LayoutParams(-1,-1)}},update={it.player=player},modifier=Modifier.fillMaxWidth().weight(1f))
   Text(progress,Modifier.padding(12.dp).testTag("novel.media.status"))
   failure?.let{Text(it,Modifier.padding(12.dp).testTag("novel.media.error"),color=MaterialTheme.colorScheme.error)}
   Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly){TextButton(onClick={onPrevious?.invoke()},enabled=onPrevious!=null){Text("上一章")};TextButton(onClick={onNext?.invoke()},enabled=onNext!=null){Text("下一章")}}
+ }
  }
 }
