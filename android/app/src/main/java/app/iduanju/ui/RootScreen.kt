@@ -102,10 +102,10 @@ fun RootScreen(initialRoute: String? = null) {
             GlassTabBar(
                 selected = tab,
                 items = listOf(
-                    "首页" to { on -> Icon(Icons.Filled.Home, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "搜索" to { on -> Icon(Icons.Filled.Search, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "我的" to { on -> Icon(Icons.Filled.Person, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "搜索" to { on -> Icon(Icons.Filled.Search, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
                 ),
                 onSelect = {
                     tab = it

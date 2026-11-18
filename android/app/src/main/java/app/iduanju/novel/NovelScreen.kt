@@ -333,10 +333,10 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
                 read(index)
             }},onRetry={loadDetails()},mediaType=source?.json?.optInt("bookSourceType")?:0)
     }
-    if(!sourcePage && currentBook==null && text.isEmpty()) Column(Modifier.fillMaxSize().background(c.bg).then(if(embedded)Modifier else Modifier.statusBarsPadding())) {
+    if(!sourcePage && currentBook==null && text.isEmpty()) Column(Modifier.fillMaxSize().then(if(embedded&&shelf&&!searching)Modifier else Modifier.dsAmbient(cool=!shelf||searching)).then(if(embedded)Modifier else Modifier.statusBarsPadding())) {
         if(!shelf || searching || currentBook!=null || text.isNotEmpty()) DSNavBar(
             if (text.isNotEmpty()) chapters.getOrNull(chapterIndex)?.title ?: "本地小说" else if(currentBook!=null) "书籍详情" else if(searching) "搜书" else "小说榜单",
-            leading={BackButton{back()}},trailing={if(searching)CapsuleButton("书源",Icons.Rounded.Cloud){sourcePage=true} else RoundIconButton(Icons.Rounded.Search,"搜书"){searching=true}})
+            leading={BackButton{back()}},trailing={if(searching)CapsuleButton("书源",BooksIcon){sourcePage=true} else RoundIconButton(Icons.Rounded.Search,"搜书"){searching=true}})
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize=13.sp, modifier=Modifier.padding(vertical=8.dp)) }
         if(shelf && !searching) {
@@ -361,13 +361,13 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
             }
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
                 Box {
-                    CapsuleButton(source?.name ?: "选择书源",Icons.Rounded.Cloud,Icons.Rounded.ExpandMore){expanded=true}
+                    CapsuleButton(source?.name ?: "选择书源",BooksIcon,Icons.Rounded.ExpandMore){expanded=true}
                     DropdownMenu(expanded,{expanded=false}){sources.filter{it.enabled}.forEach{sc->DropdownMenuItem(text={Text(sc.name)},onClick={selected=sc.id;expanded=false})}}
                 }
                 Spacer(Modifier.weight(1f))
                 if(!searching)Text("实时书源榜单",color=c.tertiary,fontSize=11.sp)
             }
-            if(!searching && categories.isNotEmpty()) UnderlineTabs(categories.map{it.group}.distinct(),selectedGroup,{it},small=true,onSelect={group->
+            if(!searching && categories.isNotEmpty()) UnderlineTabs(categories.map{it.group}.distinct(),selectedGroup,{it},small=true,modifier=Modifier.padding(horizontal=20.dp),onSelect={group->
                 if(!busy){
                     selectedGroup=group
                     val first=categories.firstOrNull{it.group==group&&!it.isControl&&it.url.isNotBlank()}

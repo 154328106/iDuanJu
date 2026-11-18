@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -139,66 +141,57 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
         if (i >= 0) { pager.scrollToPage(i); HomeJump.label = null }
     }
     val scope = rememberCoroutineScope()
-    val heroCovers = remember { mutableStateMapOf<String, String>() }
+    var feedScroll by remember { mutableFloatStateOf(0f) }
+    val feedScrollConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
+                feedScroll = (feedScroll - consumed.y).coerceAtLeast(0f)
+                return Offset.Zero
+            }
+        }
+    }
     val source = pages[pager.currentPage.coerceIn(0, pages.size - 1)]
-    val sourceKey = labels[pager.currentPage.coerceIn(0, pages.size - 1)]
     var novelFullScreen by remember { mutableStateOf(false) }
     val immersive = source == HomeSource.novel && novelFullScreen
     LaunchedEffect(immersive) { onImmersiveChanged(immersive) }
     DisposableEffect(Unit) { onDispose { onImmersiveChanged(false) } }
-    val onPoster = heroCovers[sourceKey] != null
-    val ink = if (onPoster) Color.White else c.text
+    LaunchedEffect(pager.currentPage) { feedScroll = 0f }
+    val pinned = with(androidx.compose.ui.platform.LocalDensity.current) { feedScroll > 8.dp.toPx() }
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
-        // atmosphere: hero poster blurred across the top, fading into the page colour
-        Box(
-            Modifier.fillMaxWidth().height(420.dp)
-                .graphicsLayer { alpha = 0.99f }
-                .drawWithContent {
-                drawContent()
-                drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.6f to Color.Transparent, 1f to c.bg))
-            },
-        ) {
-            if (onPoster) {
-                Box(Modifier.fillMaxSize().background(Color(0xFF141A26)))
-                BlurBackdrop(heroCovers[sourceKey], Modifier.fillMaxSize(), 48.dp, 0.75f)
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, c.bg.copy(0.35f), c.bg))))
-            } else {
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.elevated, c.bg))))
-            }
-        }
+        AmbientGlow(visible = !pinned)
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             // header: search + filter capsule
-            if (!immersive) Column(Modifier.padding(top = 6.dp)) {
+            if (!immersive) Column(Modifier.dsPinned(pinned).padding(top = 6.dp)) {
                 Row(
                     Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(46.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(if (onPoster) Color.White.copy(0.16f) else c.glass)
-                        .border(1.dp, if (onPoster) Color.White.copy(0.18f) else c.glassBorder, RoundedCornerShape(50)),
+                        .background(c.glass)
+                        .border(1.dp, c.glassBorder, RoundedCornerShape(50)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(Modifier.weight(1f).fillMaxHeight().clickable(onClick = onSearch).padding(start = 16.dp).semantics { contentDescription = "home.search" },
                         verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Search, null, tint = if (onPoster) ink.copy(0.85f) else c.secondary, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Search, null, tint = c.secondary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text("搜索你想看的作品", color = if (onPoster) ink.copy(0.8f) else c.secondary, fontSize = 16.sp, maxLines = 1)
+                        Text("搜索你想看的作品", color = c.secondary, fontSize = 16.sp, maxLines = 1)
                     }
                     Row(Modifier.fillMaxHeight().clickable { HomeChannelSheetOpen.value = true }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.FilterList, null, tint = ink, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.FilterList, null, tint = c.text, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("筛选", color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("筛选", color = c.text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
                 var sheet by HomeChannelSheetOpen
-                ChannelBar(labels, pager.currentPage, ink, onMore = { sheet = true }) { scope.launch { pager.animateScrollToPage(it) } }
+                ChannelBar(labels, pager.currentPage, c.text, onMore = { sheet = true }) { scope.launch { pager.animateScrollToPage(it) } }
                 if (sheet) ChannelSheet(pages, labels, pager.currentPage, onDismiss = { sheet = false }) { page, sub ->
                     sheet = false
                     if (sub != null) HomeSubSel.map[labels[page]] = sub
                     scope.launch { pager.animateScrollToPage(page) }
                 }
             }
-            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !immersive, beyondViewportPageCount = 0) { page ->
+            HorizontalPager(pager, Modifier.fillMaxSize().nestedScroll(feedScrollConnection), userScrollEnabled = !immersive, beyondViewportPageCount = 0) { page ->
                 val any = pages[page]
                 if (any is app.iduanju.core.cms.CMSSite) { SiteFeedPage(any, onOpenDetail); return@HorizontalPager }
                 if (any is app.iduanju.plugin.PluginStore.Installed) { PluginFeedPage(any, onOpenDetail); return@HorizontalPager }
@@ -224,7 +217,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                         }
                         Box(Modifier.weight(1f)) {
                             if (sel == 1) app.iduanju.huangguo.HuangguoFeedPage(onOpenDetail, aiOnly = true)
-                            else FeedPage(s, onOpenDetail) { cover -> if (cover == null) heroCovers.remove(s.label) else heroCovers[s.label] = cover }
+                            else FeedPage(s, onOpenDetail)
                         }
                     }
                 } else if (s.subs().isEmpty()) {
@@ -232,7 +225,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
                         Text("「${s.label}」Android 版尚未移植", color = c.secondary, fontSize = 14.sp)
                     }
                 } else {
-                    FeedPage(s, onOpenDetail) { cover -> if (cover == null) heroCovers.remove(s.label) else heroCovers[s.label] = cover }
+                    FeedPage(s, onOpenDetail)
                 }
             }
         }
@@ -343,7 +336,7 @@ private fun ChannelBar(items: List<String>, selected: Int, ink: Color, onMore: (
 
 
 @Composable
-private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (String?) -> Unit) {
+private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit) {
     val c = IdjThemeColors
     val subs = source.subs()
     var tab by remember { mutableStateOf(subs.getOrElse(HomeSubSel.map[source.label] ?: 0) { subs.first() }) }
@@ -352,7 +345,6 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit, onHero: (Stri
     val heroPicks = boards.firstOrNull()?.let { BoardCache.items[it.id] }?.take(5) ?: emptyList()
     var heroIndex by remember(tab) { mutableIntStateOf(0) }
     LaunchedEffect(tab) { boards.firstOrNull()?.let { BoardCache.load(it) } }
-    LaunchedEffect(heroPicks, heroIndex) { onHero(heroPicks.getOrNull(heroIndex)?.cover) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp + 72.dp)) {
         if (subs.size > 1) {
