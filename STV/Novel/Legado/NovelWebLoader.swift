@@ -66,7 +66,7 @@ final class NovelWebLoader {
             revision += 1
             throw LegadoError.empty("书源已删除，无法加载")
         }
-        let chapter = LegadoChapter(title: b.chapters[i].title, url: urls[i])
+        let chapter = LegadoChapter(title: b.chapters[i].title, url: urls[i],index:i)
         let next = urls.indices.contains(i + 1) ? urls[i + 1] : nil
         let bookInfo: [String: Any] = ["name": b.title, "author": b.author ?? "", "bookUrl": b.bookURL ?? "", "tocUrl": b.tocURL ?? ""]
         nonisolated(unsafe) let info = bookInfo
