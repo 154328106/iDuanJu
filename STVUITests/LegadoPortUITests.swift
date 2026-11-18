@@ -26,7 +26,7 @@ final class LegadoPortUITests:XCTestCase {
    let advancing=expectation(for:NSPredicate {object,_ in
     guard let e=object as? XCUIElement else{return false}
     let value=e.label.components(separatedBy:" ").compactMap(Double.init).first ?? 0
-    return value >= (sourceFile != nil ? 2.0 : 0.2)
+    return value >= (sourceFile != nil || folder.contains("webview") ? 2.0 : 0.2)
    },evaluatedWith:status);wait(for:[advancing],timeout:60);XCTAssertTrue(el("novel.media.player").exists)
    if let expectedTitle{XCTAssertTrue(app.navigationBars[expectedTitle].waitForExistence(timeout:10))}
   }else{
@@ -54,4 +54,6 @@ final class LegadoPortUITests:XCTestCase {
   try flow("nasa-public",media:true,publicSource:true,sourceFile:URL(fileURLWithPath:p),searchQuery:"论语",expectedTitle:"《论语》朗读与讲解")
  }
  func testNasaRealAnimationLibraryNativePlayback()throws{try flow("nasa-animation-public",media:true,publicSource:true)}
+ func testNasaWebJsRealPageNativePlayback()throws{try flow("nasa-webview-public",media:true,publicSource:true)}
+ func testNasaSourceRegexSniffRealPageNativePlayback()throws{try flow("nasa-webview-sniff-public",media:true,publicSource:true)}
 }

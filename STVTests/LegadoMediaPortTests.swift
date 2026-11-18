@@ -22,9 +22,60 @@ final class LegadoMediaPortTests:XCTestCase {
    XCTAssertEqual(contextual.url.absoluteString,c["contextExpectedURL"] as? String)
   }
  }
- func testMediaWebJsIsNotPretendedUsableAtImport()throws{
-  let s=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://example.org","bookSourceType":4,"exploreUrl":"/catalog","ruleContent":{"webJs":"document.title"}}"#.utf8)).first!
-  XCTAssertTrue(s.unsupportedMediaWebJS);XCTAssertFalse(s.supported)
+ func testMediaWebJsImportsAndUsesUpstreamWebViewContract()throws{
+  NetGuard.resolverOverride={_ in ["8.8.8.8"]}
+  defer{LegadoBackstage.loader=nil}
+  let imported=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://example.org","bookSourceType":4,"exploreUrl":"/catalog","ruleContent":{"webJs":"document.title"}}"#.utf8)).first!
+  XCTAssertTrue(imported.supported)
+  let root=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+  let cases=try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("shared/legado-port/webview-media-cases.json"))) as! [[String:Any]]
+  for c in cases {
+   let name=c["name"] as! String;let e=c["expect"] as! [String:Any]
+   var src=c["source"] as! [String:Any];if src["searchUrl"]==nil{src["searchUrl"]="/s"}
+   let s=try LegadoSourceStore.parse(JSONSerialization.data(withJSONObject:src)).first!
+   var seen:LegadoBackstageRequest?
+   LegadoBackstage.loader={r in seen=r;let b=c["backstage"] as! [String:String];return LegadoResponse(url:URL(string:b["url"]!)!,status:200,headers:[:],body:Data(b["text"]!.utf8),text:b["text"]!)}
+   LegadoHTTP.transport={req in guard let body=c["http"] as? String else{throw LegadoError.rule("webView chapter must not use plain HTTP")};return(Data(body.utf8),HTTPURLResponse(url:req.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)}
+   let media=try LegadoMedia.resolve(s,chapter:.init(title:"ep",url:c["chapterURL"] as! String))
+   XCTAssertEqual(media.url.absoluteString,e["mediaURL"] as? String,name)
+   if e["backstageCalled"] != nil {XCTAssertNil(seen,name);continue}
+   let r=try XCTUnwrap(seen,name)
+   XCTAssertEqual(r.url.absoluteString,e["pageURL"] as? String,name);XCTAssertEqual(r.javaScript,e["js"] as? String,name);XCTAssertEqual(r.sourceRegex,e["sourceRegex"] as? String,name)
+   XCTAssertEqual(r.delayMs,(e["delayMs"] as! NSNumber).intValue,name);XCTAssertEqual(r.timeout,60)
+   XCTAssertEqual(r.headers.keys.contains{$0.lowercased()=="cookie"},e["pageCookie"] as! Bool,name)
+   XCTAssertEqual(media.headers.keys.contains{$0.lowercased()=="cookie"},e["mediaCookie"] as! Bool,name)
+   XCTAssertEqual(media.headers.first{$0.key.lowercased()=="referer"}?.value,e["mediaReferer"] as? String,name)
+  }
+ }
+ func testWebViewSafetyAndResultSemantics()throws{
+  NetGuard.resolverOverride={_ in ["8.8.8.8"]}
+  defer{LegadoBackstage.loader=nil}
+  for v:Any? in [nil,NSNull(),"",false,"false"]{XCTAssertFalse(LegadoBackstage.useWebView(v))}
+  for v:Any in [true,"true","“true”","1"]{XCTAssertTrue(LegadoBackstage.useWebView(v))}
+  XCTAssertNil(LegadoBackstage.evalResult(NSNull()));XCTAssertNil(LegadoBackstage.evalResult(""));XCTAssertEqual(LegadoBackstage.evalResult("x"),"x")
+  XCTAssertEqual(LegadoBackstage.firstSniffed(#".*\.mp3.*"#,#"["https://a.example/page.js","https://cdn.example.net/x.mp3"]"#),"https://cdn.example.net/x.mp3")
+  XCTAssertFalse(LegadoBackstage.matches("([","x"))
+  let s=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://page.example.org","bookSourceType":4,"searchUrl":"/s","ruleContent":{"content":"<js>result</js>"}}"#.utf8)).first!
+  LegadoBackstage.loader={_ in XCTFail("private page must be rejected before WebView");throw LegadoError.rule("x")}
+  XCTAssertThrowsError(try LegadoMedia.resolve(s,chapter:.init(title:"x",url:#"http://127.0.0.1/p,{"webView":true}"#)))
+  LegadoBackstage.loader={r in LegadoResponse(url:r.url,status:200,headers:[:],body:Data(),text:"http://10.0.0.2/x.mp4")}
+  XCTAssertThrowsError(try LegadoMedia.resolve(s,chapter:.init(title:"x",url:#"https://page.example.org/p,{"webView":true}"#)))
+ }
+ func testRealWKWebViewTimeoutCancelPrivateAndResult()throws{
+  guard ProcessInfo.processInfo.environment["IDJ_REAL_WEBVIEW"]=="1" else{throw XCTSkip("public network opt-in")}
+  let page=URL(string:"https://images.nasa.gov/")!
+  func load(_ r:LegadoBackstageRequest,token:LegadoCancelToken?=nil)->Result<LegadoResponse,Error>{
+   var out:Result<LegadoResponse,Error>!;let done=expectation(description:"load")
+   let t=Thread{out=Result{try (token ?? LegadoCancelToken()).bind{try LegadoBackstage.load(r)}};done.fulfill()};t.start()
+   wait(for:[done],timeout:r.timeout+20);return out
+  }
+  let start=Date()
+  if case .failure(let e)=load(.init(url:page,headers:[:],javaScript:"null",sourceRegex:nil,delayMs:0,timeout:4)){XCTAssertTrue("\(e)".contains("超时"),"\(e)")}else{XCTFail("must time out")}
+  XCTAssertLessThan(Date().timeIntervalSince(start),15)
+  let token=LegadoCancelToken();DispatchQueue.global().asyncAfter(deadline:.now()+1.5){token.cancel()}
+  if case .failure(let e)=load(.init(url:page,headers:[:],javaScript:"null",sourceRegex:nil,delayMs:0,timeout:60),token:token){XCTAssertTrue(e is CancellationError,"\(e)")}else{XCTFail("must cancel")}
+  if case .success=load(.init(url:URL(string:"http://127.0.0.1/")!,headers:[:],javaScript:"document.title",sourceRegex:nil,delayMs:0,timeout:6)){XCTFail("private page must not load")}
+  if case .success(let r)=load(.init(url:page,headers:[:],javaScript:"document.title",sourceRegex:nil,delayMs:0,timeout:30)){XCTAssertFalse(r.text.isEmpty)}else{XCTFail("real page title")}
  }
  func testDirectMediaAndSafetyContract()throws{
   NetGuard.resolverOverride={_ in ["8.8.8.8"]}

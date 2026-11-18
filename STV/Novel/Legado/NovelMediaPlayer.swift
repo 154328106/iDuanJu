@@ -40,7 +40,8 @@ struct NovelMediaPlayer:View {
         var chapter=chapters[selected];chapter.index=selected
         let nextChapterURL=chapters.indices.contains(selected+1) ? chapters[selected+1].url : nil
         do {
-            let media=try await LegadoClient.run{try LegadoMedia.resolve(source,chapter:chapter,book:book,nextChapterURL:nextChapterURL)}
+            let cancel=LegadoCancelToken()
+            let media=try await withTaskCancellationHandler(operation:{try await LegadoClient.run{try cancel.bind{try LegadoMedia.resolve(source,chapter:chapter,book:book,nextChapterURL:nextChapterURL)}}},onCancel:{cancel.cancel()})
             guard !Task.isCancelled else{return}
             let local=try await LegadoClient.run{try LocalHLSProxy.shared.legadoURL(media)}
             let token=LocalHLSProxy.token(of:local)

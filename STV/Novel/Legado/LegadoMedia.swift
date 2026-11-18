@@ -22,15 +22,18 @@ struct LegadoMedia:Identifiable {
     static func resolve(_ source:LegadoSource,chapter:LegadoChapter,book:[String:Any]=[:],nextChapterURL:String?=nil)throws->LegadoMedia {
         guard source.isMedia else{throw LegadoError.rule("不是有声/视频书源")}
         let rules=source.ruleContent ?? [:]
-        guard (rules["webJs"] ?? "").isEmpty else{throw LegadoError.rule("媒体源依赖WebView webJs，尚未实现")}
         let ctx=LegadoContext(source:source);ctx.book=book;ctx.chapter=["title":chapter.title,"url":chapter.url,"index":chapter.index ?? 0];ctx.nextChapterURL=nextChapterURL
+        let chapterRule=LegadoClient.firstRequestURL(chapter.url)
+        let chapterOptions:[String:Any]=LegadoURL.optionsStart(chapterRule).flatMap{LegadoURL.lenientObject(String(chapterRule[chapterRule.index(after:$0.lowerBound)...]),ctx:ctx)} ?? [:]
+        // Upstream AnalyzeUrl: webJs/sourceRegex only apply when the URL option enables webView.
+        let web=LegadoBackstage.useWebView(chapterOptions["webView"])
         let raw:String
         // Exact AnalyzeRule baseUrl identity has no body dependency; retain requests if loginCheckJs has effects.
         let contentRule=rules["content"] ?? ""
-        let identity=(source.loginCheckJs ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && contentRule.trimmingCharacters(in:.whitespacesAndNewlines).range(of:#"^(?:@js:\s*baseUrl\s*;?\s*|<js>\s*baseUrl\s*;?\s*</js>)$"#,options:.regularExpression) != nil
+        let identity = !web && (source.loginCheckJs ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && contentRule.trimmingCharacters(in:.whitespacesAndNewlines).range(of:#"^(?:@js:\s*baseUrl\s*;?\s*|<js>\s*baseUrl\s*;?\s*</js>)$"#,options:.regularExpression) != nil
         if !contentRule.isEmpty && !identity {
             let rule=contentRule
-            let response=try LegadoClient.loginChecked(source,try LegadoURL.request(chapter.url,ctx:ctx,base:source.id).fetch(),ctx:ctx)
+            let response=web ? try backstage(source,rules:rules,chapterURL:chapter.url,options:chapterOptions,ctx:ctx) : try LegadoClient.loginChecked(source,try LegadoURL.request(chapter.url,ctx:ctx,base:source.id).fetch(),ctx:ctx)
             // Same fork contract as upstream: preserve ampersands and URL option JSON, no HTML formatter.
             let value=try LegadoAnalyzer(response.text,baseURL:response.url.absoluteString,ctx:ctx).string(rule)
             raw=LegadoURL.absolute(LegadoClient.firstRequestURL(value),base:response.url.absoluteString)
@@ -45,5 +48,21 @@ struct LegadoMedia:Identifiable {
         }
         guard headers.allSatisfy({key,value in !key.contains(where:{$0.isWhitespace || $0==":"}) && !value.contains(where:{$0=="\r" || $0=="\n" || $0=="\0"})}) else {throw LegadoError.rule("媒体header含控制字符")}
         return LegadoMedia(url:url,headers:headers,sourceType:source.bookSourceType ?? 0)
+    }
+    private static func backstage(_ source:LegadoSource,rules:[String:String],chapterURL:String,options:[String:Any],ctx:LegadoContext)throws->LegadoResponse {
+        let request=try LegadoURL.request(chapterURL,ctx:ctx,base:source.id)
+        guard request.request.httpMethod==nil || request.request.httpMethod=="GET" else{throw LegadoError.rule("WebView媒体解析暂不支持POST，不会忽略请求方法")}
+        guard let raw=request.request.url else{throw LegadoError.rule("WebView 页面地址为空")}
+        let page=try checkedURL(raw.absoluteString)
+        let same=URL(string:source.id).map{sameOrigin(page,$0)} ?? false
+        let headers=(request.request.allHTTPHeaderFields ?? [:]).filter{key,_ in
+            !["host","connection","content-length","transfer-encoding","proxy-authorization"].contains(key.lowercased()) && (same || !["authorization","cookie"].contains(key.lowercased()))
+        }
+        guard headers.allSatisfy({key,value in !key.contains(where:{$0.isWhitespace || $0==":"}) && !value.contains(where:{$0=="\r" || $0=="\n" || $0=="\0"})}) else {throw LegadoError.rule("WebView header含控制字符")}
+        func text(_ v:Any?)->String?{guard let v,!(v is NSNull) else{return nil};let s="\(v)".trimmingCharacters(in:.whitespacesAndNewlines);return s.isEmpty || s=="null" ? nil : s}
+        let js=text(options["webJs"]) ?? text(rules["webJs"])
+        let regex=text(rules["sourceRegex"])
+        let delay=min(max((options["webViewDelayTime"] as? NSNumber)?.intValue ?? Int(text(options["webViewDelayTime"]) ?? "") ?? 0,0),30000)
+        return try LegadoBackstage.load(LegadoBackstageRequest(url:page,headers:headers,javaScript:js,sourceRegex:regex,delayMs:delay))
     }
 }

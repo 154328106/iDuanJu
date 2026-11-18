@@ -884,7 +884,11 @@ enum LegadoURL {
     static func lenientObject(_ text: String, ctx: LegadoContext) -> [String: Any]? {
         if let d = text.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] { return o }
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") else { return nil }
-        return (try? ctx.js.eval("JSON.parse(JSON.stringify(" + text + "))", [:])) as? [String: Any]
+        if let o = (try? ctx.js.eval("JSON.parse(JSON.stringify(" + text + "))", [:])) as? [String: Any] { return o }
+        // Real sources write typographic quotes, e.g. `{webView:“true”}` (Gson reads them leniently).
+        let normalized = text.replacingOccurrences(of: "“", with: "\"").replacingOccurrences(of: "”", with: "\"")
+        guard normalized != text else { return nil }
+        return (try? ctx.js.eval("JSON.parse(JSON.stringify(" + normalized + "))", [:])) as? [String: Any]
     }
 
     /// The `}}` that closes a `{{` (JS inside may itself contain `}}`, e.g. `})()}}`): the first one that leaves the

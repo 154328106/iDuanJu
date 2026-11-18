@@ -117,7 +117,6 @@ struct NovelSourcesView: View {
 
     private func subtitle(_ s: LegadoSource) -> String {
         let group = (s.bookSourceGroup ?? "").isEmpty ? "综合" : s.bookSourceGroup!
-        if s.unsupportedMediaWebJS {return group+" · 媒体 webJs 浏览器解析尚未实现，不会启用"}
         if !s.supported { return group + " · " + ([2,3].contains(s.bookSourceType ?? 0) ? "暂未实现的源类型" : "没有搜索 / 发现地址") }
         return [group, URL(string: s.bookSourceUrl)?.host].compactMap { $0 }.joined(separator: " · ")
     }
