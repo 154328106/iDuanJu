@@ -36,7 +36,7 @@ internal fun NovelBookDetail(
     book: NovelHit, info: NovelBookDetails?, sourceName: String, chapterCount: Int,
     loading: Boolean, error: String?, onShelf: Boolean, downloading: Boolean,
     downloadProgress: Float, onBack: () -> Unit, onSwitch: () -> Unit,
-    onAdd: () -> Unit, onDownload: () -> Unit, onRead: () -> Unit, onRetry: () -> Unit
+    onAdd: () -> Unit, onDownload: () -> Unit, onRead: () -> Unit, onRetry: () -> Unit, mediaType:Int=0
 ) {
     val c = IdjThemeColors
     val blue = Color(0xFF2868F0)
@@ -114,7 +114,7 @@ internal fun NovelBookDetail(
                 Icon(Icons.Outlined.DownloadForOffline,null,Modifier.size(18.dp));Spacer(Modifier.width(5.dp));Text("下载",fontSize=17.sp)
             }
             Button(onClick=onRead,enabled=enabled,modifier=Modifier.weight(1f).heightIn(min=58.dp).testTag("novel.detail.read"),colors=ButtonDefaults.buttonColors(containerColor=blue,contentColor=Color.White),contentPadding=PaddingValues(horizontal=8.dp)) {
-                Text("开始阅读",fontSize=17.sp,maxLines=1)
+                Text(if(mediaType==1)"开始收听" else if(mediaType==4)"开始观看" else "开始阅读",fontSize=17.sp,maxLines=1)
             }
         }
     }

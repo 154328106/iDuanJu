@@ -34,18 +34,18 @@ class SourceCompatibilityTest {
    for(url in listOf("http://example.org/x","https://u:p@example.org/x","https://127.0.0.1/x","https://example.org:8443/x"))assertTrue(runCatching{app.iduanju.plugin.PluginStore.checkedDownloadURL(url)}.isFailure)
    ui.setContent{IdjTheme(dark=false){NovelScreen({})}}
    val input=ui.onNode(hasSetTextAction())
-   input.performTextInput("""{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":1}""")
+   input.performTextInput("""{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":2}""")
    ui.onNode(hasText("导入书源") and hasClickAction()).performClick()
-   ui.waitUntil(10000){ui.onAllNodesWithText("暂不支持有声",substring=true).fetchSemanticsNodes().isNotEmpty()}
+   ui.waitUntil(10000){ui.onAllNodesWithText("暂不支持漫画",substring=true).fetchSemanticsNodes().isNotEmpty()}
    ui.onNodeWithTag("novel.import.sheet").assertIsDisplayed()
-   ui.onNode(hasText("暂不支持有声",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
+   ui.onNode(hasText("暂不支持漫画",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
    shotDevice("source-android-unsupported-audio.png")
-   input.performScrollTo().performTextClearance();input.performTextInput("""[{"sourceUrl":"https://compat-rss.invalid","ruleArticles":"a"}]""")
+   input.performScrollTo().performTextClearance();input.performTextInput("""{"sites":[],"spider":"https://example.org/spider.jar"}""")
    ui.onNode(hasText("导入书源") and hasClickAction()).performClick()
-   ui.waitUntil(10000){ui.onAllNodesWithText("暂不支持 Legado RSS",substring=true).fetchSemanticsNodes().isNotEmpty()}
+   ui.waitUntil(10000){ui.onAllNodesWithText("TVBox",substring=true).fetchSemanticsNodes().isNotEmpty()}
    ui.onNodeWithTag("novel.import.sheet").assertIsDisplayed()
-   ui.onNode(hasText("暂不支持 Legado RSS",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
-   shotDevice("source-android-unsupported-rss.png")
+   ui.onNode(hasText("TVBox",substring=true) and hasAnyAncestor(hasTestTag("novel.import.sheet"))).performScrollTo().assertIsDisplayed()
+   shotDevice("source-android-unsupported-tvbox.png")
   }finally{app.iduanju.ui.UiEvidence.page=old}
  }
 

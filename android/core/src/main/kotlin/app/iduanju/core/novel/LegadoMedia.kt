@@ -1,0 +1,42 @@
+/* Adapts legado-E model/webBook/BookContent.kt lines226-235 (same fixed SHA in
+ * UPSTREAM-PORT.md): audio/video results are URLs, NOT HTML-cleaned chapter text.
+ * Adds host URL/header projection for the existing restricted runtime and native player. GPL-3.0. */
+package app.iduanju.core.novel
+
+import app.iduanju.core.util.NetGuard
+import org.json.JSONObject
+import java.net.URI
+
+data class NovelMedia(val url:String,val headers:Map<String,String>,val sourceType:Int)
+object LegadoMedia {
+    fun checkedURL(raw:String):String {
+        val u=URI(raw);require(u.scheme in listOf("https","http")&&!u.host.isNullOrBlank()&&u.userInfo==null&&(u.port == -1 || u.port == (if(u.scheme=="https")443 else 80))){"媒体地址/端口或凭证不允许"}
+        require(!u.host.equals("localhost",true)&&!(if(NetGuard.isIPLiteral(u.host))NetGuard.isBlockedIP(u.host)else NetGuard.resolvesToBlocked(u.host))){"媒体地址指向内网"}
+        return u.toASCIIString()
+    }
+    fun resolve(source:NovelSource,chapter:NovelChapter,bookURL:String?=null,nextChapterURL:String?=null):NovelMedia=NovelScript.withBook(bookURL){ NovelScript.withChapter(chapter,nextChapterURL){
+        require(source.isMedia){"不是有声/视频书源"}
+        val rule=source.rules("ruleContent")
+        require(rule.optString("webJs").isBlank()){ "此媒体源依赖WebView webJs，尚未实现；不能假装已解析" }
+        val contentRule=rule.optString("content")
+        val raw=if(contentRule.isBlank())chapter.url else {
+            val response=NovelSources.page(chapter.url,source)
+            // Upstream intentionally does not run HTML text cleanup for audio/video.
+            NovelSources.ruleValue(NovelSources.document(response.text),contentRule,source,response.url)
+                .let{NovelSources.absolute(NovelSources.firstRequestURL(it),response.url)}
+        }
+        val pieces=NovelSources.firstRequestURL(raw).split(Regex(",\\s*(?=\\{)"),limit=2)
+        val options=if(pieces.size>1)JSONObject(pieces[1])else JSONObject()
+        require(options.optString("method","GET").equals("GET",true)){"媒体播放暂不支持POST，不会忽略请求方法"}
+        val url=checkedURL(NovelSources.absolute(pieces[0],source.id))
+        val headers=NovelSources.headers(source)
+        options.optJSONObject("headers")?.let{extra->for(k in extra.keys())headers.put(k,extra.get(k))}
+        val same=URI(url).host.equals(URI(source.id.substringBefore(',')).host,true)
+        val forbidden=setOf("host","connection","content-length","transfer-encoding","proxy-authorization")
+        val projected=headers.keys().asSequence().associateWith{headers.get(it).toString()}.filter { (k,v)->
+            require(k.none{it<=' '||it==':'}&&v.none{it=='\r'||it=='\n'||it=='\u0000'}){"媒体header含控制字符"}
+            k.lowercase() !in forbidden && (same || k.lowercase() !in setOf("authorization","cookie"))
+        }
+        NovelMedia(url,projected,source.json.optInt("bookSourceType"))
+    } }
+}

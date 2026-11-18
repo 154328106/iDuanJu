@@ -14,7 +14,7 @@ class LegadoRssPortTest {
   for(i in 0 until cases.length()){
    val c=cases.getJSONObject(i);val root=Files.createTempDirectory("rss-port").toFile();NovelSources.configureStorage(root)
    val source=NovelSources.import(c.getJSONObject("source").toString()).single();assertTrue(source.isRSS)
-   val requests=mutableListOf<String>();NovelSources.fixture={url->requests+=url;if(url.contains("/feed"))c.getString("body")else c.getString("detailBody")}
+   val requests=mutableListOf<String>();NovelSources.fixture={url->requests+=url;if(url.endsWith("article-api"))c.getString("apiBody")else if(url.contains("/feed"))c.getString("body")else c.getString("detailBody")}
    val cat=NovelSources.categories(source).single();val hits=NovelSources.search(source,"",category=cat)
    assertEquals(c.getJSONArray("expectedTitles").toList(),hits.map{it.name});assertEquals(c.getJSONArray("expectedLinks").toList(),hits.map{it.url})
    if(c.has("expectedImages"))assertEquals(c.getJSONArray("expectedImages").toList(),hits.map{it.cover})
@@ -39,4 +39,13 @@ class LegadoRssPortTest {
   val info=NovelSources.details(source,hits.first().url);val text=NovelSources.content(source,info.chapters.first());assertTrue(text.length>80)
   println("RSS_LIVE source=${source.id} count=${hits.size} first=${hits.first().name} chars=${text.length} readerConsumed=true")
  }
+ @Test fun livePersonalYckRssUpdateAndReader(){
+  val path=System.getenv("IDJ_PERSONAL_RSS_JSON");Assume.assumeTrue(System.getProperty("idj.live")=="rss"&&!path.isNullOrBlank())
+  val source=NovelSources.import(java.io.File(path!!).readText()).single();assertTrue(source.isRSS)
+  val category=NovelSources.categories(source).first();val first=NovelSources.search(source,"",category=category);assertTrue(first.isNotEmpty())
+  val detail=NovelSources.details(source,first.first().url);val text=NovelSources.content(source,detail.chapters.first());assertTrue(text.length>80)
+  val next=NovelSources.search(source,"",page=2,category=category);assertTrue(next.isNotEmpty());assertTrue(next.first().url!=first.first().url)
+  println("RSS_PERSONAL_LIVE source=${source.id} count=${first.size} next=${next.size} title=${first.first().name} chars=${text.length} readerConsumed=true")
+ }
+
 }

@@ -31,7 +31,7 @@
       "rulePubDate": "date",
       "ruleDescription": "summary",
       "ruleNextPage": "PAGE",
-      "ruleContent": "$.body"
+      "ruleContent": "@js:rssArticle.getTitle()+'\\n'+JSON.parse(java.ajax('https://example.org/article-api')).body"
     },
     "body": "{\"items\": [{\"title\": \"Old\", \"url\": \"/old\", \"summary\": \"old summary\", \"date\": \"2026-11-17\"}, {\"title\": \"New\", \"url\": \"/new\", \"summary\": \"new summary\", \"date\": \"2026-11-18\"}]}",
     "detailBody": "{\"body\":\"<p>Full custom article.</p>\"}",
@@ -43,6 +43,7 @@
       "https://rss.example.org/new",
       "https://rss.example.org/old"
     ],
-    "expectedText": "Full custom article."
+    "expectedText": "New\nOwned API full article body.",
+    "apiBody": "{\"body\": \"Owned API full article body.\"}"
   }
 ]

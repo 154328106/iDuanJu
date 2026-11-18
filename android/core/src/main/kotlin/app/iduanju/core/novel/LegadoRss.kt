@@ -13,7 +13,11 @@ import org.json.JSONObject
 object LegadoRss {
     private const val CACHE="__rssArticles"
     private fun state(source:NovelSource)=runCatching{JSONObject(NovelScript.storage["${source.id}|$CACHE"]?:"{}")}.getOrDefault(JSONObject())
-    private fun save(source:NovelSource,value:JSONObject)=NovelScript.withBook(null){NovelScript.setVariable(source.id,CACHE,value.toString())}
+    private fun save(source:NovelSource,value:JSONObject)=NovelScript.updateSourceState(source.id,CACHE){raw->
+        val old=runCatching{JSONObject(raw?:"{}").optJSONObject("articles")}.getOrNull()
+        value.optJSONObject("articles")?.let{incoming->for(k in incoming.keys())if(old?.optJSONObject(k)?.optBoolean("read")==true)incoming.getJSONObject(k).put("read",true)}
+        value.toString()
+    }
     fun categories(source:NovelSource):List<NovelCategory> {
         var str=source.json.optString("sortUrl")
         if(str.startsWith("@js:")||str.startsWith("<js>"))str=NovelScript(source,source.id).eval(str.removePrefix("@js:").removePrefix("<js>").removeSuffix("</js>"))?.toString().orEmpty()
@@ -71,8 +75,10 @@ object LegadoRss {
         val a=article(source,url)
         return NovelBookDetails(a.getString("title"),a.optString("pubDate"),NovelSources.cleanText(if(a.isNull("description"))"" else a.optString("description")),a.optString("image"),"RSS","",listOf(NovelChapter(a.getString("title"),url)))
     }
-    fun content(source:NovelSource,url:String):String {
-        val a=article(source,url);val rule=source.json.optString("ruleContent")
+    fun content(source:NovelSource,url:String):String =NovelScript.withBook(url){
+        val a=JSONObject(article(source,url).toString()).put("origin",source.json.optString("sourceUrl",source.id))
+        NovelScript.withRSSArticle(a){
+        val rule=source.json.optString("ruleContent")
         val inline=if(!a.isNull("content"))a.optString("content") else if(!a.isNull("description"))a.optString("description") else ""
         val raw=if(rule.isBlank()&&inline.isNotBlank())inline else {
             val response=NovelSources.page(url,source)
@@ -80,6 +86,6 @@ object LegadoRss {
         }
         val text=NovelSources.cleanText(raw);require(text.isNotBlank()){ "订阅正文为空" }
         val cache=state(source);cache.getJSONObject("articles").getJSONObject(url).put("read",true);save(source,cache)
-        return text
-    }
+        text
+    } }
 }

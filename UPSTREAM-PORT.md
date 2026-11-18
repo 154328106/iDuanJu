@@ -28,7 +28,7 @@ Unrelated third-party `modules/web` and assets have separate notices; they are n
 - Existing OkHttp Apache2, Jsoup MIT, Rhino MPL2 are reused, no new JS/native source engine.
 - iOS uses existing Foundation XML parser and existing sandbox engine/network controls.
 
-## Implemented slice (RSS, in progress validation)
+## Implemented RSS consumption slice
 RSS source import is a real source-family dispatch, not deleting an error message:
 sort/category -> fetch -> default XML/custom rules -> cached article detail -> single
 article TOC -> body extraction -> existing native reader. Update merges article cache,
@@ -40,11 +40,19 @@ iOS equivalent tests are added alongside the same cases. Controlled fixture test
 public-network tests are recorded separately. Public optional example: official NASA RSS;
 no private yck source export or prohibited source collection is committed.
 
-## Next contracts (not completed by import alone)
-- Audio/video source type1/4 media result must bypass HTML cleanup, then preserve request
-  headers/options and connect to actual native playback; catalog/detail/TOC remain common.
-- Broader parser/API gaps discovered by source tracing must receive deterministic fixtures.
-- Native Android/iOS UI and public yck RSS checks are still pending at this point; no claim
-  of native/public end-to-end success until real logs/screenshots exist.
-- TVBox/CatVod/JAR/Python are not Legado and are not silently enabled.
-- Existing private-network/credentials/CF/paywall/DRM boundaries remain in force.
+## Audio/video and script API port
+- `constant/BookSourceType.kt` is actually copied into `LegadoSourceType.kt` and used by production source dispatch (Android annotation removed, constants retained).
+- `model/webBook/BookContent.kt` lines226–235 raw/unescaped media-result branch adapted to Android `LegadoMedia.kt` and Swift `LegadoMedia.swift`: preserve URL ampersands/options, do not HTML-clean or cache media as chapter text.
+- `model/analyzeRule/AnalyzeRule.kt` lines828–843 bindings adapted in NovelScript/LegadoRule/LegadoCore. Nullable `chapter`, `title`, `nextChapterUrl`, `rssArticle`; public Kotlin-style chapter/article getters, chapter index and scoped state restoration. Arbitrary JVM reflection is still forbidden.
+- Common catalog/detail/TOC pipeline now dispatches type1 audio/type4 video into real Media3/AVPlayer views. Existing text filters/POST/prefetch pipelines retained. iOS text-novel visual style unchanged; media adds a separate sheet. iOS media shelf/download is honestly disabled (Android shelf playback works).
+- Android player uses a separate guarded OkHttp DNS/interceptor boundary. iOS player reuses existing LocalHLSProxy with an **opt-in route only**, an ephemeral isolated PluginNet cookie jar/domain policy, private-address/redirect checks on every manifest/key/segment/range and no unrelated ad/header/decryption transformations. iOS resolves same-host public media; undeclared cross-CDN resources fail closed. Credentialed iOS playback and unsupported steering/byte-range HLS extensions fail honestly instead of forwarding account cookies unsafely. Existing non-Legado playback routes are not changed in behavior.
+- Embeddable GPL/notice files included under STV/Resources/Licenses and Android copied license assets. Existing Media3 Apache2, Apple AVFoundation SDK and in-house proxy/PluginNet reused; no additional engine dependency.
+
+## Evidence and limits (updated as runs complete)
+- Android shared RSS/media/parser/filter JVM suites + full debug/instrumentation build passed; actual 5554 isolated QA app import→catalog→detail→TOC→RSS reader/audio/video public timeline advancing: 3/3 passed before final transport-only follow-ups.
+- iOS shared RSS/media 4 new unit tests + existing parser/filter 18 tests passed. Actual dedicated simulator three native UI flows passed, including source import into empty state and restart persistence. Guarded transport follow-up receives its own rerun; see final evidence summary.
+- NASA official public RSS actual HTTP directory/detail/body consumed on JVM; not merely import-only.
+- Personal yck RSS895 list and next-page update reached 200 on Mac. Its original daily.zhihu.com article URL currently returns a JavaScript shell (14 cleaned chars, generic Zhihu title), not a usable article; not declared reader success. The personal-only adaptation uses the same official free article API through ruleContent and rssArticle context; no private collection exported. BOX news-at host currently TLS EOF, not proved Cloudflare or site death. Final live retest recorded separately.
+- `shared/legado-port` fixtures are self-owned catalog/article responses; audio is MDN CC0 T-Rex and video official Mux Big Buck Bunny. Controlled catalog + public media playback is **not** a real yck media-source full-flow claim.
+- Type2 manga and type3 download-only sources, browser-sniffed `webJs`, TVBox/CatVod/JAR/Python and DRM/paywall/auth/challenge bypass are not enabled by this port. No arbitrary spider execution.
+- This is an implemented, tested vertical port, not all upstream API/Room/browser feature parity or a perfect compatibility guarantee. RSS cache is bounded200; RSS/novel identical source URL collisions and broader APIs still need dedicated follow-up before claiming full upstream parity.

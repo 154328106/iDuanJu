@@ -36,7 +36,10 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName(if (System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) "debug" else "distribution")
         }
-        debug { }
+        debug {
+            // Opt-in parallel QA install; never re-sign/uninstall or overwrite the owner's existing app.
+            if (providers.gradleProperty("idjIsolatedQa").orNull == "true") applicationIdSuffix = ".legadoport"
+        }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -50,7 +53,7 @@ val copyBundledPlugins by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/idj-assets/plugins"))
 }
 val copySharedLicenses by tasks.registering(Sync::class) {
-    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*", "Rhino-*") }
+    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*", "Rhino-*", "legado-E-*") }
     into(layout.buildDirectory.dir("generated/idj-assets/licenses"))
 }
 tasks.named("preBuild") { dependsOn(copyBundledPlugins, copySharedLicenses) }
@@ -83,3 +86,6 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
+
+// Same self-owned Legado port fixtures used by core JVM and iOS tests.
+android.sourceSets.getByName("androidTest").assets.srcDir("../../shared/legado-port")

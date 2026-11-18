@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 data class NovelSource(val json: JSONObject) {
     val id: String get() = json.optString("bookSourceUrl",json.optString("sourceUrl"))
     val isRSS:Boolean get() = json.optString("_idjSourceKind")=="rss" || (json.has("sourceUrl") && (!json.has("bookSourceUrl")||json.has("ruleArticles")||json.has("sortUrl")))
+    val isMedia:Boolean get() = !isRSS && json.optInt("bookSourceType",0) in listOf(LegadoSourceType.audio,LegadoSourceType.video)
     val name: String get() = json.optString("bookSourceName",json.optString("sourceName",id))
     val enabled: Boolean get() = json.optBoolean("enabled", true)
     fun rules(name: String): JSONObject = json.optJSONObject(name)
@@ -30,7 +31,7 @@ data class NovelCategory(val title: String, val url: String, val group: String =
     val id get() = "$selectionKey|$url|${action.orEmpty()}"
     val isControl get() = type != "url"
 }
-data class NovelChapter(val title: String, val url: String)
+data class NovelChapter(val title: String, val url: String, val index:Int=0)
 
 /** Text-source subset of Legado: CSS/Jsoup rules, simple JSON paths, GET/POST and discovery. */
 object NovelSources {
@@ -42,8 +43,8 @@ object NovelSources {
     @Volatile var requestObserver: ((method:String,url:String,body:String?) -> Unit)? = null
 
     data class ImportReport(val sources:List<NovelSource>,val unsupported:Int,val invalid:Int) {
-        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持有声、视频、漫画等非文本书源；不是坏源或网站失效" else
-            "已导入 ${sources.size} 个书源（含RSS）" + (if(unsupported>0) "；跳过 $unsupported 个不支持的非文本源（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
+        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持漫画/下载型书源；不是坏源或网站失效" else
+            "已导入 ${sources.size} 个书源（含RSS）" + (if(unsupported>0) "；跳过 $unsupported 个不支持的源类型（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
     }
     fun import(text:String):List<NovelSource> = importReport(text).sources
     fun importReport(text:String):ImportReport {
@@ -54,9 +55,9 @@ object NovelSources {
         rows.filter{NovelSource(it).isRSS}.forEach {
             it.put("_idjSourceKind","rss").put("bookSourceUrl",it.optString("sourceUrl")).put("bookSourceName",it.optString("sourceName",it.optString("sourceUrl")))
         }
-        val unsupported=rows.count{it.optInt("bookSourceType",0)!=0}
-        val valid=rows.filter{it.optInt("bookSourceType",0)==0&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
-        return ImportReport(valid,unsupported,array.length()-rows.count{it.optInt("bookSourceType",0)!=0||it.optString("bookSourceUrl").isNotBlank()})
+        val unsupported=rows.count{it.optInt("bookSourceType",0) !in listOf(0,1,4)}
+        val valid=rows.filter{it.optInt("bookSourceType",0) in listOf(0,1,4)&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
+        return ImportReport(valid,unsupported,array.length()-rows.count{it.optInt("bookSourceType",0) !in listOf(0,1,4)||it.optString("bookSourceUrl").isNotBlank()})
     }
 
     fun absolute(raw: String, base: String): String {
@@ -606,13 +607,14 @@ object NovelSources {
             val next = ruleValue(doc, rules.optString("nextTocUrl"),source,url)
             for(link in next.lines().filter{it.isNotBlank()}){val target=absolute(link,url);if(target !in seen && target !in queue)queue.add(target)}
         }
-        NovelBookDetails(name, author, intro, if (cover.isBlank()) "" else runCatching{absolute(cover, bookURL)}.getOrDefault(""), kind, latest, out.distinctBy { it.url })
+        NovelBookDetails(name, author, intro, if (cover.isBlank()) "" else runCatching{absolute(cover, bookURL)}.getOrDefault(""), kind, latest, out.distinctBy { it.url }.mapIndexed{i,ch->ch.copy(index=i)})
     }
 
     fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = details(source, bookURL).chapters
 
-    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) {
-        if(source.isRSS)return@withBook LegadoRss.content(source,chapter.url)
+    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) { NovelScript.withChapter(chapter,nextChapter) {
+        require(!source.isMedia){"媒体源应进入原生播放，不得当作文本缓存"}
+        if(source.isRSS)return@withChapter LegadoRss.content(source,chapter.url)
         val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>(); var imageOnly = false
         while (seen.size < 30 && seen.add(url)) {
             val doc = document(page(url, source).text)
@@ -629,7 +631,7 @@ object NovelSources {
         }
         require(text.isNotBlank()) { if(imageOnly) "本章是图片页，请换文字版书源" else "章节正文为空或书源规则不兼容" }
         text
-    }
+    } }
 
     fun cleanText(raw: String): String = Jsoup.parse(raw.replace(Regex("(?i)<br\\s*/?>|</p>|</div>"), "\n")).wholeText()
         .lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")

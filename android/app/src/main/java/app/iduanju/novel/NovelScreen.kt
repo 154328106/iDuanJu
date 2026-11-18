@@ -68,6 +68,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     var currentBook by remember { mutableStateOf<NovelHit?>(null) }
     var chapterIndex by remember { mutableIntStateOf(-1) }
     var text by remember { mutableStateOf("") }
+    var media by remember { mutableStateOf<app.iduanju.core.novel.NovelMedia?>(null) }
     var localBook by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -123,7 +124,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     fun addSources(raw: String) {
         val report = NovelSources.importReport(raw)
         val parsed = report.sources
-        require(parsed.isNotEmpty()) { if(report.unsupported>0)report.message else "没有可用的文本书源；仅支持 Legado 文本格式" }
+        require(parsed.isNotEmpty()) { if(report.unsupported>0)report.message else "没有可用的 Legado 文本/媒体/RSS 源" }
         for (s in parsed) { sources.removeAll { it.id == s.id }; sources.add(s) }
         saveSources(); selected = parsed.first().id; importResult = report.message
     }
@@ -133,6 +134,11 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
         val book = bookToSave ?: return
         val token = ++readGeneration
         prefetchJob?.cancel()
+        if(s.isMedia){
+            val resolved=withContext(Dispatchers.IO){LegadoMedia.resolve(s,chapter.copy(index=index),book.url,chapters.getOrNull(index+1)?.url)}
+            if(token==readGeneration){media=resolved;chapterIndex=index;localBook=false}
+            return
+        }
         val job=currentCoroutineContext()
         val toc=chapters.toList()
         val body=withContext(Dispatchers.IO){
@@ -280,6 +286,12 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     }
     fun back() { readGeneration++; prefetchJob?.cancel(); if (text.isNotEmpty()) text = "" else if (currentBook != null) { currentBook = null; chapters = emptyList() } else if(sourcePage) sourcePage=false else if(searching) { searching=false;hits=emptyList();category=null;more=false } else if(!shelf) shelf=true else onBack() }
     androidx.activity.compose.BackHandler(enabled=!embedded || !shelf || sourcePage || searching || currentBook!=null || text.isNotEmpty()) { back() }
+    media?.let { active ->
+        NovelMediaPlayer(active,chapters.getOrNull(chapterIndex)?.title.orEmpty(),{readGeneration++;media=null},
+            if(chapterIndex>0)({work{read(chapterIndex-1)}})else null,
+            if(chapterIndex+1<chapters.size)({work{read(chapterIndex+1)}})else null)
+        return
+    }
     val c=IdjThemeColors
     if (!sourcePage && text.isNotEmpty()) {
         val book=currentBook
@@ -314,12 +326,12 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
             downloadBusy,if(downloadTotal==0)0f else downloadDone.toFloat()/downloadTotal,
             onBack={back()},onSwitch={findSources()},
             onAdd={scope.launch{withContext(Dispatchers.IO){cache.saveBook(selected,book,chapters,bookDetails)};shelfRevision++}},
-            onDownload={scope.launch{withContext(Dispatchers.IO){cache.saveBook(selected,book,chapters,bookDetails)};shelfRevision++;showDownload=true}},
+            onDownload={if(source?.isMedia==true)error="媒体离线下载尚未实现，请使用原生播放" else scope.launch{withContext(Dispatchers.IO){cache.saveBook(selected,book,chapters,bookDetails)};shelfRevision++;showDownload=true}},
             onRead={work{withContext(Dispatchers.IO){cache.saveBook(selected,book,chapters,bookDetails)};shelfRevision++
                 val last=runCatching{JSONObject(prefs.getString("last","{}")!!)}.getOrDefault(JSONObject())
                 val index=if(last.optString("source")==selected && last.optString("url")==book.url)last.optInt("chapter",0).coerceIn(0,chapters.lastIndex) else 0
                 read(index)
-            }},onRetry={loadDetails()})
+            }},onRetry={loadDetails()},mediaType=source?.json?.optInt("bookSourceType")?:0)
     }
     if(!sourcePage && currentBook==null && text.isEmpty()) Column(Modifier.fillMaxSize().background(c.bg).then(if(embedded)Modifier else Modifier.statusBarsPadding())) {
         if(!shelf || searching || currentBook!=null || text.isNotEmpty()) DSNavBar(
@@ -454,7 +466,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
             Row(Modifier.fillMaxWidth().pressClick {filePicker.launch(arrayOf("application/json","text/*"))}.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){IconWell(Icons.Rounded.FolderOpen);Spacer(Modifier.width(12.dp));Text("从文件导入书源",color=c.text,fontSize=15.sp)}
             importResult?.let{DSStatus(it,StatusTone.Ok)}
             error?.let{Text(it,color=c.accentWarm,fontSize=13.sp)}
-            Text("支持 Legado 文本书源。书源与阅读记录仅保存在当前设备。",color=c.tertiary,fontSize=12.sp,lineHeight=19.sp)
+            Text("支持 Legado 文本、有声、视频书源与 RSS 订阅。书源与阅读记录仅保存在当前设备。",color=c.tertiary,fontSize=12.sp,lineHeight=19.sp)
             Spacer(Modifier.height(12.dp))
         }
     }
