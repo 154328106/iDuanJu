@@ -192,6 +192,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         while (isActive) {
             pos = player.currentPosition; dur = player.duration.coerceAtLeast(0); buffered = player.bufferedPosition
             playing = player.isPlaying
+            app.iduanju.ui.UiEvidence.playerPositionMs = pos; app.iduanju.ui.UiEvidence.playerPlaying = playing
             if (++tick % 20 == 0 && playing) detail?.let { d ->
                 d.episodes.getOrNull(epIndex)?.let { ep ->
                     lib.record(WatchProgress(seriesId, d.title, d.cover, epIndex, ep.ep, pos / 1000.0, dur / 1000.0, System.currentTimeMillis()))

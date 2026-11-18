@@ -98,12 +98,14 @@ class PluginStore(private val ctx: Context,
     fun removeSubscription(url: String) { subscriptions.removeAll { it.url == url }; saveSubs() }
 
     sealed class Pasted { data class Plugin(val rec: Installed) : Pasted(); data class Subscription(val sub: PluginSubscription) : Pasted() }
-    /** iOS PluginInstaller.interpret: an https manifest / .idjplugin / subscription URL, or a pasted bundle. Blocking. */
-    fun interpret(text: String, origin: String? = null): Pasted {
+    /** iOS PluginInstaller.interpret: an https manifest / .idjplugin / subscription / M3U URL, or a pasted bundle or M3U. Blocking. */
+    fun interpret(text: String, origin: String? = null, name: String? = null): Pasted {
         val t = text.trim()
+        if (M3UImport.isChannelList(t)) return Pasted.Plugin(installM3U(t, null, name, origin ?: "paste"))
         if (!t.startsWith("https://") && !t.startsWith("http://")) return Pasted.Plugin(install(t, origin ?: "paste"))
         val body = download(t)
-        val o = runCatching { JSONObject(body) }.getOrNull() ?: throw PluginException("E_INSTALL", "这个链接不是插件 manifest / .idjplugin / 订阅列表")
+        if (M3UImport.isChannelList(body)) return Pasted.Plugin(installM3U(body, t, name, origin ?: t))
+        val o = runCatching { JSONObject(body) }.getOrNull() ?: throw PluginException("E_INSTALL", "这个链接不是插件 manifest / .idjplugin / 订阅列表 / M3U")
         return when {
             PluginSubscription.isSubscription(o) -> Pasted.Subscription(addSubscription(t))
             o.has("manifest") -> Pasted.Plugin(install(body, origin ?: t))
@@ -115,6 +117,13 @@ class PluginStore(private val ctx: Context,
             }
             else -> throw PluginException("E_INSTALL", "这个链接不是插件 manifest / .idjplugin / 订阅列表")
         }
+    }
+
+    /** A reviewed M3U channel list becomes a static video plugin, under the same rules as scripts/source-compat/m3u_to_idj.py. */
+    private fun installM3U(text: String, url: String?, name: String?, origin: String): Installed {
+        val channels = try { M3UImport.parse(text, url) } catch (e: M3UImport.Rejected) { throw PluginException("E_INSTALL", "M3U 导入失败：${e.message}") }
+        val title = name?.trim()?.takeIf { it.isNotEmpty() } ?: url?.let(M3UImport::nameFromUrl) ?: "M3U 频道列表"
+        return install(M3UImport.bundle(channels, title, M3UImport.importId(url ?: text), author = "M3U 导入"), origin)
     }
 
     /** iOS bundles adult comic plugins under 推荐插件 (never auto-installed). */

@@ -63,7 +63,8 @@ fun PluginsScreen(onBack: () -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) run {
             val text = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: error("读取文件失败")
-            describe(store.interpret(text, "file"))
+            val name = ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            describe(store.interpret(text, "file", name?.substringBeforeLast('.')))
         }
     }
 
@@ -90,7 +91,7 @@ fun PluginsScreen(onBack: () -> Unit) {
         Group("添加插件", footer = "插件运行在 QuickJS 沙箱里，只能访问 manifest 声明的域名；未成年相关内容一律过滤。") {
             LinkRow("从网址添加", ProfileIcons.link) { dialog = "url" }
             RowDivider()
-            LinkRow("从文件导入（.idjplugin）", ProfileIcons.file) { picker.launch(arrayOf("*/*")) }
+            LinkRow("从文件导入（.idjplugin / .m3u）", ProfileIcons.file) { picker.launch(arrayOf("*/*")) }
             RowDivider()
             LinkRow("粘贴插件内容", ProfileIcons.paste) { dialog = "paste" }
             RowDivider()
@@ -221,7 +222,7 @@ private fun PasteDialog(onDismiss: () -> Unit, onDone: (String) -> Unit) {
         onDismissRequest = onDismiss, title = { Text("粘贴插件内容") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(text, { text = it }, label = { Text(".idjplugin 内容或 {\"manifest\":…}") }, maxLines = 8, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp))
+                OutlinedTextField(text, { text = it }, label = { Text(".idjplugin 内容、{\"manifest\":…} 或 M3U 频道列表") }, maxLines = 8, modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp))
                 TextAction("从剪贴板粘贴") { clip.getText()?.text?.let { text = it } }
             }
         },
