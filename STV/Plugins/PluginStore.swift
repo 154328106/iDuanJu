@@ -335,21 +335,36 @@ enum PluginInstaller {
         throw PluginError.install("插件跳转过多")
     }
 
-    /// Text pasted / scanned by the user: a manifest URL, a subscription URL, or a bundle JSON.
+    /// Text pasted / scanned by the user: a manifest URL, a subscription URL, an M3U URL, a bundle JSON or an M3U list.
     enum Pasted { case plugin(PendingInstall), subscription(String) }
     static func interpret(_ text: String) async throws -> Pasted {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if M3UImport.isChannelList(t) { return .plugin(try prepareM3U(t, url: nil, name: nil, origin: "粘贴")) }
         if t.hasPrefix("http://") || t.hasPrefix("https://") {
             let data = try await download(t, limit: 2 << 20)
+            if let list = String(data: data, encoding: .utf8), M3UImport.isChannelList(list) {
+                return .plugin(try prepareM3U(list, url: t, name: nil, origin: t))
+            }
             if let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if o["plugins"] != nil || o["cms"] != nil { return .subscription(t) }
                 if o["manifest"] != nil { return .plugin(try prepare(bundle: data, origin: t)) }
                 if o["schema"] != nil { return .plugin(try await prepare(manifestData: data, manifestURL: t, origin: t)) }
             }
-            throw PluginError.install("这个链接不是插件 manifest / .idjplugin / 订阅列表")
+            throw PluginError.install("这个链接不是插件 manifest / .idjplugin / 订阅列表 / M3U")
         }
         guard let data = t.data(using: .utf8) else { throw PluginError.install("无法识别") }
         return .plugin(try prepare(bundle: data, origin: "粘贴"))
+    }
+
+    /// A reviewed M3U channel list becomes a static video plugin, under the same rules as scripts/source-compat/m3u_to_idj.py.
+    static func prepareM3U(_ text: String, url: String?, name: String?, origin: String) throws -> PendingInstall {
+        let channels: [M3UImport.Channel]
+        do { channels = try M3UImport.parse(text, base: url) }
+        catch let e as M3UImport.Rejected { throw PluginError.install("M3U 导入失败：" + e.message) }
+        let given = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = !given.isEmpty ? given : (url.flatMap { M3UImport.name(fromURL: $0) } ?? "M3U 频道列表")
+        let data = try M3UImport.bundle(channels, name: title, id: M3UImport.importID(url ?? text), author: "M3U 导入")
+        return try prepare(bundle: data, origin: origin)
     }
 
     static func prepare(manifestURL: String, origin: String) async throws -> PendingInstall {

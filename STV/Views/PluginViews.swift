@@ -37,7 +37,7 @@ struct PluginsView: View {
                 }
                 group("添加插件") {
                     action("从网址添加", "link", id: "plugins.add.url") { urlText = ""; showURL = true }
-                    action("从文件导入（.idjplugin）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
+                    action("从文件导入（.idjplugin / .m3u）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
                     action("粘贴插件内容", "doc.on.clipboard", id: "plugins.add.paste") { showPaste = true }
                     action(busy == "update" ? "正在检查更新…" : "检查更新", "arrow.triangle.2.circlepath", id: "plugins.update") { await checkUpdates() }
                 }
@@ -105,7 +105,7 @@ struct PluginsView: View {
             TextField("https://…/manifest.json 或 .idjplugin", text: $urlText).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("取消", role: .cancel) {}
             Button("下一步") { interpret(urlText) }
-        } message: { Text("支持 manifest.json、.idjplugin 或订阅列表链接") }
+        } message: { Text("支持 manifest.json、.idjplugin、订阅列表或 M3U 链接") }
         .alert("订阅地址", isPresented: $showSub) {
             TextField("https://…/plugins.json", text: $subText).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("取消", role: .cancel) {}
@@ -118,6 +118,11 @@ struct PluginsView: View {
             let ok = url.startAccessingSecurityScopedResource()
             defer { if ok { url.stopAccessingSecurityScopedResource() } }
             guard let d = try? Data(contentsOf: url), d.count < 4 << 20 else { message = "无法读取文件"; return }
+            if let list = String(data: d, encoding: .utf8), M3UImport.isChannelList(list) {
+                let name = url.deletingPathExtension().lastPathComponent
+                prepare { try PluginInstaller.prepareM3U(list, url: nil, name: name, origin: "文件：" + url.lastPathComponent) }
+                return
+            }
             prepare { try PluginInstaller.prepare(bundle: d, origin: "文件：" + url.lastPathComponent) }
         }
         .accessibilityIdentifier("plugins.root")
@@ -334,7 +339,7 @@ private struct PasteSheet: View {
         NavigationStack {
             TextEditor(text: $text).font(.system(.footnote, design: .monospaced)).padding(8)
                 .overlay(alignment: .topLeading) {
-                    if text.isEmpty { Text("粘贴 .idjplugin 内容（JSON）或插件 / 订阅链接").foregroundStyle(.secondary).padding(14).allowsHitTesting(false) }
+                    if text.isEmpty { Text("粘贴 .idjplugin 内容（JSON）、M3U 频道列表或插件 / 订阅链接").foregroundStyle(.secondary).padding(14).allowsHitTesting(false) }
                 }
                 .navigationTitle("粘贴插件").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
