@@ -24,7 +24,10 @@ object LegadoMedia {
         val rule=source.rules("ruleContent")
         require(rule.optString("webJs").isBlank()){ "此媒体源依赖WebView webJs，尚未实现；不能假装已解析" }
         val contentRule=rule.optString("content")
-        val raw=if(contentRule.isBlank())chapter.url else {
+        // AnalyzeRule binds baseUrl to this request. An exact identity script with no
+        // login-check side effects needs no response body; never download a whole audiobook to return its URL.
+        val identity=source.json.optString("loginCheckJs").isBlank() && Regex("^(?:@js:\\s*baseUrl\\s*;?\\s*|<js>\\s*baseUrl\\s*;?\\s*</js>)$").matches(contentRule.trim())
+        val raw=if(contentRule.isBlank() || identity)chapter.url else {
             val response=NovelSources.page(chapter.url,source)
             // Upstream intentionally does not run HTML text cleanup for audio/video.
             NovelSources.ruleValue(NovelSources.document(response.text),contentRule,source,response.url)

@@ -121,13 +121,14 @@ internal class NovelScript(private val source: NovelSource, private val base: St
         val initialExploreInfo=exploreInfo(source.id)
         val globals = "var source=${source.json}; __wrapSource(source); var baseUrl=${JSONObject.quote(base)}; var key=${JSONObject.quote(key)}; var page=$page; var book={bookUrl:${JSONObject.quote(bookURL.get().orEmpty())},getVariable:function(k){return java.get(k||'__bookVariable')}}; var result=${if (nodeList != null) "__nodeList(" + JSONArray(nodeList.map { handle(it) }) + ")" else jsonValue(result)}; var src=${JSONObject.quote(srcText ?: src.get().orEmpty())};"
         // AnalyzeRule.evalJS upstream lines 837–840: nullable chapter/title/nextChapterUrl bindings.
+        val jsonCoercion=if(result is JSONObject || result is JSONArray) "if(result && typeof result==='object' && !Object.prototype.hasOwnProperty.call(result,'toString')){Object.defineProperty(result,'toString',{value:function(){return JSON.stringify(this)},enumerable:false,configurable:true})};\n" else ""
         val chapterData=currentChapter.get()?.toString()?:"null"
         val nextData=nextChapterURL.get()?.let{JSONObject.quote(it)}?:"null"
         val chapterContext="var chapter=$chapterData;var title=chapter?chapter.title:null;var nextChapterUrl=$nextData;if(chapter){chapter.getTitle=function(){return this.title||''};chapter.getUrl=function(){return this.url||''};chapter.getIndex=function(){return this.index||0};}"
 
         val rssData=currentRSSArticle.get()?.toString()?:"null"
         val rssContext="var rssArticle=$rssData;if(rssArticle){Object.keys(rssArticle).forEach(function(k){rssArticle['get'+k.charAt(0).toUpperCase()+k.slice(1)]=function(){return this[k]}});rssArticle.getVariable=function(k){return java.get(k||'__rssArticleVariable')}};"
-        cx.evaluateString(scope, globals + chapterContext + rssContext + "var infoMap=" + initialExploreInfo.toString() + ";Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});", "novel-context", 1, null)
+        cx.evaluateString(scope, globals + jsonCoercion + chapterContext + rssContext + "var infoMap=" + initialExploreInfo.toString() + ";Object.defineProperties(infoMap,{get:{value:function(k){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:null}},put:{value:function(k,v){var old=this[k];this[k]=String(v);return old==null?null:old}}});", "novel-context", 1, null)
         val lib = libraryCode(source.json.optString("jsLib"))
         if (lib.isNotBlank()) cx.evaluateString(scope, compatible(lib), "source-library", 1, null)
         val value = cx.evaluateString(scope, compatible(code), "source-rule", 1, null)

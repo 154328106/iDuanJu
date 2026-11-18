@@ -262,6 +262,11 @@ final class LegadoContext {
         // Legado's `src` is the analyzer content: the item for item rules, the raw body for page rules.
         if let cur = stack.last { b["src"] = LegadoAnalyzer.jsonable(cur.content) } else if let src { b["src"] = src }
         var code = code
+        // Upstream JSONPath JSON containers stringify as JSON, while keeping property access.
+        let isNodeList=(result as? [Any]).map{ !$0.isEmpty && $0.allSatisfy{$0 is LegadoNode} } ?? false
+        if result is [String:Any] || ((result is [Any]) && !isNodeList) {
+            code = "if(result && typeof result==='object' && !Object.prototype.hasOwnProperty.call(result,'toString')){Object.defineProperty(result,'toString',{value:function(){return JSON.stringify(this)},enumerable:false,configurable:true})};\n" + code
+        }
         if let list = result as? [Any], !list.isEmpty, list.allSatisfy({ $0 is LegadoNode }) {
             b["__resultNodes"] = list.map { handle($0 as! LegadoNode) }
             code = "result = __nodeList(__resultNodes);\n" + code

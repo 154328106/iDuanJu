@@ -63,4 +63,24 @@ final class LegadoMediaPortTests:XCTestCase {
   }
  }
 
+ func testIdentityMediaRulesNeverDownloadTheWholeRecording()throws{
+  let old=NetGuard.resolverOverride;NetGuard.resolverOverride={_ in ["8.8.8.8"]};defer{NetGuard.resolverOverride=old;LegadoHTTP.transport=nil}
+  LegadoHTTP.transport={_ in XCTFail("Identity must not fetch media bytes");throw LegadoError.rule("unexpected fetch")}
+  let url=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("shared/legado-port/media-identity-cases.json")
+  for c in try JSONSerialization.jsonObject(with:Data(contentsOf:url)) as! [[String:String]]{
+   let raw:[String:Any] = ["bookSourceUrl":"https://media.example.org","bookSourceType":1,"ruleContent":["content":c["rule"]!]]
+   let source=try LegadoSourceStore.parse(JSONSerialization.data(withJSONObject:raw)).first!
+   XCTAssertEqual(try LegadoMedia.resolve(source,chapter:LegadoChapter(title:"episode",url:c["url"]!)).url.absoluteString,c["url"])
+  }
+ }
+ func testJSONResultKeepsPropertiesAndUpstreamStringCoercion()throws{
+  let source=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://example.org"}"#.utf8)).first!
+  let url=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("shared/legado-port/json-result-coercion-cases.json")
+  for c in try JSONSerialization.jsonObject(with:Data(contentsOf:url)) as! [[String:Any]]{XCTAssertEqual(try LegadoContext(source:source).evalJS(c["script"] as! String,result:c["input"],baseURL:source.id) as? String,c["expected"] as? String)}
+ }
+ func testMissingNonVolumeChapterURLUsesTocBaseLikeUpstream()throws{
+  LegadoHTTP.transport={r in (Data("<h2>Original public podcast</h2>".utf8),HTTPURLResponse(url:r.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)}
+  let source=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://example.org","bookSourceType":1,"ruleToc":{"chapterList":"tag.h2","chapterName":"text"}}"#.utf8)).first!
+  XCTAssertEqual(try LegadoClient.toc(source,tocURL:"https://example.org/episode").first?.url,"https://example.org/episode")
+ }
 }

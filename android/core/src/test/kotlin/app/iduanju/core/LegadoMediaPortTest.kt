@@ -48,4 +48,18 @@ class LegadoMediaPortTest {
   }
  }
 
+ @Test fun identityMediaRulesNeverDownloadTheWholeRecording(){
+  NetGuard.resolverOverride={listOf("8.8.8.8")};NovelSources.fixture={error("Identity rule must not fetch media bytes")}
+  val cases=JSONArray(javaClass.getResource("/media-identity-cases.json")!!.readText())
+  for(i in 0 until cases.length()) { val c=cases.getJSONObject(i);val raw=JSONObject().put("bookSourceUrl","https://media.example.org").put("bookSourceType",1).put("ruleContent",JSONObject().put("content",c.getString("rule")));val s=NovelSources.import(raw.toString()).single();assertEquals(c.getString("url"),LegadoMedia.resolve(s,NovelChapter("episode",c.getString("url"))).url) }
+ }
+ @Test fun missingNonVolumeChapterURLUsesTocBaseLikeUpstream(){
+  NovelSources.fixture={"<h2>Original public podcast</h2>"}
+  val s=NovelSources.import("""{"bookSourceUrl":"https://example.org","bookSourceType":1,"ruleToc":{"chapterList":"tag.h2","chapterName":"text"}}""").single()
+  assertEquals("https://example.org/episode",NovelSources.details(s,"https://example.org/episode").chapters.single().url)
+ }
+ @Test fun jsonResultKeepsPropertiesAndUpstreamStringCoercion(){
+  val source=NovelSources.import("""{"bookSourceUrl":"https://example.org"}""").single();val cases=JSONArray(javaClass.getResource("/json-result-coercion-cases.json")!!.readText())
+  for(i in 0 until cases.length()){val c=cases.getJSONObject(i);assertEquals(c.getString("expected"),NovelScript(source,source.id).eval(c.getString("script"),c.get("input")))}
+ }
 }

@@ -25,7 +25,11 @@ struct LegadoMedia:Identifiable {
         guard (rules["webJs"] ?? "").isEmpty else{throw LegadoError.rule("媒体源依赖WebView webJs，尚未实现")}
         let ctx=LegadoContext(source:source);ctx.book=book;ctx.chapter=["title":chapter.title,"url":chapter.url,"index":chapter.index ?? 0];ctx.nextChapterURL=nextChapterURL
         let raw:String
-        if let rule=rules["content"],!rule.isEmpty {
+        // Exact AnalyzeRule baseUrl identity has no body dependency; retain requests if loginCheckJs has effects.
+        let contentRule=rules["content"] ?? ""
+        let identity=(source.loginCheckJs ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && contentRule.trimmingCharacters(in:.whitespacesAndNewlines).range(of:#"^(?:@js:\s*baseUrl\s*;?\s*|<js>\s*baseUrl\s*;?\s*</js>)$"#,options:.regularExpression) != nil
+        if !contentRule.isEmpty && !identity {
+            let rule=contentRule
             let response=try LegadoClient.loginChecked(source,try LegadoURL.request(chapter.url,ctx:ctx,base:source.id).fetch(),ctx:ctx)
             // Same fork contract as upstream: preserve ampersands and URL option JSON, no HTML formatter.
             let value=try LegadoAnalyzer(response.text,baseURL:response.url.absoluteString,ctx:ctx).string(rule)

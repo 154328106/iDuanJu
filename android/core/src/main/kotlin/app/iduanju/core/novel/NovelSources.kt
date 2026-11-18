@@ -603,7 +603,10 @@ object NovelSources {
             val doc = if (url == bookURL) detail else document(page(url, source).text)
             for (n in nodes(doc, rules.optString("chapterList"),source,url)) {
                 val title = ruleValue(n, rules.optString("chapterName"),source,url); val address = ruleValue(n, rules.optString("chapterUrl"),source,url)
-                if (title.isNotBlank() && address.isNotBlank()) out += NovelChapter(title, absolute(address, url))
+                // Legado-E BookChapterList.kt:258-273 falls back to the TOC base for non-volume entries.
+                val volumeRule=rules.optString("isVolume")
+                val isVolume=volumeRule.isNotBlank() && ruleValue(n,volumeRule,source,url).lowercase() in setOf("true","1")
+                if (title.isNotBlank() && (address.isNotBlank() || !isVolume)) out += NovelChapter(title, absolute(address.ifBlank{url}, url))
             }
             val next = ruleValue(doc, rules.optString("nextTocUrl"),source,url)
             for(link in next.lines().filter{it.isNotBlank()}){val target=absolute(link,url);if(target !in seen && target !in queue)queue.add(target)}

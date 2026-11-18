@@ -1,0 +1,10 @@
+[
+  {
+    "rule": "@js:baseUrl",
+    "url": "https://media.example.org/public-recording.m4a"
+  },
+  {
+    "rule": "<js> baseUrl; </js>",
+    "url": "https://media.example.org/public-recording.m4a"
+  }
+]
