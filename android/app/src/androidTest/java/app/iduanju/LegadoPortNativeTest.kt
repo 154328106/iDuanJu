@@ -34,7 +34,8 @@ class LegadoPortNativeTest {
    ui.onNodeWithText("排行榜").performClick()
    ui.waitUntil(20000){ui.onAllNodesWithText(actualTitle,substring=false).fetchSemanticsNodes().isNotEmpty()}
    shot("port-android-$folder-catalog.png")
-   ui.onAllNodesWithText(actualTitle,substring=false).onFirst().performClick()
+   // Public demo source and book deliberately share a title; first match is the source picker.
+   ui.onAllNodesWithText(actualTitle,substring=false).onLast().performClick()
    ui.waitUntil(20000){runCatching{ui.onNodeWithTag("novel.detail.read").assertIsEnabled();true}.getOrDefault(false)}
    shot("port-android-$folder-detail.png");ui.onNodeWithTag("novel.detail.read").performClick()
    if(media){
