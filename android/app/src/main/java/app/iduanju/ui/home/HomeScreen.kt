@@ -394,8 +394,10 @@ private fun HeroSkeleton() {
 private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setIndex: (Int) -> Unit, onOpen: (String) -> Unit) {
     val pager = rememberPagerState { picks.size }
     LaunchedEffect(pager.currentPage) { setIndex(pager.currentPage) }
-    LaunchedEffect(pager.currentPage, picks.size) {
-        if (picks.size > 1) { delay(6000); pager.animateScrollToPage((pager.currentPage + 1) % picks.size) }
+    // Keyed on settledPage: currentPage flips halfway through the animation, which would restart this
+    // effect and cancel the scroll, leaving the hero stuck between two pages.
+    LaunchedEffect(pager.settledPage, picks.size) {
+        if (picks.size > 1) { delay(6000); if (!pager.isScrollInProgress) pager.animateScrollToPage((pager.settledPage + 1) % picks.size) }
     }
     val cur = picks.getOrNull(index)
     val density = androidx.compose.ui.platform.LocalDensity.current
