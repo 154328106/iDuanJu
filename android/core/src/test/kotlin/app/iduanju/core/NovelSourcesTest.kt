@@ -10,7 +10,8 @@ class NovelSourcesTest {
         val result=NovelSources.importReport("""[{"bookSourceUrl":"https://example.org","bookSourceType":1},{"bookSourceUrl":"https://text.example.org","bookSourceType":0}]""")
         assertEquals(1,result.sources.size);assertEquals(1,result.unsupported);assertTrue(result.message.contains("不是坏源"))
         assertTrue(NovelSources.importReport("""{"bookSourceUrl":"https://example.org","bookSourceType":4}""").sources.isEmpty())
-        for(raw in listOf("""[{"sourceUrl":"https://example.org","ruleArticles":"a"}]""","""{"sites":[],"spider":"x.jar"}""")) {
+        assertTrue(NovelSources.importReport("""[{"sourceUrl":"https://example.org","ruleArticles":"a"}]""").sources.single().isRSS)
+        for(raw in listOf("""{"sites":[],"spider":"x.jar"}""")) {
             try {NovelSources.importReport(raw);fail("unsupported format accepted")}catch(e:IllegalArgumentException){assertTrue(e.message.orEmpty().contains("不是坏源"))}
         }
     }

@@ -14,8 +14,9 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class NovelSource(val json: JSONObject) {
-    val id: String get() = json.optString("bookSourceUrl")
-    val name: String get() = json.optString("bookSourceName", id)
+    val id: String get() = json.optString("bookSourceUrl",json.optString("sourceUrl"))
+    val isRSS:Boolean get() = json.optString("_idjSourceKind")=="rss" || (json.has("sourceUrl") && (!json.has("bookSourceUrl")||json.has("ruleArticles")||json.has("sortUrl")))
+    val name: String get() = json.optString("bookSourceName",json.optString("sourceName",id))
     val enabled: Boolean get() = json.optBoolean("enabled", true)
     fun rules(name: String): JSONObject = json.optJSONObject(name)
         ?: runCatching { JSONObject(json.optString(name)) }.getOrDefault(JSONObject())
@@ -42,7 +43,7 @@ object NovelSources {
 
     data class ImportReport(val sources:List<NovelSource>,val unsupported:Int,val invalid:Int) {
         val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持有声、视频、漫画等非文本书源；不是坏源或网站失效" else
-            "已导入 ${sources.size} 个文本书源" + (if(unsupported>0) "；跳过 $unsupported 个不支持的非文本源（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
+            "已导入 ${sources.size} 个书源（含RSS）" + (if(unsupported>0) "；跳过 $unsupported 个不支持的非文本源（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
     }
     fun import(text:String):List<NovelSource> = importReport(text).sources
     fun importReport(text:String):ImportReport {
@@ -50,7 +51,9 @@ object NovelSources {
         val array=if(trimmed.startsWith("["))JSONArray(trimmed)else JSONArray().put(JSONObject(trimmed))
         val rows=(0 until array.length()).mapNotNull{array.optJSONObject(it)}
         require(rows.none{it.has("sites")||it.has("spider")||it.has("lives")}){"这是 TVBox 配置，小说导入器不支持；不是坏源"}
-        require(rows.none{it.has("sourceUrl")&&(it.has("ruleArticles")||it.has("sortUrl"))}){"暂不支持 Legado RSS 订阅源运行时；不是坏源，请勿当作文本书源导入"}
+        rows.filter{NovelSource(it).isRSS}.forEach {
+            it.put("_idjSourceKind","rss").put("bookSourceUrl",it.optString("sourceUrl")).put("bookSourceName",it.optString("sourceName",it.optString("sourceUrl")))
+        }
         val unsupported=rows.count{it.optInt("bookSourceType",0)!=0}
         val valid=rows.filter{it.optInt("bookSourceType",0)==0&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
         return ImportReport(valid,unsupported,array.length()-rows.count{it.optInt("bookSourceType",0)!=0||it.optString("bookSourceUrl").isNotBlank()})
@@ -196,7 +199,7 @@ object NovelSources {
         return try { decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString() } catch (_: java.nio.charset.CharacterCodingException) { String(bytes, java.nio.charset.Charset.forName("GB18030")) }
     }
 
-    fun categories(source: NovelSource): List<NovelCategory> = categories(source,0)
+    fun categories(source: NovelSource): List<NovelCategory> = if(source.isRSS)LegadoRss.categories(source)else categories(source,0)
     private fun categories(source: NovelSource,repairPass:Int): List<NovelCategory> {
         var raw = source.json.optString("exploreUrl").trim()
         if (raw.isEmpty()) return emptyList()
@@ -506,7 +509,7 @@ object NovelSources {
         return text.trim()
     }
 
-    private fun document(text: String): Any = when {
+    internal fun document(text: String): Any = when {
         text.trimStart().startsWith('{') -> JSONObject(text)
         text.trimStart().startsWith('[') -> JSONArray(text)
         Regex("<[A-Za-z!/]").containsMatchIn(text) -> Jsoup.parse(text)
@@ -563,6 +566,7 @@ object NovelSources {
     internal fun firstLine(text: String) = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
 
     fun search(source: NovelSource, key: String, page: Int = 1, category: NovelCategory? = null): List<NovelHit> {
+        if(source.isRSS)return LegadoRss.list(source,key,page,category)
         val raw = category?.url ?: source.json.optString("searchUrl")
         require(raw.isNotBlank()) { "书源没有搜索地址" }
         val response = page(raw, source, key, page)
@@ -581,6 +585,7 @@ object NovelSources {
     }
 
     fun details(source: NovelSource, bookURL: String): NovelBookDetails = NovelScript.withBook(bookURL) {
+        if(source.isRSS)return@withBook LegadoRss.details(source,bookURL)
         var detail:Any = document(page(bookURL, source).text)
         val info=source.rules("ruleBookInfo")
         if(info.optString("init").isNotBlank()) detail=nodes(detail,info.getString("init"),source,bookURL).firstOrNull() ?: detail
@@ -607,6 +612,7 @@ object NovelSources {
     fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = details(source, bookURL).chapters
 
     fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) {
+        if(source.isRSS)return@withBook LegadoRss.content(source,chapter.url)
         val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>(); var imageOnly = false
         while (seen.size < 30 && seen.add(url)) {
             val doc = document(page(url, source).text)
