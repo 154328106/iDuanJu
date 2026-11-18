@@ -158,7 +158,7 @@ import XCTest
         defer{LegadoHTTP.transport=nil;store.remove(book);LegadoSourceStore.shared.remove([source.id])}
         LegadoHTTP.transport={req in (Data("<body>fixture</body>".utf8),HTTPURLResponse(url:req.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)}
         try await NovelWebLoader.shared.load(book,1)
-        XCTAssertEqual(store.chapterText(book,1),"1:chapter1:"+toc[2].url)
+        XCTAssertEqual(store.chapterText(book,1),"chapter1\n1:chapter1:"+toc[2].url)
     }
 
 }
