@@ -64,6 +64,8 @@ final class LegadoContext {
     /// Raw body of the page being parsed (Legado's JS `src`).
     var src: String?
     var chapter: [String: Any]?
+    var nextChapterURL:String?
+    var rssArticle:[String:Any]?
     var key: String?
     var page: Int?
     var log: [String] = []
@@ -266,7 +268,10 @@ final class LegadoContext {
         }
         if let key { b["key"] = key }
         if let page { b["page"] = page }
-        if let chapter { b["chapter"] = chapter; b["title"] = chapter["title"] ?? "" }
+        b["rssArticle"] = rssArticle.map{$0 as Any} ?? NSNull()
+        b["nextChapterUrl"] = nextChapterURL.map{$0 as Any} ?? NSNull()
+        b["chapter"] = chapter.map{$0 as Any} ?? NSNull()
+        b["title"] = chapter?["title"] ?? NSNull()
         for (k, v) in extra { b[k] = v }
         return try js.eval(code, b)
     }

@@ -184,6 +184,8 @@ final class PluginNet: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     }
 
     deinit { session.invalidateAndCancel() }
+    /// Owning transient media route ended: stop in-flight network and release URLSession's delegate retain.
+    func cancel() { session.invalidateAndCancel() }
 
     /// Throws E_PERMISSION when the URL is not reachable for this plugin.
     func check(_ url: URL) throws {

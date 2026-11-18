@@ -217,7 +217,8 @@ struct NovelHomeView: View {
                 Thread.sleep(forTimeInterval: 0.2)
                 return (d, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!)
             }
-            if let sd = FileManager.default.contents(atPath: dir + "/sources.json"), let list = try? LegadoSourceStore.parse(sd) {
+            if ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE_IMPORT"] != "0",
+            let sd = FileManager.default.contents(atPath: dir + "/sources.json"), let list = try? LegadoSourceStore.parse(sd) {
                 // Only the fixture sources (a previous run may have imported a big collection).
                 LegadoSourceStore.shared.remove(Set(LegadoSourceStore.shared.sources.map(\.id)))
                 LegadoSourceStore.shared.add(list)

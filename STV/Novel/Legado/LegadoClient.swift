@@ -26,6 +26,7 @@ struct LegadoBookInfo: Hashable {
 struct LegadoChapter: Codable, Hashable {
     var title: String
     var url: String
+    var index: Int? = nil
 }
 
 /// Chapter text cleanup: HTML → paragraphs.
@@ -67,7 +68,8 @@ enum LegadoClient {
     }
 
     static func exploreCategories(_ s: LegadoSource) throws -> [ExploreCategory] {
-        try exploreCategories(s, repairPass: 0)
+        if s.isRSS { return try LegadoRSS.categories(s) }
+        return try exploreCategories(s, repairPass: 0)
     }
     private static func exploreCategories(_ s: LegadoSource, repairPass: Int) throws -> [ExploreCategory] {
         guard var raw = s.exploreUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
@@ -201,6 +203,7 @@ enum LegadoClient {
     }
 
     static func explore(_ s: LegadoSource, category: ExploreCategory, page: Int = 1) throws -> [LegadoSearchItem] {
+        if s.isRSS { return try LegadoRSS.list(s, url:category.url, key:"", page:page) }
         var source = s
         source.searchUrl = category.url
         source.ruleSearch = (s.ruleSearch ?? [:]).merging((s.ruleExplore ?? [:]).filter { !$0.value.isEmpty }) { _, new in new }
@@ -240,6 +243,7 @@ enum LegadoClient {
     }
 
     static func search(_ s: LegadoSource, key: String, page: Int = 1, allowDetailFallback: Bool = true) throws -> [LegadoSearchItem] {
+        if s.isRSS { return try LegadoRSS.list(s, url:s.searchUrl, key:key, page:page) }
         let ctx = LegadoContext(source: s)
         ctx.key = key
         ctx.page = page
@@ -276,6 +280,7 @@ enum LegadoClient {
     }
 
     static func info(_ s: LegadoSource, bookURL: String) throws -> LegadoBookInfo {
+        if s.isRSS { return try LegadoRSS.info(s,url:bookURL) }
         let ctx = LegadoContext(source: s)
         ctx.book = ["bookUrl": bookURL]
         let r = try LegadoURL.request(bookURL, ctx: ctx, base: s.bookSourceUrl)
@@ -300,6 +305,7 @@ enum LegadoClient {
 
     /// Chapter list, following `nextTocUrl` (up to 100 pages). A `-` before `chapterList` reverses it.
     static func toc(_ s: LegadoSource, tocURL: String, book: [String: Any] = [:]) throws -> [LegadoChapter] {
+        if s.isRSS { return [LegadoChapter(title:try LegadoRSS.info(s,url:tocURL).name,url:tocURL)] }
         let ctx = LegadoContext(source: s)
         ctx.book = book
         let rules = s.ruleToc ?? [:]
@@ -320,7 +326,7 @@ enum LegadoClient {
                 let title = ((try? a.string(rules["chapterName"] ?? "")) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let cu = (try? a.string(rules["chapterUrl"] ?? "")) ?? ""
                 guard !title.isEmpty else { continue }
-                out.append(LegadoChapter(title: title, url: cu.isEmpty ? base : LegadoURL.absolute(cu, base: base)))
+                out.append(LegadoChapter(title: title, url: cu.isEmpty ? base : LegadoURL.absolute(cu, base: base),index:out.count))
             }
             if let nr = rules["nextTocUrl"], !nr.isEmpty {
                 for n in (try? page.strings(nr)) ?? [] {
@@ -334,9 +340,12 @@ enum LegadoClient {
 
     /// Chapter text, following `nextContentUrl` until it reaches the next chapter (up to 30 pages).
     static func content(_ s: LegadoSource, chapter: LegadoChapter, nextChapterURL: String?, book: [String: Any] = [:]) throws -> String {
+        if s.isMedia { throw LegadoError.rule("媒体源必须进入原生播放，不能当作文本缓存") }
+        if s.isRSS { return try LegadoRSS.content(s,url:chapter.url) }
         let ctx = LegadoContext(source: s)
         ctx.book = book
-        ctx.chapter = ["title": chapter.title, "url": chapter.url]
+        ctx.chapter = ["title": chapter.title, "url": chapter.url, "index": chapter.index ?? 0]
+        ctx.nextChapterURL=nextChapterURL
         let rules = s.ruleContent ?? [:]
         var parts: [String] = []
         var url: String? = chapter.url

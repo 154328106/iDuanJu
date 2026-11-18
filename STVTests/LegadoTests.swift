@@ -312,7 +312,7 @@ final class LegadoTests: XCTestCase {
                                     XCTAssertEqual(list.map(\.bookSourceName), ["A", "听书"], "broken entries skipped")
                                     XCTAssertEqual(list[0].ruleSearch?["checkKeyWord"], "123", "non-string rule values kept as text")
                                     XCTAssertTrue(list[0].supported)
-                                    XCTAssertFalse(list[1].supported, "audio sources not supported")
+                                    XCTAssertTrue(list[1].supported, "audio sources dispatch to native media, not the text cache")
                                 }
 
                                 /// Rhino `Packages.*` shim and Legado crypto helpers (as used by API sources such as 七猫).
@@ -419,12 +419,13 @@ final class RealRankRegressionTests: XCTestCase {
     override func tearDown() { LegadoHTTP.transport = nil }
     /// Multiline request options are part of book identity, not a list of links.
     func testUnsupportedFormatsAreNotBadSources() throws {
-        for kind in [1,2,4] {
+        for kind in [2,3] {
             let raw="{\"bookSourceUrl\":\"https://example.org\",\"bookSourceType\":\(kind),\"exploreUrl\":\"/catalog\"}"
             let source=try XCTUnwrap(LegadoSourceStore.parse(Data(raw.utf8)).first)
             XCTAssertFalse(source.supported)
         }
-        for raw in [#"[{"sourceUrl":"https://example.org","ruleArticles":"a"}]"#,#"{"sites":[],"spider":"x.jar"}"#] {
+        XCTAssertTrue(try XCTUnwrap(LegadoSourceStore.parse(Data(#"[{"sourceUrl":"https://example.org","ruleArticles":"a"}]"#.utf8)).first).isRSS)
+        for raw in [#"{"sites":[],"spider":"x.jar"}"#] {
             XCTAssertThrowsError(try LegadoSourceStore.parse(Data(raw.utf8))) { error in
                 XCTAssertTrue(error.localizedDescription.contains("不是坏源"))
             }

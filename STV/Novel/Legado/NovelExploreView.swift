@@ -19,7 +19,7 @@ struct NovelExploreView: View {
     @State private var generation = UUID()
     @State private var controlHeight: CGFloat = 0
     private let accent = STVTheme.accent
-    private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && ($0.bookSourceType ?? 0) == 0 && !($0.exploreUrl ?? "").isEmpty } }
+    private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && $0.supported && ($0.isRSS || !($0.exploreUrl ?? "").isEmpty) } }
     private var groups: [String] { categories.reduce(into: [String]()) { if !$0.contains($1.group) { $0.append($1.group) } } }
 
     @State private var searching = false

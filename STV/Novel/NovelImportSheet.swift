@@ -126,8 +126,8 @@ struct NovelImportSheet: View {
             let r = try f()
             let allUnsupported = r.unsupported > 0 && r.unsupported == r.added + r.updated
             result = Result(ok: !allUnsupported, title: allUnsupported ? "当前书源类型不支持" : "新增 \(r.added) 个，更新 \(r.updated) 个",
-                            detail: r.unsupported > 0 ? "其中 \(r.unsupported) 个类型/规则暂不支持，不会启用。有声、视频、漫画和 RSS 运行时尚未实现；不表示坏源或网站失效。" : nil)
-        } catch { result = Result(ok: false, title: "导入失败", detail: (error as? LegadoSourceImportError)?.localizedDescription ?? "不是有效的文本书源 JSON；当前不支持有声/视频/RSS 运行时") }
+                            detail: r.unsupported > 0 ? "其中 \(r.unsupported) 个类型/规则暂不支持，不会启用。漫画/仅下载类型或所需规则尚未实现；文本、有声、视频和 RSS 按各自运行时处理，不表示网站失效。" : nil)
+        } catch { result = Result(ok: false, title: "导入失败", detail: (error as? LegadoSourceImportError)?.localizedDescription ?? "不是有效的 Legado 文本/媒体/RSS 源 JSON") }
     }
 
     private func importClipboard() {

@@ -82,7 +82,13 @@ object LegadoRss {
         val inline=if(!a.isNull("content"))a.optString("content") else if(!a.isNull("description"))a.optString("description") else ""
         val raw=if(rule.isBlank()&&inline.isNotBlank())inline else {
             val response=NovelSources.page(url,source)
-            if(rule.isBlank())response.text else NovelSources.ruleValue(NovelSources.document(response.text),rule,source,response.url)
+            if(rule.isBlank()){
+                if(Regex("(?i)<(?:!doctype|html|body)\\b").containsMatchIn(response.text)){
+                    val body=org.jsoup.Jsoup.parse(response.text).body();body.select("script,style,noscript").remove()
+                    require(body.text().isNotBlank()){"订阅页面仅 JavaScript 外壳，需适配 ruleContent；未提取到文章正文"}
+                }
+                response.text
+            } else NovelSources.ruleValue(NovelSources.document(response.text),rule,source,response.url)
         }
         val text=NovelSources.cleanText(raw);require(text.isNotBlank()){ "订阅正文为空" }
         val cache=state(source);cache.getJSONObject("articles").getJSONObject(url).put("read",true);save(source,cache)

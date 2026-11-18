@@ -48,4 +48,12 @@ class LegadoRssPortTest {
   println("RSS_PERSONAL_LIVE source=${source.id} count=${first.size} next=${next.size} title=${first.first().name} chars=${text.length} readerConsumed=true")
  }
 
+ @Test fun javascriptShellDoesNotMasqueradeAsReadArticle(){
+  val c=JSONObject(javaClass.getResource("/rss-shell-case.json")!!.readText());val s=NovelSources.import(c.getJSONObject("source").toString()).single()
+  NovelSources.fixture={url->if(url.endsWith("feed"))c.getString("body")else c.getString("detailBody")}
+  val hit=NovelSources.search(s,"",category=NovelSources.categories(s).first()).single()
+  val failure=runCatching{NovelSources.content(s,NovelChapter(hit.name,hit.url))}.exceptionOrNull()
+  assertTrue(failure?.message.orEmpty().contains("JavaScript"));assertFalse(LegadoRss.article(s,hit.url).getBoolean("read"))
+ }
+
 }

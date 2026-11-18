@@ -27,7 +27,7 @@ final class NovelUITests: XCTestCase {
             XCTAssertEqual(field.value as? String,raw)
             field.typeText("\n")
         }
-        input(#"{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":1,"exploreUrl":"/catalog"}"#)
+        input(#"{"bookSourceUrl":"https://compat-audio.invalid","bookSourceType":2,"exploreUrl":"/catalog"}"#)
         let audio=app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","当前书源类型不支持")).firstMatch
         let shown=audio.waitForExistence(timeout:10)
         if !shown,let dir=ProcessInfo.processInfo.environment["STV_SHOT_DIR"] {
@@ -37,9 +37,9 @@ final class NovelUITests: XCTestCase {
         XCTAssertTrue(shown)
         app.swipeUp();shot("ios-unsupported-audio-import")
         app.terminate()
-        input(#"[{"sourceUrl":"https://compat-rss.invalid","ruleArticles":"a"}]"#)
-        XCTAssertTrue(app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","暂不支持 Legado RSS")).firstMatch.waitForExistence(timeout:10))
-        app.swipeUp();shot("ios-unsupported-rss-import")
+        input(#"{"sites":[],"spider":"https://example.org/spider.jar"}"#)
+        XCTAssertTrue(app.descendants(matching:.any).matching(NSPredicate(format:"label CONTAINS %@","TVBox")).firstMatch.waitForExistence(timeout:10))
+        app.swipeUp();shot("ios-unsupported-tvbox-import")
     }
 
     func testReadTurnPagesAndJumpChapter() {

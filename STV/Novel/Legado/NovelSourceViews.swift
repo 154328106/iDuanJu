@@ -117,7 +117,7 @@ struct NovelSourcesView: View {
 
     private func subtitle(_ s: LegadoSource) -> String {
         let group = (s.bookSourceGroup ?? "").isEmpty ? "综合" : s.bookSourceGroup!
-        if !s.supported { return group + " · " + ((s.bookSourceType ?? 0) != 0 ? "非文本书源" : "没有搜索 / 发现地址") }
+        if !s.supported { return group + " · " + ([2,3].contains(s.bookSourceType ?? 0) ? "暂未实现的源类型" : "没有搜索 / 发现地址") }
         return [group, URL(string: s.bookSourceUrl)?.host].compactMap { $0 }.joined(separator: " · ")
     }
 }
@@ -374,6 +374,7 @@ struct NovelWebDetailView: View {
     @State private var alternatives: [LegadoSearchItem] = []
     @State private var findingSources = false
     @State private var downloadBook: NovelBook?
+    @State private var showingMedia=false
     @State private var sourceTask: Task<Void, Never>?
     @State private var loadGeneration = UUID()
     private var allItems: [LegadoSearchItem] { items + alternatives.filter { candidate in !items.contains { $0.id == candidate.id } } }
@@ -426,13 +427,13 @@ struct NovelWebDetailView: View {
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 12) {
                 Button { read(open: false) } label: { Text(onShelf == nil ? "加入书架" : "已在书架").frame(maxWidth: .infinity, minHeight: 44) }
-                    .buttonStyle(.bordered).disabled(toc == nil || onShelf != nil)
+                    .buttonStyle(.bordered).disabled(toc == nil || onShelf != nil || source?.isMedia == true)
                     .accessibilityIdentifier("detail.add")
                 Button {
                     downloadBook = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
                 } label: { Label("下载", systemImage: "arrow.down.circle").frame(minHeight: 44) }
-                    .buttonStyle(.bordered).disabled(toc?.isEmpty != false && onShelf == nil)
-                Button { read(open: true) } label: { Text("开始阅读").frame(maxWidth: .infinity, minHeight: 44) }
+                    .buttonStyle(.bordered).disabled((toc?.isEmpty != false && onShelf == nil) || source?.isMedia == true)
+                Button { read(open: true) } label: { Text(source?.bookSourceType == 1 ? "开始收听" : source?.bookSourceType == 4 ? "开始观看" : "开始阅读").frame(maxWidth: .infinity, minHeight: 44) }
                     .buttonStyle(.borderedProminent).disabled(toc?.isEmpty != false && onShelf == nil)
                     .accessibilityIdentifier("detail.read")
             }
@@ -444,6 +445,7 @@ struct NovelWebDetailView: View {
         .task(id: pick) { await load() }
         .onDisappear { sourceTask?.cancel() }
         .sheet(item: $downloadBook) { book in NovelDownloadView(book: book) }
+        .sheet(isPresented:$showingMedia){if let source{NovelMediaPlayer(source:source,chapters:toc ?? [],book:["name":info?.name ?? item.name,"author":info?.author ?? item.author,"bookUrl":item.bookURL])}}
     }
 
     private func findSources() async {
@@ -489,6 +491,7 @@ struct NovelWebDetailView: View {
     }
 
     private func read(open: Bool) {
+        if source?.isMedia == true {if open{showingMedia=true};return}
         let b = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
         if open {
             if let old = resumeFrom, old.id != b.id { store.transferProgress(from: old, to: b) }

@@ -605,6 +605,8 @@ src.getLoginHeaderMap = () => __jmap(parseObj(call('loginHeader', null)));
         // `book` / `source` / `chapter` objects also answer Legado's getter style (book.getVariable, source.getKey()).
         header += "if (typeof source === 'object' && source) __wrapSource(source);\n"
         header += "if (typeof book === 'object' && book) { book.getVariable = (k) => java.get(k || '__bookVariable'); book.setVariable = (k,v) => java.put(v === undefined ? '__bookVariable' : k, v === undefined ? k : v); }\n"
+        header += "if(typeof chapter==='object'&&chapter){chapter.getTitle=()=>chapter.title||'';chapter.getUrl=()=>chapter.url||'';chapter.getIndex=()=>chapter.index||0;}\n"
+        header += "if(typeof rssArticle==='object'&&rssArticle){Object.keys(rssArticle).forEach(function(k){rssArticle['get'+k.charAt(0).toUpperCase()+k.slice(1)]=function(){return this[k]}});rssArticle.getVariable=(k)=>java.get(k||'__rssArticleVariable');}\n"
         // jsLib and the snippet run as separate scripts (separate scopes in Legado). Top-level `let` / `const` become
         // `var` so names declared in both, or by two snippets, do not clash in the shared global scope.
         if let lib0 = jsLib, !lib0.isEmpty {
