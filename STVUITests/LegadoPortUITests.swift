@@ -27,7 +27,13 @@ final class LegadoPortUITests:XCTestCase {
     let value=e.label.components(separatedBy:" ").compactMap(Double.init).first ?? 0
     return value>=0.2
    },evaluatedWith:status);wait(for:[advancing],timeout:60);XCTAssertTrue(el("novel.media.player").exists)
-  }else{XCTAssertTrue(el("novel.page").waitForExistence(timeout:30))}
+  }else{
+   let body=el("novel.page.body");XCTAssertTrue(body.waitForExistence(timeout:30))
+   let ready=expectation(for:NSPredicate{object,_ in
+    guard let e=object as? XCUIElement else{return false};let text=(e.value as? String) ?? e.label
+    return text.count>50 && !text.contains("正在加载") && !text.contains("加载失败")
+   },evaluatedWith:body);wait(for:[ready],timeout:60)
+  }
   shot("port-ios-"+evidenceName+"-consumed");app.terminate()
  }
  func testRSSImportAndNativeReader()throws{try flow("rss-ui",media:false)}
