@@ -446,7 +446,7 @@ struct NovelWebDetailView: View {
         .task(id: pick) { await load() }
         .onDisappear { sourceTask?.cancel() }
         .sheet(item: $downloadBook) { book in NovelDownloadView(book: book) }
-        .sheet(isPresented:$showingMedia){if let source{NovelMediaPlayer(source:source,chapters:toc ?? [],book:["name":info?.name ?? item.name,"author":info?.author ?? item.author,"bookUrl":item.bookURL])}}
+        .sheet(isPresented:$showingMedia){if let source{NovelMediaPlayer(source:source,chapters:toc ?? [],book:["name":info?.name.isEmpty == false ? info!.name : item.name,"author":info?.author.isEmpty == false ? info!.author : item.author,"bookUrl":item.bookURL])}}
     }
 
     private func findSources() async {

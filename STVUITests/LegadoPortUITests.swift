@@ -28,6 +28,7 @@ final class LegadoPortUITests:XCTestCase {
     let value=e.label.components(separatedBy:" ").compactMap(Double.init).first ?? 0
     return value >= (sourceFile != nil ? 2.0 : 0.2)
    },evaluatedWith:status);wait(for:[advancing],timeout:60);XCTAssertTrue(el("novel.media.player").exists)
+   if let expectedTitle{XCTAssertTrue(app.navigationBars[expectedTitle].waitForExistence(timeout:10))}
   }else{
    let body=el("novel.page.body");XCTAssertTrue(body.waitForExistence(timeout:30))
    let ready=expectation(for:NSPredicate{object,_ in
