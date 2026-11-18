@@ -44,4 +44,7 @@ final class LegadoPortUITests:XCTestCase {
   guard let path=ProcessInfo.processInfo.environment["IDJ_PERSONAL_RSS_JSON"]else{throw XCTSkip("personal source not distributed")}
   try flow("nasa-public",media:false,publicSource:true,sourceFile:URL(fileURLWithPath:path))
  }
+ func testStandalonePublicAudioConfigNativePlayback()throws{try flow("audio-static-public",media:true,publicSource:true)}
+ func testStandalonePublicVideoConfigNativePlayback()throws{try flow("video-static-public",media:true,publicSource:true)}
+
 }

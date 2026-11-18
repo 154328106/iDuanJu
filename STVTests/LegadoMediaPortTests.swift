@@ -47,4 +47,16 @@ final class LegadoMediaPortTests:XCTestCase {
   XCTAssertThrowsError(try LocalHLSProxy.shared.legadoURL(.init(url:URL(string:"https://media.example.org/file.mp3")!,headers:["Cookie":"fake-test"],sourceType:1)))
  }
 
+ func testStandalonePublicDemoConfigsNeedNoFixtureServer()throws{
+  NetGuard.resolverOverride={_ in ["8.8.8.8"]}
+  LegadoHTTP.transport={_ in XCTFail("Static catalog must not contact a fixture server");throw URLError(.badURL)}
+  let root=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent()
+  for folder in ["audio-static-public","video-static-public"]{
+   let s=try LegadoSourceStore.parse(Data(contentsOf:root.appendingPathComponent("shared/legado-port/"+folder+"/sources.json"))).first!
+   let hit=try LegadoClient.explore(s,category:LegadoClient.exploreCategories(s)[0])[0]
+   let info=try LegadoClient.info(s,bookURL:hit.bookURL);let toc=try LegadoClient.toc(s,tocURL:info.tocURL)
+   let media=try LegadoMedia.resolve(s,chapter:toc[0],book:["bookUrl":hit.bookURL]);XCTAssertEqual(media.url.scheme,"https");XCTAssertEqual(media.sourceType,s.bookSourceType)
+  }
+ }
+
 }

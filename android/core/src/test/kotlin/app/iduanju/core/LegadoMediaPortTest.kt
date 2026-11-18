@@ -34,4 +34,14 @@ class LegadoMediaPortTest {
   for(url in listOf("file:///etc/passwd","http://127.0.0.1/x","http://[::1]/x","https://u:p@example.org/x","https://example.org:80/x"))assertTrue(url,runCatching{LegadoMedia.checkedURL(url)}.isFailure)
   assertTrue(runCatching{LegadoMedia.resolve(s,NovelChapter("post","https://direct.example.org/x,{\"method\":\"POST\"}"))}.isFailure)
  }
+ @Test fun standalonePublicDemoConfigsNeedNoFixtureServer(){
+  NetGuard.resolverOverride={listOf("8.8.8.8")};NovelSources.fixture={error("Static catalog must not contact fixture network")}
+  for(folder in listOf("audio-static-public","video-static-public")){
+   val s=NovelSources.import(javaClass.getResource("/$folder/sources.json")!!.readText()).single()
+   val hit=NovelSources.search(s,"",category=NovelSources.categories(s).first()).single();val detail=NovelSources.details(s,hit.url)
+   val media=LegadoMedia.resolve(s,detail.chapters.single(),hit.url)
+   assertTrue(media.url.startsWith("https://"));assertEquals(s.json.getInt("bookSourceType"),media.sourceType)
+  }
+ }
+
 }

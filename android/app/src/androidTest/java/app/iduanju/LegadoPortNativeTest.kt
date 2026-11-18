@@ -45,9 +45,9 @@ class LegadoPortNativeTest {
     }
     ui.onNodeWithTag("novel.media.error").assertDoesNotExist();ui.onNodeWithTag("novel.media.player").assertExists()
    }else{ui.waitUntil(20000){ui.onAllNodesWithTag("novel.reader").fetchSemanticsNodes().isNotEmpty()}}
-   if(publicSource){assertTrue(LegadoRss.article(s,liveHit!!.url).getBoolean("read"));NovelSources.search(s,"",category=NovelSources.categories(s).first());assertTrue(LegadoRss.article(s,liveHit.url).getBoolean("read"))}
+   if(publicSource&&s.isRSS){assertTrue(LegadoRss.article(s,liveHit!!.url).getBoolean("read"));NovelSources.search(s,"",category=NovelSources.categories(s).first());assertTrue(LegadoRss.article(s,liveHit.url).getBoolean("read"))}
    shot("port-android-$folder-consumed.png")
-   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource)"public source, actual HTTP, no fixture"else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)"public media timeline >=0.2s"else "reader body visible").toString().toByteArray())
+   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)"public media timeline >=0.2s"else "reader body visible").toString().toByteArray())
   }finally{
    NovelSources.fixture=null;NovelSources.configureStorage(ctx.filesDir);app.iduanju.ui.UiEvidence.page=oldPage
    val edit=prefs.edit().clear();for((k,v)in old)when(v){is String->edit.putString(k,v);is Int->edit.putInt(k,v);is Boolean->edit.putBoolean(k,v);is Float->edit.putFloat(k,v);is Long->edit.putLong(k,v)};edit.commit()
@@ -77,5 +77,8 @@ class LegadoPortNativeTest {
    for(url in listOf("http://127.0.0.1/x","http://[::1]/x","http://192.168.1.1/x","https://media.example.org:444/x"))assertTrue(url,runCatching{guardedMediaRequest(request(url),origin)}.isFailure)
   }finally{app.iduanju.core.util.NetGuard.resolverOverride=old}
  }
+
+ @Test fun standalonePublicAudioConfigNativePlayback()=flow("audio-static-public",null,true,publicSource=true)
+ @Test fun standalonePublicVideoConfigNativePlayback()=flow("video-static-public",null,true,publicSource=true)
 
 }
