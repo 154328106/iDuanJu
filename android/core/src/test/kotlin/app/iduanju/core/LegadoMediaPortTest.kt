@@ -5,7 +5,7 @@ import org.json.*
 import org.junit.*
 import org.junit.Assert.*
 class LegadoMediaPortTest {
- @After fun cleanup(){NovelSources.fixture=null;NetGuard.resolverOverride=null}
+ @After fun cleanup(){NovelSources.fixture=null;NetGuard.resolverOverride=null;LegadoWebView.backstage=null}
  @Test fun sharedAudioVideoCatalogDetailTocAndRawMediaContract(){
   NetGuard.resolverOverride={listOf("8.8.8.8")}
   val cases=JSONArray(javaClass.getResource("/media-cases.json")!!.readText())
@@ -25,9 +25,40 @@ class LegadoMediaPortTest {
    assertNull(NovelScript.currentChapter.get());assertNull(NovelScript.nextChapterURL.get())
   }
  }
- @Test fun mediaWebJsIsRejectedAtImportNotPretendedUsable(){
+ @Test fun mediaWebJsImportsAndUsesUpstreamWebViewContract(){
+  NetGuard.resolverOverride={listOf("8.8.8.8")}
   val report=NovelSources.importReport("""{"bookSourceUrl":"https://example.org","bookSourceType":4,"ruleContent":{"webJs":"document.title"}}""")
-  assertTrue(report.sources.isEmpty());assertEquals(1,report.unsupported);assertTrue(report.message.contains("webJs"))
+  assertEquals(1,report.sources.size);assertEquals(0,report.unsupported)
+  val cases=JSONArray(javaClass.getResource("/webview-media-cases.json")!!.readText())
+  for(i in 0 until cases.length()){
+   val c=cases.getJSONObject(i);val e=c.getJSONObject("expect");val s=NovelSources.import(c.getJSONObject("source").toString()).single()
+   var seen:BackstageRequest?=null
+   LegadoWebView.backstage=LegadoBackstage{r->seen=r;val b=c.getJSONObject("backstage");NovelSources.PageResponse(b.getString("text"),b.getString("url"))}
+   NovelSources.fixture=if(c.has("http")){{c.getString("http")}}else{{error("webView chapter must not use plain HTTP")}}
+   val media=LegadoMedia.resolve(s,NovelChapter("ep",c.getString("chapterURL")))
+   assertEquals(c.getString("name"),e.getString("mediaURL"),media.url)
+   if(e.has("backstageCalled")){assertNull(seen);continue}
+   val r=seen!!
+   assertEquals(e.getString("pageURL"),r.url);assertEquals(e.opt("js").takeIf{it!=JSONObject.NULL},r.javaScript)
+   assertEquals(e.opt("sourceRegex").takeIf{it!=JSONObject.NULL},r.sourceRegex);assertEquals(e.getLong("delayMs"),r.delayMs);assertEquals(60000L,r.timeoutMs)
+   assertEquals(e.getBoolean("pageCookie"),r.headers.keys.any{it.equals("Cookie",true)})
+   assertEquals(e.getBoolean("mediaCookie"),media.headers.keys.any{it.equals("Cookie",true)})
+   assertEquals(e.opt("mediaReferer").takeIf{it!=JSONObject.NULL},media.headers["Referer"])
+  }
+ }
+ @Test fun webViewSafetyAndResultSemantics(){
+  NetGuard.resolverOverride={listOf("8.8.8.8")}
+  for(v in listOf(null,"",false,"false"))assertFalse(LegadoWebView.useWebView(v));for(v in listOf(true,"true","“true”","1",1))assertTrue(LegadoWebView.useWebView(v))
+  assertNull(LegadoWebView.evalResult("null"));assertNull(LegadoWebView.evalResult("\"\""));assertEquals("a\"b",LegadoWebView.evalResult("\"a\\\"b\""))
+  assertEquals("https://cdn.example.net/x.mp3",LegadoWebView.firstSniffed(".*\\.mp3.*", "\"[\\\"https://a.example/page.js\\\",\\\"https://cdn.example.net/x.mp3\\\"]\""))
+  assertFalse(LegadoWebView.matches("([",""))
+  val s=NovelSources.import("""{"bookSourceUrl":"https://page.example.org","bookSourceType":4,"ruleContent":{"content":"<js>result</js>"}}""").single()
+  LegadoWebView.backstage=LegadoBackstage{error("private page must be rejected before WebView")}
+  assertTrue(runCatching{LegadoMedia.resolve(s,NovelChapter("x","http://127.0.0.1/p,{\"webView\":true}"))}.isFailure)
+  LegadoWebView.backstage=LegadoBackstage{NovelSources.PageResponse("http://10.0.0.2/x.mp4",it.url)}
+  assertTrue(runCatching{LegadoMedia.resolve(s,NovelChapter("x","https://page.example.org/p,{\"webView\":true}"))}.isFailure)
+  LegadoWebView.backstage=null
+  assertTrue(runCatching{LegadoMedia.resolve(s,NovelChapter("x","https://page.example.org/p,{\"webView\":true}"))}.exceptionOrNull()!!.message!!.contains("WebView"))
  }
  @Test fun directMediaAndSafetyContract(){
   NetGuard.resolverOverride={listOf("8.8.8.8")}

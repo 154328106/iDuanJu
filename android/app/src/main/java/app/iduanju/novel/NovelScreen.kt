@@ -135,7 +135,7 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
         val token = ++readGeneration
         prefetchJob?.cancel()
         if(s.isMedia){
-            val resolved=withContext(Dispatchers.IO){LegadoMedia.resolve(s,chapter.copy(index=index),book.url,chapters.getOrNull(index+1)?.url)}
+            val resolved=kotlinx.coroutines.runInterruptible(Dispatchers.IO){LegadoMedia.resolve(s,chapter.copy(index=index),book.url,chapters.getOrNull(index+1)?.url)}
             if(token==readGeneration){media=resolved;chapterIndex=index;localBook=false}
             return
         }

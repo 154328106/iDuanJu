@@ -90,4 +90,18 @@ class LegadoPortNativeTest {
   flow("personal-yck-audio","《论语》朗读与讲解",true,publicSource=true,sourceOverride=raw,searchQuery="论语")
  }
  @Test fun nasaRealAnimationLibraryNativePlayback()=flow("nasa-animation-public",null,true,publicSource=true)
+ @Test fun nasaWebJsRealPageNativePlayback()=flow("nasa-webview-public",null,true,publicSource=true)
+ @Test fun nasaSourceRegexSniffRealPageNativePlayback()=flow("nasa-webview-sniff-public",null,true,publicSource=true)
+ @Test fun backstageWebViewTimeoutCancelAndPrivateGuards(){
+  val ctx=InstrumentationRegistry.getInstrumentation().targetContext;val web=app.iduanju.novel.AndroidBackstageWebView(ctx)
+  val page="https://images.nasa.gov/"
+  val started=System.currentTimeMillis()
+  val timeout=runCatching{web.load(BackstageRequest(page,emptyMap(),"null",null,0,4000))}.exceptionOrNull()
+  assertTrue(timeout?.message.orEmpty(),timeout?.message.orEmpty().let{it.contains("超时")});assertTrue(System.currentTimeMillis()-started<15000)
+  assertTrue(runCatching{web.load(BackstageRequest("http://127.0.0.1/",emptyMap(),null,null,0,4000))}.isFailure)
+  var failure:Throwable?=null
+  val t=Thread{failure=runCatching{web.load(BackstageRequest(page,emptyMap(),"null",null,0,60000))}.exceptionOrNull()};t.start();Thread.sleep(1500);t.interrupt();t.join(5000)
+  assertFalse(t.isAlive);assertTrue(failure is InterruptedException)
+  val ok=web.load(BackstageRequest(page,emptyMap(),"document.title",null,0,30000));assertTrue(ok.text,ok.text.isNotBlank())
+ }
 }

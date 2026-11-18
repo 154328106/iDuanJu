@@ -24,4 +24,19 @@ class LegadoRealMediaTest {
    val media=LegadoMedia.resolve(source,detail.chapters.first(),hit.url);assertEquals("images-assets.nasa.gov",java.net.URI(media.url).host);assertEquals("https",java.net.URI(media.url).scheme);println("REAL_NASA_ANIMATION title=${hit.name} chapters=${detail.chapters.size}")
   }
  }
+ @Test fun nasaRealWebViewConfigsReachBackstageWithActualPage(){
+  Assume.assumeTrue(System.getenv("IDJ_REAL_NASA_VIDEO")=="1")
+  try{
+   for(folder in listOf("nasa-webview-public","nasa-webview-sniff-public")){
+    val source=NovelSources.import(javaClass.getResource("/$folder/sources.json")!!.readText()).single()
+    val hit=NovelSources.search(source,"",category=NovelSources.categories(source).first()).first()
+    val detail=NovelSources.details(source,hit.url);assertEquals(1,detail.chapters.size)
+    var seen:BackstageRequest?=null
+    LegadoWebView.backstage=LegadoBackstage{seen=it;error("JVM has no WebView; native tests consume the page")}
+    assertTrue(runCatching{LegadoMedia.resolve(source,detail.chapters.first(),hit.url)}.isFailure)
+    val r=seen!!;assertTrue(r.url,r.url.startsWith("https://images.nasa.gov/details/"));assertTrue((r.javaScript!=null)xor(r.sourceRegex!=null))
+    println("REAL_NASA_WEBVIEW folder=$folder title=${hit.name} page=${r.url}")
+   }
+  }finally{LegadoWebView.backstage=null}
+ }
 }
