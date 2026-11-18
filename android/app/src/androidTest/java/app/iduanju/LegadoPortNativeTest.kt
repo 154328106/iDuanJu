@@ -39,16 +39,17 @@ class LegadoPortNativeTest {
    ui.waitUntil(20000){runCatching{ui.onNodeWithTag("novel.detail.read").assertIsEnabled();true}.getOrDefault(false)}
    shot("port-android-$folder-detail.png");ui.onNodeWithTag("novel.detail.read").performClick()
    if(media){
+    val minimum=if(s.json.optInt("bookSourceType")==4)2.0 else 0.2
     ui.waitUntil(60000){
      val node=ui.onAllNodesWithTag("novel.media.status").fetchSemanticsNodes().firstOrNull()
      val text=node?.config?.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text){emptyList()}?.firstOrNull()?.text.orEmpty()
-     Regex("已播放 ([0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()?.let{it>=0.2}==true
+     Regex("已播放 ([0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()?.let{it>=minimum && (minimum<2 || text.contains("播放中"))}==true
     }
     ui.onNodeWithTag("novel.media.error").assertDoesNotExist();ui.onNodeWithTag("novel.media.player").assertExists()
    }else{ui.waitUntil(20000){ui.onAllNodesWithTag("novel.reader").fetchSemanticsNodes().isNotEmpty()}}
    if(publicSource&&s.isRSS){assertTrue(LegadoRss.article(s,liveHit!!.url).getBoolean("read"));NovelSources.search(s,"",category=NovelSources.categories(s).first());assertTrue(LegadoRss.article(s,liveHit.url).getBoolean("read"))}
    shot("port-android-$folder-consumed.png")
-   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)"public media timeline >=0.2s"else "reader body visible").toString().toByteArray())
+   saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)if(s.json.optInt("bookSourceType")==4)"public video timeline >=2s and playing" else "public audio timeline >=0.2s"else "reader body visible").toString().toByteArray())
   }finally{
    NovelSources.fixture=null;NovelSources.configureStorage(ctx.filesDir);app.iduanju.ui.UiEvidence.page=oldPage
    val edit=prefs.edit().clear();for((k,v)in old)when(v){is String->edit.putString(k,v);is Int->edit.putInt(k,v);is Boolean->edit.putBoolean(k,v);is Float->edit.putFloat(k,v);is Long->edit.putLong(k,v)};edit.commit()
