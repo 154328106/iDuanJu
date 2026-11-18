@@ -4,6 +4,10 @@
 > 本项目以 **GPL-3.0** 协议发布：任何使用、修改、衍生本项目代码的作品，都必须同样以 GPL-3.0 开源并公开完整源代码。
 > 如果你是花钱买到本 App 或本代码的，你被骗了，请举报卖家。
 
+## 下载
+
+请前往 [Releases 页面](https://github.com/my-name-is-alan/iDuanJu/releases) 下载。
+
 ## 播放内核（AetherEngine）
 
 - 默认使用 **AetherEngine 7.62.0**（LGPL-3.0，附 App Store / DRM 例外条款），以 SwiftPM 静态链接、未修改。
