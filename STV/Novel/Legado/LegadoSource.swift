@@ -32,10 +32,11 @@ struct LegadoSource: Codable, Hashable, Identifiable {
     var isRSS: Bool { rssRules != nil }
     var isMedia: Bool { !isRSS && [1,4].contains(bookSourceType ?? 0) }
 
+    var unsupportedMediaWebJS:Bool {isMedia && !(ruleContent?["webJs"] ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty}
     var id: String { bookSourceUrl }
     var isOn: Bool { enabled ?? true }
     var hasLogin: Bool { !(loginUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var supported: Bool { !bookSourceUrl.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && (isRSS || ([0,1,4].contains(bookSourceType ?? 0) && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty))) }
+    var supported: Bool { !bookSourceUrl.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && !unsupportedMediaWebJS && (isRSS || ([0,1,4].contains(bookSourceType ?? 0) && (!(searchUrl ?? "").isEmpty || !(exploreUrl ?? "").isEmpty))) }
 
     enum CodingKeys: String, CodingKey {
         case bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType, bookSourceComment, enabled, header, searchUrl,

@@ -25,6 +25,10 @@ class LegadoMediaPortTest {
    assertNull(NovelScript.currentChapter.get());assertNull(NovelScript.nextChapterURL.get())
   }
  }
+ @Test fun mediaWebJsIsRejectedAtImportNotPretendedUsable(){
+  val report=NovelSources.importReport("""{"bookSourceUrl":"https://example.org","bookSourceType":4,"ruleContent":{"webJs":"document.title"}}""")
+  assertTrue(report.sources.isEmpty());assertEquals(1,report.unsupported);assertTrue(report.message.contains("webJs"))
+ }
  @Test fun directMediaAndSafetyContract(){
   NetGuard.resolverOverride={listOf("8.8.8.8")}
   assertTrue(LegadoMedia.sameOrigin("https://media.example.org/file","https://media.example.org:443/root"))

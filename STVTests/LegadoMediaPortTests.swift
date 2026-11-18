@@ -22,6 +22,10 @@ final class LegadoMediaPortTests:XCTestCase {
    XCTAssertEqual(contextual.url.absoluteString,c["contextExpectedURL"] as? String)
   }
  }
+ func testMediaWebJsIsNotPretendedUsableAtImport()throws{
+  let s=try LegadoSourceStore.parse(Data(#"{"bookSourceUrl":"https://example.org","bookSourceType":4,"exploreUrl":"/catalog","ruleContent":{"webJs":"document.title"}}"#.utf8)).first!
+  XCTAssertTrue(s.unsupportedMediaWebJS);XCTAssertFalse(s.supported)
+ }
  func testDirectMediaAndSafetyContract()throws{
   NetGuard.resolverOverride={_ in ["8.8.8.8"]}
   XCTAssertTrue(LegadoMedia.sameOrigin(URL(string:"https://media.example.org/file")!,URL(string:"https://media.example.org:443/root")!))

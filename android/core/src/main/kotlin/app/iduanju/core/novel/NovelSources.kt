@@ -33,7 +33,7 @@ data class NovelCategory(val title: String, val url: String, val group: String =
 }
 data class NovelChapter(val title: String, val url: String, val index:Int=0)
 
-/** Text-source subset of Legado: CSS/Jsoup rules, simple JSON paths, GET/POST and discovery. */
+/** Guarded Legado source adapters: common catalog/text runtime plus explicit RSS and native media dispatch. */
 object NovelSources {
     fun configureStorage(root: java.io.File) { NovelScript.configure(root) }
     const val userAgent = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
@@ -43,7 +43,7 @@ object NovelSources {
     @Volatile var requestObserver: ((method:String,url:String,body:String?) -> Unit)? = null
 
     data class ImportReport(val sources:List<NovelSource>,val unsupported:Int,val invalid:Int) {
-        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持漫画/下载型书源；不是坏源或网站失效" else
+        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持漫画/下载型或依赖媒体 webJs 的书源；不是坏源或网站失效" else
             "已导入 ${sources.size} 个书源（含RSS）" + (if(unsupported>0) "；跳过 $unsupported 个不支持的源类型（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
     }
     fun import(text:String):List<NovelSource> = importReport(text).sources
@@ -55,9 +55,10 @@ object NovelSources {
         rows.filter{NovelSource(it).isRSS}.forEach {
             it.put("_idjSourceKind","rss").put("bookSourceUrl",it.optString("sourceUrl")).put("bookSourceName",it.optString("sourceName",it.optString("sourceUrl")))
         }
-        val unsupported=rows.count{it.optInt("bookSourceType",0) !in listOf(0,1,4)}
-        val valid=rows.filter{it.optInt("bookSourceType",0) in listOf(0,1,4)&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
-        return ImportReport(valid,unsupported,array.length()-rows.count{it.optInt("bookSourceType",0) !in listOf(0,1,4)||it.optString("bookSourceUrl").isNotBlank()})
+        fun isUnsupported(row:JSONObject):Boolean = row.optInt("bookSourceType",0) !in listOf(0,1,4) || (NovelSource(row).isMedia && row.optJSONObject("ruleContent")?.optString("webJs").orEmpty().isNotBlank())
+        val unsupported=rows.count{isUnsupported(it)}
+        val valid=rows.filter{!isUnsupported(it)&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
+        return ImportReport(valid,unsupported,array.length()-rows.count{isUnsupported(it)||it.optString("bookSourceUrl").isNotBlank()})
     }
 
     fun absolute(raw: String, base: String): String {
