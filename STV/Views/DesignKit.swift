@@ -270,9 +270,13 @@ struct ChipRow<T: Hashable>: View {
                     }
                 }
                 .padding(.leading, leading).padding(.trailing, 24)
+                // The scroll view and the fade mask clip to the row; this margin keeps the selected neutral chip's
+                // shadow (`.chip.all.on`) inside them, and the negative padding below gives the space back.
+                .padding(.vertical, 6)
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .mask { if fade { FadeMask() } else { Color.black } }
+            .padding(.vertical, -6)
             .onChange(of: selection) { _, it in withAnimation(DS.select) { proxy.scrollTo(it, anchor: .center) } }
         }
     }

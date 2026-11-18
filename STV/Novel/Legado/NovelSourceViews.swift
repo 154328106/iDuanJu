@@ -351,10 +351,7 @@ struct WebCover: View {
     var body: some View {
         AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
             if let img = phase.image { img.resizable().scaledToFill() }
-            else {
-                STVTheme.accent.opacity(0.12)
-                    .overlay(Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(STVTheme.accent).multilineTextAlignment(.center).padding(4))
-            }
+            else { GeneratedBookCover(title: title) }
         }
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
     }
