@@ -14,7 +14,42 @@ import org.junit.Assert.*
 class LegadoPortNativeTest {
  @get:Rule val ui=createAndroidComposeRule<androidx.activity.ComponentActivity>()
  private fun asset(path:String)=InstrumentationRegistry.getInstrumentation().context.assets.open(path).bufferedReader().use{it.readText()}
- private fun shot(name:String){ui.waitForIdle();val b=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot();try{val o=java.io.ByteArrayOutputStream();b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,o);saveNovelEvidence(name,o.toByteArray())}finally{b.recycle()}}
+ // MEmu's UiAutomation screenshots can be entirely black. Draw the real decor, including a PixelCopy of the video surface.
+ private fun shot(name: String) {
+  val root = ui.activity.window.decorView
+  fun surface(view: android.view.View): android.view.SurfaceView? {
+   if (view is android.view.SurfaceView) return view
+   if (view is android.view.ViewGroup) for (i in 0 until view.childCount) surface(view.getChildAt(i))?.let { return it }
+   return null
+  }
+  val video = ui.runOnIdle { surface(root)?.takeIf { it.width > 0 && it.height > 0 && it.holder.surface.isValid } }
+  val frame = video?.let {
+   val image = android.graphics.Bitmap.createBitmap(it.width, it.height, android.graphics.Bitmap.Config.ARGB_8888)
+   val result = java.util.concurrent.CompletableFuture<Int>()
+   android.view.PixelCopy.request(it, image, { code -> result.complete(code) }, android.os.Handler(android.os.Looper.getMainLooper()))
+   if (result.get(3, java.util.concurrent.TimeUnit.SECONDS) == android.view.PixelCopy.SUCCESS) image else { image.recycle(); null }
+  }
+  val b = android.graphics.Bitmap.createBitmap(root.width, root.height, android.graphics.Bitmap.Config.ARGB_8888)
+  val drawn = ui.runOnIdle {
+   try {
+    val canvas = android.graphics.Canvas(b)
+    root.draw(canvas)
+    if (video != null && frame != null) {
+     val p = IntArray(2); video.getLocationInWindow(p)
+     val paint = android.graphics.Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OVER) }
+     canvas.drawBitmap(frame, p[0].toFloat(), p[1].toFloat(), paint)
+    }
+    true
+   } catch (e: IllegalArgumentException) { if (e.message?.contains("hardware bitmap", ignoreCase = true) != true) throw e; false }
+  }
+  if (!drawn) {
+   val result = java.util.concurrent.CompletableFuture<Int>()
+   android.view.PixelCopy.request(ui.activity.window, b, { code -> result.complete(code) }, android.os.Handler(android.os.Looper.getMainLooper()))
+   check(result.get(3, java.util.concurrent.TimeUnit.SECONDS) == android.view.PixelCopy.SUCCESS)
+  }
+  try { val out = java.io.ByteArrayOutputStream(); b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); saveNovelEvidence(name, out.toByteArray()) }
+  finally { b.recycle(); frame?.recycle() }
+ }
  private fun flow(folder:String,title:String?,media:Boolean,publicSource:Boolean=false,sourceOverride:String?=null,searchQuery:String?=null){
   val ctx=InstrumentationRegistry.getInstrumentation().targetContext;val prefs=ctx.getSharedPreferences("novel",0);val old=prefs.all;val oldPage=app.iduanju.ui.UiEvidence.page
   val raw=sourceOverride?:asset("$folder/sources.json")
@@ -43,7 +78,7 @@ class LegadoPortNativeTest {
     val minimum=if(s.json.optInt("bookSourceType")==4 || (sourceOverride!=null && s.isMedia))2.0 else 0.2
     ui.waitUntil(60000){
      val node=ui.onAllNodesWithTag("novel.media.status").fetchSemanticsNodes().firstOrNull()
-     val text=node?.config?.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text){emptyList()}?.firstOrNull()?.text.orEmpty()
+     val text=node?.config?.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.StateDescription){""}.orEmpty()
      Regex("已播放 ([0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull()?.let{it>=minimum && (minimum<2 || text.contains("播放中"))}==true
     }
     ui.onNodeWithTag("novel.media.error").assertDoesNotExist();ui.onNodeWithTag("novel.media.player").assertExists()
@@ -52,7 +87,7 @@ class LegadoPortNativeTest {
    shot("port-android-$folder-consumed.png")
    saveNovelEvidence("port-android-$folder-result.json",JSONObject().put("sourcePages",if(publicSource){if(s.isRSS)"public RSS, actual HTTP, no fixture"else if(sourceOverride!=null || folder.startsWith("nasa-"))"actual public media library, HTTP, no fixture" else "self-owned data: catalog and public media, no fixture"}else "self-owned controlled fixture").put("nativeImportUI",true).put("nativeConsumption",if(media)if(s.json.optInt("bookSourceType")==4)"public video timeline >=2s and playing" else "public audio timeline >=0.2s"else "reader body visible").toString().toByteArray())
   }finally{
-   NovelSources.fixture=null;NovelSources.configureStorage(ctx.filesDir);app.iduanju.ui.UiEvidence.page=oldPage
+   InstrumentationRegistry.getInstrumentation().runOnMainSync{app.iduanju.novel.NovelPlayback.stop()};NovelSources.fixture=null;NovelSources.configureStorage(ctx.filesDir);app.iduanju.ui.UiEvidence.page=oldPage
    val edit=prefs.edit().clear();for((k,v)in old)when(v){is String->edit.putString(k,v);is Int->edit.putInt(k,v);is Boolean->edit.putBoolean(k,v);is Float->edit.putFloat(k,v);is Long->edit.putLong(k,v)};edit.commit()
   }
  }

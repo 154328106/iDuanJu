@@ -1,28 +1,32 @@
 package app.iduanju.novel
 
-import android.view.ViewGroup
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.iduanju.core.hongguo.HGEpisode
+import app.iduanju.core.hongguo.HGSeriesDetail
+import app.iduanju.ui.player.PlayerScreen
+import app.iduanju.ui.player.VideoQueueSession
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.media3.common.Player
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.PlayerView
-import app.iduanju.core.novel.NovelMedia
 import app.iduanju.core.novel.LegadoMedia
 import app.iduanju.core.util.NetGuard
-import okhttp3.Dns
-import okhttp3.OkHttpClient
-import java.net.UnknownHostException
 import java.net.Socket
 import java.net.SocketAddress
 import java.net.InetSocketAddress
@@ -53,35 +57,115 @@ internal fun guardedMediaRequest(req:okhttp3.Request,origin:String):okhttp3.Requ
  return if(LegadoMedia.sameOrigin(req.url.toString(),origin))req else req.newBuilder().removeHeader("Authorization").removeHeader("Cookie").build()
 }
 
-/** Native Media3 consumer, separate from text cache/TTS. No untrusted WebView or DRM helper. */
 @Composable
-fun NovelMediaPlayer(media:NovelMedia,title:String,onClose:()->Unit,onPrevious:(()->Unit)?,onNext:(()->Unit)?) {
- val context=LocalContext.current
- var failure by remember(media){mutableStateOf<String?>(null)}
- var progress by remember(media){mutableStateOf("正在缓冲") }
- val player=remember(media){
-  fun strip(req:okhttp3.Request)=guardedMediaRequest(req,media.url)
-  val client=OkHttpClient.Builder().socketFactory(GuardedMediaSocketFactory()).dns(object:Dns { override fun lookup(hostname:String):List<java.net.InetAddress> =
-   Dns.SYSTEM.lookup(hostname).also { addresses -> if(addresses.any{NetGuard.isBlockedIP(it.hostAddress.orEmpty())})throw UnknownHostException("媒体请求拒绝内网地址") }
-  }).addInterceptor { chain->chain.proceed(strip(chain.request())) }
-   .addNetworkInterceptor { chain->chain.proceed(strip(chain.request())) }.build()
-  val factory=OkHttpDataSource.Factory(client).setDefaultRequestProperties(media.headers)
-  ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build().apply {
-   addListener(object:Player.Listener{override fun onPlayerError(error:PlaybackException){failure=error.errorCodeName+": "+error.message}})
-   setMediaItem(MediaItem.fromUri(media.url));prepare();playWhenReady=true
-  }
- }
- LaunchedEffect(player){while(isActive){progress="已播放 %.2f 秒 · %s".format(java.util.Locale.ROOT,player.currentPosition/1000.0,if(player.playbackState==Player.STATE_ENDED)"结束"else if(player.isPlaying)"播放中"else "缓冲/暂停");delay(200)}}
- DisposableEffect(player){onDispose{player.release()}}
- BackHandler{onClose()}
- Surface(Modifier.fillMaxSize().testTag("novel.media.player")){
- Column(Modifier.fillMaxSize().safeDrawingPadding()){
-  Row(Modifier.fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(title,Modifier.weight(1f));TextButton(onClick=onClose){Text("关闭播放")}}
-  if(media.sourceType==1)Text("有声书 · 原生音频播放",Modifier.padding(12.dp))
-  AndroidView(factory={ctx->PlayerView(ctx).apply{this.player=player;useController=true;controllerShowTimeoutMs=0;layoutParams=ViewGroup.LayoutParams(-1,-1)}},update={it.player=player},modifier=Modifier.fillMaxWidth().weight(1f))
-  Text(progress,Modifier.padding(12.dp).testTag("novel.media.status"))
-  failure?.let{Text(it,Modifier.padding(12.dp).testTag("novel.media.error"),color=MaterialTheme.colorScheme.error)}
-  Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly){TextButton(onClick={onPrevious?.invoke()},enabled=onPrevious!=null){Text("上一章")};TextButton(onClick={onNext?.invoke()},enabled=onNext!=null){Text("下一章")}}
- }
- }
+fun NovelMediaPlayer(state: NovelPlayback.State, onClose: () -> Unit) {
+    val player = NovelPlayback.exo ?: return
+    val lifecycle = LocalView.current.findViewTreeLifecycleOwner()?.lifecycle
+    DisposableEffect(lifecycle, player, state.video) {
+        val observer = LifecycleEventObserver { _, event -> if (state.video && event == Lifecycle.Event.ON_STOP) player.pause() }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    DisposableEffect(player) { onDispose { if (NovelPlayback.state?.video == true) NovelPlayback.stop() } }
+    BackHandler(onBack = onClose)
+    var position by remember(state.index) { mutableLongStateOf(0) }
+    var duration by remember(state.index) { mutableLongStateOf(0) }
+    var playing by remember { mutableStateOf(false) }
+    LaunchedEffect(player, state.index) {
+        while (isActive) {
+            position = player.currentPosition
+            duration = player.duration.coerceAtLeast(0)
+            playing = player.isPlaying
+            delay(250)
+        }
+    }
+    Box(Modifier.fillMaxSize().testTag("novel.media.player")) {
+        val status = "已播放 %.2f 秒 · %s".format(java.util.Locale.ROOT, position / 1000.0, if (playing) "播放中" else "暂停")
+        Box(Modifier.fillMaxSize().testTag("novel.media.status").semantics { stateDescription = status }) {
+            if (state.video) {
+                val detail = remember(state.queue) {
+                    val episodes = state.queue.titles.mapIndexed { i, title -> HGEpisode(i + 1, i.toString(), title = title) }
+                    HGSeriesDetail(seriesId = "novel:" + state.queue.key, title = state.queue.book, episodes = episodes,
+                        totalEps = episodes.size, source = "视频书", cover = state.queue.cover)
+                }
+                PlayerScreen(detail.seriesId, state.index + 1, onClose, VideoQueueSession(player, detail, state.index,
+                    state.media == null && state.failure == null, state.failure, NovelPlayback::select))
+            } else {
+                AudioBookPlayer(state, position, duration, playing, onClose)
+            }
+        }
+    }
+}
+
+private fun clock(ms: Long) = "%d:%02d".format(ms / 60000, ms / 1000 % 60)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioBookPlayer(state: NovelPlayback.State, position: Long, duration: Long, playing: Boolean, onClose: () -> Unit) {
+    val player = NovelPlayback.player ?: return
+    var listOpen by remember { mutableStateOf(false) }
+    var drag by remember(state.index) { mutableStateOf<Float?>(null) }
+    val colors = MaterialTheme.colorScheme
+    Surface(modifier = Modifier.fillMaxSize(), color = colors.surface) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 26.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClose) { Icon(Icons.Default.KeyboardArrowDown, "关闭播放") }
+                Text("有声书", style = MaterialTheme.typography.titleMedium)
+                IconButton({ listOpen = true }) { Icon(Icons.Default.QueueMusic, "章节列表") }
+            }
+            val cover: @Composable (Modifier) -> Unit = { modifier ->
+                BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(minOf(maxHeight * .9f, maxWidth * .9f, 320.dp)).clip(RoundedCornerShape(18.dp))
+                        .background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                            val radius = size.minDimension / 2
+                            drawCircle(colors.onSecondaryContainer.copy(alpha = .9f), radius * .87f)
+                            for (ring in 4..12) drawCircle(colors.secondaryContainer.copy(alpha = .16f), radius * ring / 15,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()))
+                            drawCircle(colors.primaryContainer, radius * .31f)
+                        }
+                        Icon(Icons.Default.Headphones, null, Modifier.fillMaxSize(.15f), tint = colors.onPrimaryContainer)
+                        if (state.queue.cover.isNotBlank()) coil.compose.AsyncImage(state.queue.cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                }
+            }
+            val transport: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth()) {
+                    Text(state.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    Text(state.queue.book, color = colors.onSurfaceVariant, maxLines = 1)
+                    state.failure?.let { TextButton({ NovelPlayback.select(state.index) }, Modifier.testTag("novel.media.error")) { Text("$it · 重试") } }
+                    Spacer(Modifier.height(16.dp))
+                    Slider(value = drag ?: (position.toFloat() / duration.coerceAtLeast(1)).coerceIn(0f, 1f), enabled = duration > 0 && state.media != null,
+                        onValueChange = { drag = it }, onValueChangeFinished = { drag?.let { player.seekTo((it * duration).toLong()) }; drag = null })
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(clock(drag?.let { (it * duration).toLong() } ?: position)); Text(clock(duration)) }
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(NovelPlayback::previous, enabled = state.hasPrevious) { Icon(Icons.Default.SkipPrevious, "上一章") }
+                    FilledIconButton({ if (playing) player.pause() else { if (player.playbackState == Player.STATE_ENDED) player.seekTo(0); player.play() } }, Modifier.size(64.dp), enabled = state.media != null && state.failure == null) {
+                        if (state.media == null && state.failure == null) CircularProgressIndicator(Modifier.size(24.dp))
+                        else Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp))
+                    }
+                    IconButton(NovelPlayback::next, enabled = state.hasNext) { Icon(Icons.Default.SkipNext, "下一章") }
+                }
+            }
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                if (maxWidth > maxHeight) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        cover(Modifier.weight(.85f).fillMaxHeight())
+                        Column(Modifier.weight(1f)) { transport() }
+                    }
+                } else Column(Modifier.fillMaxSize()) {
+                    cover(Modifier.weight(1f).fillMaxWidth())
+                    transport()
+                }
+            }
+        }
+    }
+    if (listOpen) ModalBottomSheet(onDismissRequest = { listOpen = false }) {
+        androidx.compose.foundation.lazy.LazyColumn { items(state.queue.titles.size) { i ->
+            TextButton(onClick = { if (i != state.index) NovelPlayback.select(i); listOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                Text(state.queue.titles[i], color = if (state.index == i) colors.primary else colors.onSurface)
+            }
+        } }
+    }
 }

@@ -39,6 +39,7 @@ struct NovelHomeView: View {
     @State private var busy = false
     @State private var errors: [String] = []
     @State private var reading: NovelBook?
+    @State private var detailBook: NovelBook?
     @State private var deleting: NovelBook?
     @State private var searching = false
     @State private var managing = false
@@ -70,7 +71,7 @@ struct NovelHomeView: View {
                 } else {
                     LazyVGrid(columns: cols, spacing: 16) {
                         ForEach(store.shelf) { b in
-                            Button { reading = b } label: { bookCell(b) }
+                            Button { if b.isWeb { detailBook = b } else { reading = b } } label: { bookCell(b) }
                                 .buttonStyle(PressScale(scale: 0.97))
                                 .contextMenu { Button("删除", systemImage: "trash", role: .destructive) { deleting = b } }
                                 .accessibilityIdentifier("novel.book.\(b.title)")
@@ -83,7 +84,7 @@ struct NovelHomeView: View {
             .animation(DS.panel, value: store.books.count)
         }
         .scrollIndicators(.hidden)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub], allowsMultipleSelection: true) { r in
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub, .item], allowsMultipleSelection: true) { r in
             guard case .success(let urls) = r, !urls.isEmpty else { return }
             busy = true
             Task { errors = await store.importFiles(urls); busy = false }
@@ -95,19 +96,16 @@ struct NovelHomeView: View {
             Button("删除", role: .destructive) { if let b = deleting { store.remove(b) }; deleting = nil }
         } message: { Text("会同时删除阅读进度和本机保存的文件。") }
         .fullScreenCover(item: $reading) { b in NovelReaderView(book: store.book(b.id) ?? b) }
-        .fullScreenCover(isPresented: $searching) {
-            NovelSearchView { b in
-                searching = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
+        .fullScreenCover(item: $detailBook) { book in
+            if let source = book.sourceURL, let url = book.bookURL {
+                NavigationStack {
+                    NovelWebDetailView(items: [LegadoSearchItem(name: book.title, author: book.author ?? "", kind: "", intro: "", cover: book.coverURL ?? "", latest: "", bookURL: url, sourceURL: source, sourceName: LegadoSourceStore.shared.source(source)?.bookSourceName ?? "当前书源")])
+                }
             }
         }
+        .fullScreenCover(isPresented: $searching) { NovelSearchView() }
         .fullScreenCover(isPresented: $managing) { NovelSourcesView() }
-        .fullScreenCover(isPresented: $exploring) {
-            NovelExploreView { b in
-                exploring = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
-            }
-        }
+        .fullScreenCover(isPresented: $exploring) { NovelExploreView() }
         .sheet(isPresented: $importSheet) {
             NovelImportSheet(onLocalFiles: {
                 importSheet = false

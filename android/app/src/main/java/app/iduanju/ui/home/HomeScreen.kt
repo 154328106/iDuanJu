@@ -160,7 +160,7 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
         AmbientGlow(visible = !pinned)
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(Modifier.fillMaxSize().then(if (immersive) Modifier else Modifier.statusBarsPadding())) {
             // header: search + filter capsule
             if (!immersive) Column(Modifier.dsPinned(pinned).padding(top = 6.dp)) {
                 Row(
@@ -337,7 +337,6 @@ private fun ChannelBar(items: List<String>, selected: Int, ink: Color, onMore: (
 
 @Composable
 private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit) {
-    val c = IdjThemeColors
     val subs = source.subs()
     var tab by remember { mutableStateOf(subs.getOrElse(HomeSubSel.map[source.label] ?: 0) { subs.first() }) }
     LaunchedEffect(HomeSubSel.map[source.label]) { HomeSubSel.map[source.label]?.let { i -> subs.getOrNull(i)?.let { tab = it } } }
@@ -346,15 +345,18 @@ private fun FeedPage(source: HomeSource, onOpen: (String) -> Unit) {
     var heroIndex by remember(tab) { mutableIntStateOf(0) }
     LaunchedEffect(tab) { boards.firstOrNull()?.let { BoardCache.load(it) } }
 
+    @Composable fun subTabs(modifier: Modifier = Modifier) {
+        SegmentedTabs(subs, tab, { it.subLabel }, {
+            tab = it
+            HomeSubSel.map[source.label] = subs.indexOf(it)
+        }, modifier)
+    }
+    if (tab == HomeTab.ActorRank) {
+        app.iduanju.ui.profile.ActorRankList(bottomPadding = 96.dp) { subTabs() }
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp + 72.dp)) {
-        if (subs.size > 1) {
-            SegmentedTabs(subs, tab, { it.subLabel }, { tab = it; HomeSubSel.map[source.label] = subs.indexOf(it) }, Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
-        }
-        if (tab == HomeTab.ActorRank) {
-            val go = app.iduanju.ui.LocalNavigate.current
-            Box(Modifier.fillMaxWidth().padding(40.dp).clickable { go("actorRank") }, contentAlignment = Alignment.Center) { Text("查看剧星榜 →", color = c.accent) }
-            return@Column
-        }
+        if (subs.size > 1) subTabs(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp))
         Column(Modifier.padding(top = 0.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
             if (heroPicks.isNotEmpty()) {
                 PosterHero(boards.first().title, heroPicks, heroIndex, { heroIndex = it }, onOpen)
@@ -400,8 +402,11 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
         platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
     val metaStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, lineHeight = 18.sp,
         platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
-    val buttonStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
-        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false))
+    // Material Text merges the ambient style (including letter spacing). Measure
+    // that same resolved style, not a partial style that underestimates the label.
+    val buttonStyle = LocalTextStyle.current.merge(androidx.compose.ui.text.TextStyle(
+        fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
     BoxWithConstraints(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
         // Preserve the spec's 112 dp poster normally; narrow windows keep a usable info column.
         val posterWidth = minOf(112.dp, (maxWidth - 28.dp - 14.dp - 160.dp).coerceAtLeast(80.dp))
@@ -411,7 +416,14 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
             measurer.measure(text, style, maxLines = lines, overflow = TextOverflow.Ellipsis,
                 constraints = androidx.compose.ui.unit.Constraints(maxWidth = infoPx)).size.height.toDp()
         }
-        val ctaWidth = with(density) { measurer.measure("查看详情", buttonStyle).size.width.toDp() } + 48.dp
+        val ctaLabel = "查看详情"
+        val pillPadding = 14.dp
+        val iconSize = 14.dp
+        val iconGap = 6.dp
+        val ctaWidth = with(density) {
+            val labelWidth = measurer.measure(ctaLabel, buttonStyle, maxLines = 1, softWrap = false).size.width
+            (labelWidth + 2 * pillPadding.roundToPx() + iconSize.roundToPx() + iconGap.roundToPx()).toDp()
+        }
         val visualButtonHeight = with(density) { 16.sp.toDp() + 12.dp }.coerceAtLeast(32.dp)
         val touchHeight = maxOf(48.dp, visualButtonHeight)
         val dotsWidth = if (picks.size > 1) (14 + (picks.size - 1) * 9).dp else 0.dp
@@ -452,11 +464,11 @@ private fun PosterHero(board: String, picks: List<HGSeries>, index: Int, setInde
                         @Composable fun cta() {
                             // Explicit 48 dp hit slot; the spec's 32 dp white pill stays visually compact.
                             Box(Modifier.height(touchHeight).width(ctaWidth).testTag("home.hero.cta.$i")
-                                .pressClick(0.98f, label = "查看详情") { onOpen(s.seriesId) }, contentAlignment = Alignment.Center) {
-                                Row(Modifier.fillMaxWidth().height(visualButtonHeight).testTag("home.hero.pill.$i").clip(CircleShape).background(Color.White).padding(horizontal = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
-                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(14.dp), tint = Color(0xFF111317))
-                                    Text("查看详情", Modifier.testTag("home.hero.ctaText.$i"), color = Color(0xFF111317), style = buttonStyle, maxLines = 1)
+                                .pressClick(0.98f, label = ctaLabel) { onOpen(s.seriesId) }, contentAlignment = Alignment.Center) {
+                                Row(Modifier.fillMaxWidth().height(visualButtonHeight).testTag("home.hero.pill.$i").clip(CircleShape).background(Color.White).padding(horizontal = pillPadding),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(iconGap)) {
+                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(iconSize), tint = Color(0xFF111317))
+                                    Text(ctaLabel, Modifier.weight(1f).testTag("home.hero.ctaText.$i"), color = Color(0xFF111317), style = buttonStyle, maxLines = 1, softWrap = false)
                                 }
                             }
                         }

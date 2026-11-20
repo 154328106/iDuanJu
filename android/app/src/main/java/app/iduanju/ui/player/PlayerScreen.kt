@@ -59,9 +59,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
+/** A resolved video queue whose owner manages chapter loading and the player lifetime. */
+class VideoQueueSession(val player: ExoPlayer, val detail: HGSeriesDetail, val index: Int,
+    val loading: Boolean, val failure: String?, val select: (Int) -> Unit)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSeries: (String) -> Unit = {}) {
+fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: VideoQueueSession? = null, onSwitchSeries: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val lib = IdjApp.instance.library
     var detail by remember { mutableStateOf<HGSeriesDetail?>(null) }
@@ -100,24 +104,25 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
     }
     var tags by remember { mutableStateOf(TechTags()) }
     var retry by remember { mutableIntStateOf(0) }
+    var detailRetry by remember { mutableIntStateOf(0) }
 
     // OkHttp (HTTP/2) like iOS URLSession: huangguo.video's Cloudflare 403s HTTP/1.1 (HttpURLConnection),
     // which made every 黄果 视频站 segment request fail with ERROR_CODE_IO_BAD_HTTP_STATUS.
     val httpFactory = remember { androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(EpisodeCache.http).setUserAgent(app.iduanju.core.cms.MacCMS.UA) }
-    val player = remember {
-        ExoPlayer.Builder(ctx).setMediaSourceFactory(
+    val player = remember(queue?.player) {
+        queue?.player ?: ExoPlayer.Builder(ctx, DecoderCaps.renderers(ctx)).setMediaSourceFactory(
             androidx.media3.exoplayer.source.DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(ctx, httpFactory))
         ).build().also { it.playWhenReady = true }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(player) {
         val l = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED && autoNext) {
+                if (queue == null && state == Player.STATE_ENDED && autoNext) {
                     val n = detail?.episodes?.size ?: 0
                     if (epIndex + 1 < n) epIndex += 1
                 }
             }
-            override fun onPlayerError(e: PlaybackException) { error = "播放失败：${e.errorCodeName}"; keepScreenOn(activity, false) }
+            override fun onPlayerError(e: PlaybackException) { if (queue == null) error = "播放失败：${e.errorCodeName}"; keepScreenOn(activity, false) }
             // Keep the display awake only while frames are actually playing (portrait, landscape, same activity window).
             override fun onIsPlayingChanged(isPlaying: Boolean) { keepScreenOn(activity, isPlaying) }
             override fun onTracksChanged(t: androidx.media3.common.Tracks) {
@@ -128,10 +133,25 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) { tags = TechTags.from(player, quality) }
         }
         player.addListener(l)
-        onDispose { keepScreenOn(activity, false); player.removeListener(l); player.release() }
+        onDispose { keepScreenOn(activity, false); player.removeListener(l); if (queue == null) player.release() }
     }
 
-    LaunchedEffect(seriesId) {
+    val activeQueue by rememberUpdatedState(queue)
+    fun selectEpisode(index: Int) {
+        val current = activeQueue
+        if (current == null) epIndex = index else current.select(index)
+    }
+    LaunchedEffect(queue?.index, queue?.loading, queue?.failure, queue?.detail) {
+        if (queue != null) {
+            detail = queue.detail
+            epIndex = queue.index
+            error = queue.failure
+            status = if (queue.loading) "正在打开章节…" else ""
+        }
+    }
+    LaunchedEffect(seriesId, detailRetry) {
+        if (queue != null) return@LaunchedEffect
+        error = null; status = "加载中…"
         if(fixture) {
             detail=HGSeriesDetail(seriesId=seriesId,title="本地彩条测试 · 非真实片源",totalEps=48,source="本地测试",
                 episodes=(1..48).map{app.iduanju.core.hongguo.HGEpisode(it,"fixture-$it",60,"彩条第 $it 段")})
@@ -143,10 +163,12 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             val d = withContext(Dispatchers.IO) { app.iduanju.data.Catalog.detail(seriesId, web = false) }
             detail = d
             epIndex = d.episodes.indexOfFirst { it.ep == startEp }.coerceAtLeast(0)
-        } catch (e: Exception) { error = e.message ?: "详情失败"; status = "" }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { android.util.Log.w("IDJ", "Player detail load failed", e); error = "无法加载节目详情"; status = "" }
     }
 
     LaunchedEffect(detail, epIndex, retry) {
+        if (queue != null) return@LaunchedEffect
         val d = detail ?: return@LaunchedEffect
         val ep = d.episodes.getOrNull(epIndex) ?: return@LaunchedEffect
         if(previousEpisode >= 0 && previousEpisode != epIndex) centerSuppressed=true
@@ -179,8 +201,10 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             // precache next episode (iOS preloads the next stream while this one plays)
             // spaced ≥6 s from the current resolve: fresh one-shot registrations back-to-back get soft-rejected (probe 2026-11-11)
             if (IdjApp.instance.settings.prefetchEnabled) d.episodes.getOrNull(epIndex + 1)?.let { delay(6_000); EpisodeCache.preload(it) }
-        } catch (e: Exception) {
-            status = ""; error = e.message ?: "播放失败"
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
+            android.util.Log.w("IDJ", "Player media load failed", e)
+            status = ""; error = "无法打开这条播放线路"
         }
     }
 
@@ -193,7 +217,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
             pos = player.currentPosition; dur = player.duration.coerceAtLeast(0); buffered = player.bufferedPosition
             playing = player.isPlaying
             app.iduanju.ui.UiEvidence.playerPositionMs = pos; app.iduanju.ui.UiEvidence.playerPlaying = playing
-            if (++tick % 20 == 0 && playing) detail?.let { d ->
+            if (queue == null && ++tick % 20 == 0 && playing) detail?.let { d ->
                 d.episodes.getOrNull(epIndex)?.let { ep ->
                     lib.record(WatchProgress(seriesId, d.title, d.cover, epIndex, ep.ep, pos / 1000.0, dur / 1000.0, System.currentTimeMillis()))
                 }
@@ -207,7 +231,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
         onDispose {
             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             activity?.window?.let { w -> androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
-            detail?.let { d -> d.episodes.getOrNull(epIndex)?.let { ep ->
+            if (queue == null) detail?.let { d -> d.episodes.getOrNull(epIndex)?.let { ep ->
                 lib.record(WatchProgress(seriesId, d.title, d.cover, epIndex, ep.ep, pos / 1000.0, dur / 1000.0, System.currentTimeMillis()))
             } }
         }
@@ -273,8 +297,8 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                     var acc = 0f
                     detectVerticalDragGestures(onDragStart = { acc = 0f }, onDragEnd = {
                         val n = detail?.episodes?.size ?: 0
-                        if (!locked && acc < -160 && epIndex + 1 < n) epIndex += 1
-                        else if (!locked && acc > 160 && epIndex > 0) epIndex -= 1
+                        if (!locked && acc < -160 && epIndex + 1 < n) selectEpisode(epIndex + 1)
+                        else if (!locked && acc > 160 && epIndex > 0) selectEpisode(epIndex - 1)
                     }) { _, d -> acc += d }
                 }
                 .pointerInput(Unit) {
@@ -302,7 +326,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 Text(it, color = Color.White.copy(0.85f), fontSize = 14.sp)
                 Spacer(Modifier.height(14.dp))
                 Text("重试", color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White).clickable { retry++ }.padding(horizontal = 18.dp, vertical = 8.dp))
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White).clickable { if (queue != null) selectEpisode(epIndex) else if (detail == null) detailRetry++ else retry++ }.padding(horizontal = 18.dp, vertical = 8.dp))
             }
         }
         if (holdSpeed) {
@@ -334,10 +358,10 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(detail?.title.orEmpty(),color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Bold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        Text("第 ${detail?.episodes?.getOrNull(epIndex)?.ep ?: 1} 集 / 共 ${detail?.episodes?.size ?: 0} 集",color=Color.White.copy(0.7f),fontSize=12.sp)
+                        Text(if (queue != null) "第 ${epIndex + 1} 章 · ${detail?.episodes?.getOrNull(epIndex)?.title.orEmpty()}" else "第 ${detail?.episodes?.getOrNull(epIndex)?.ep ?: 1} 集 / 共 ${detail?.episodes?.size ?: 0} 集",maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,color=Color.White.copy(0.7f),fontSize=12.sp)
                     }
                     TechLine(tags,Modifier.padding(end=14.dp))
-                    LandChip(Icons.Filled.Repeat,"连播",if(autoNext)"开" else "关",autoNext,showChrome&&!locked){autoNext=!autoNext}
+                    if (queue == null) LandChip(Icons.Filled.Repeat,"连播",if(autoNext)"开" else "关",autoNext,showChrome&&!locked){autoNext=!autoNext}
                     Spacer(Modifier.width(10.dp))
                     CircleBtn(if(locked)Icons.Filled.Lock else Icons.Filled.LockOpen,if(locked)"解锁" else "锁屏",showChrome){locked=!locked}
                     Spacer(Modifier.width(10.dp))
@@ -347,7 +371,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                     CircleBtn(Icons.Filled.PictureInPictureAlt, "画中画", showChrome) {}
                     Spacer(Modifier.width(10.dp))
                     val fav = lib.isFavorite(seriesId)
-                    CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", showChrome) {
+                    if (queue == null) CircleBtn(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "收藏", showChrome) {
                         detail?.let { lib.toggleFavorite(seriesId, it.title, it.cover) }
                     }
                     Spacer(Modifier.width(10.dp))
@@ -387,8 +411,8 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                             "第 " + app.iduanju.core.hongguo.SeasonParser.seasonNo(ss.firstOrNull { it.seriesId == d.seriesId }?.title ?: d.title) + " 季" else null
                     }
                     seasonTag?.let { Text("$it · ", color = Color.White.copy(0.72f), fontSize = 13.sp) }
-                    Text("第 ${d.episodes.getOrNull(epIndex)?.ep ?: startEp} 集", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(" / 共 ${maxOf(d.totalEps, d.episodes.size)} 集", color = Color.White.copy(0.72f), fontSize = 13.sp)
+                    Text(if (queue != null) "第 ${epIndex + 1} 章" else "第 ${d.episodes.getOrNull(epIndex)?.ep ?: startEp} 集", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (queue != null) " · ${d.episodes.getOrNull(epIndex)?.title.orEmpty()}" else " / 共 ${maxOf(d.totalEps, d.episodes.size)} 集", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = Color.White.copy(0.72f), fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(d.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, lineHeight = 27.sp, maxLines = 1,
@@ -452,7 +476,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, onSwitchSer
                 .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(24.dp)).pointerInput(Unit) { detectTapGestures { } }
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp)) {
                 when (shown) {
-                    "episodes" -> detail?.let { d -> EpisodesPanel(d, epIndex, pc, onPick = { epIndex = it; panel = null },
+                    "episodes" -> detail?.let { d -> EpisodesPanel(d, epIndex, pc, onPick = { selectEpisode(it); panel = null },
                         onSeason = { id -> panel = null; onSwitchSeries(id) }) }
                     "speed" -> {
                         PanelTitle("倍速", "长按画面临时 2×")

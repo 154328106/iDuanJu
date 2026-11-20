@@ -23,8 +23,8 @@ iOS 小说视觉未改，只增加测试用 accessibilityIdentifier；DEBUG 本�
 | 1335 七猫、米读 | 双端真实请求 + 原生筛选 UI；七猫完结/50–100万/评分、男→女、恢复源自带默认；米读男→女。仅公开目录列表，不碰付费正文。 |
 | 静态合法 M3U → idj1 | Mux 官方 hls.js Big Buck Bunny 测试流。iOS 安装/首页/搜索/详情/解析/200 HLS/重载持久化；原生播放器时间推进。Android 插件详情和真实 ExoPlayer H.264/AAC 播放截图。 |
 | 原生 idj1 插件订阅 | iOS 原生存储/Android 原生 SharedPreferences 的受控传输测试：v1→v2 刷新、相对 manifest URL、错误 TVBox 更新保留 v2、重载持久化、不自动安装。**这是受控 fixture，不是已找到可用的公开远程 idj 订阅服务。** |
-| MacCMS JSON VOD | 现有内建 Provider 支持；本轮只核对代码，不宣称新公共 VOD 源端到端通过。XML/通用 TVBox JSON 导入不支持。 |
-| TVBox JSON sites/type1 | MacCMS 条目有条件可人工映射；不能把整份 TVBox JSON 当 M3U。CatVod JS、JAR、Python spider **不支持本轮接入**，未下载/执行 JAR。 |
+| MacCMS JSON VOD | 现有内建 Provider 支持；本轮只核对代码，不宣称新公共 VOD 源端到端通过。XML 仍不支持。 |
+| TVBox JSON sites/type1 | 导入入口只映射 `sites` 中 `type=1` 且可验证的公网 HTTPS JSON API 到内置 MacCMS；逐站请求分类接口，最多 50 个。CatVod JS、JAR、Python spider、解析器和直播规则仍不执行。 |
 | Legado type1 有声/type4 视频、RSS 订阅规则 | 并非现有文本引擎支持。iOS 保留不支持标记，Android 文本导入排除非 0 类型；不能称已导入就可听/可看。 |
 | yck RSS 895 知乎日报 | 上游公开 API 可达，规则是 sourceUrl/ruleArticles/sortUrl 的 Legado RSS，不是 idj1 插件订阅；应用无此阅读器运行时，明确未适配。 |
 | 商业动漫/未知版权采集 | 未挑选、未播放。合法动画测试流不等于商业动漫站兼容保证。漫画由另一 worker 负责，本分支未重复研究。 |
@@ -106,4 +106,4 @@ adb -s <own-device> shell am instrument -w -r -e sourceCompatLive 1 -e class app
 
 ## 明确未完成/不承诺
 
-没有新增有声/RSS/CatVod/JAR/Python 执行引擎，没有解 CF/登录/付费/DRM；没有全601源扫描，没有商业动漫源保证。真实上游请求有偶发较长延迟，Android 原生测试保留至多120秒的控件/结果等待，不把等待中的空白页算通过；列表可达不等于每本每章都可读；一次播放通过不等于全球网络永久兼容。受控订阅存储测试不等于已验证公网订阅服务。后续集成须由 parent review/cherry-pick，不能直接发公开 Release。
+没有新增有声/RSS/CatVod/JAR/Python 执行引擎，没有解 CF/登录/付费/DRM；TVBox 只做 type=1 API 到 MacCMS 的受限映射，没有全601源扫描，没有商业动漫源保证。真实上游请求有偶发较长延迟，Android 原生测试保留至多120秒的控件/结果等待，不把等待中的空白页算通过；列表可达不等于每本每章都可读；一次播放通过不等于全球网络永久兼容。受控订阅存储测试不等于已验证公网订阅服务。后续集成须由 parent review/cherry-pick，不能直接发公开 Release。

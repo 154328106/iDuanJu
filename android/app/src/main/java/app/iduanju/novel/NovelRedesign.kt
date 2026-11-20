@@ -2,6 +2,7 @@ package app.iduanju.novel
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.*
@@ -34,10 +35,10 @@ import app.iduanju.ui.components.*
 
 /** Native redesign 04–08. Empty states never manufacture books or source results. */
 @Composable
-internal fun NovelShelf(books: List<Pair<String, NovelHit>>, hasLocal: Boolean, onBook: (String,NovelHit)->Unit,
+internal fun NovelShelf(books: List<Pair<String, NovelHit>>, hasLocal: Boolean, onContinue: (String, NovelHit) -> Unit, onBook: (String,NovelHit)->Unit,
     onLocal: ()->Unit, onImport: ()->Unit, onSearch: ()->Unit, onRank: ()->Unit, onSources: ()->Unit, embedded:Boolean=false) {
     val c=IdjThemeColors
-    LazyColumn(contentPadding=PaddingValues(bottom=36.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
+    LazyColumn(Modifier.testTag("novel.shelf"), contentPadding=PaddingValues(bottom=36.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
         if(!embedded) {
             item { Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("书架",color=c.text,fontSize=28.sp,fontWeight=FontWeight.ExtraBold,modifier=Modifier.weight(1f))
@@ -64,7 +65,7 @@ internal fun NovelShelf(books: List<Pair<String, NovelHit>>, hasLocal: Boolean, 
                     Text(b.name,color=c.text,fontSize=20.sp,fontWeight=FontWeight.Bold,maxLines=1)
                     Text(b.author,color=c.secondary,fontSize=13.sp)
                     DSStatus("已缓存 · 可离线阅读",StatusTone.Ok)
-                    PillButton("继续阅读",icon=Icons.Rounded.PlayArrow,tone=PillTone.Ink,small=true){onBook(src,b)}
+                    PillButton("继续阅读",icon=Icons.Rounded.PlayArrow,tone=PillTone.Ink,small=true){onContinue(src,b)}
                 }
             }
         }
@@ -162,7 +163,7 @@ internal val BooksIcon:ImageVector by lazy{
         if(value.isNotEmpty())Icon(Icons.Rounded.Cancel,"清除",tint=c.tertiary,modifier=Modifier.size(18.dp).clickable{onValue("")})
     }
 }
-@Composable internal fun NovelResult(book:NovelHit,rank:Int?,sourceName:String,onClick:()->Unit){val c=IdjThemeColors
+@Composable internal fun NovelResult(book:NovelHit,rank:Int?,sourceName:String,sourceCount:Int=1,onClick:()->Unit){val c=IdjThemeColors
     Row(Modifier.fillMaxWidth().pressClick(0.985f,onClick=onClick).padding(horizontal=16.dp,vertical=13.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){
         if(rank!=null) RankNumeral(rank,18,Modifier.width(20.dp).padding(top=26.dp))
         NovelPoster(book,Modifier.size(if(rank==null)58.dp else 54.dp,if(rank==null)81.dp else 75.dp))
@@ -176,7 +177,7 @@ internal val BooksIcon:ImageVector by lazy{
                 Text(listOf(book.author,book.kind).filter{it.isNotBlank()}.joinToString(" · "),color=c.secondary,fontSize=12.sp,maxLines=1)
                 if(book.latest.isNotBlank())Text("最新：${book.latest}",color=c.tertiary,fontSize=11.sp,maxLines=1)
             }
-            if(rank==null)Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){DSStatus("1 个书源",StatusTone.Accent);DSTag(sourceName)}
+            if(rank==null)Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){DSStatus("$sourceCount 个书源",StatusTone.Accent);DSTag(sourceName)}
         }
     }
 }

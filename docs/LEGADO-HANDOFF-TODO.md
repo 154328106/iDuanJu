@@ -23,7 +23,7 @@
 
 - [ ] yck 真实动漫／视频源端到端验收，目前通过数为 0。NASA 只能证明相同解析契约。B 站 #197 专用混合源的 WBI、专用界面和脚本接口尚未移植。
 - [ ] 将 WebView 能力扩展到文本正文、目录等非媒体请求；支持 POST + webView 以及上游 java.webView 规则桥。
-- [ ] 通用 TVBox／CatVod／JAR／Python 引擎。当前媒体链路不等于 TVBox 引擎。
+- [ ] 通用 TVBox／CatVod／JAR／Python 引擎。当前仅完成 TVBox `sites.type=1` 公网 HTTPS JSON API 到内置 MacCMS 的受限映射；不执行 CatVod JS、JAR、Python spider、解析器或直播规则，当前媒体链路也不等于通用 TVBox 引擎。
 - [ ] M3U 导入至实际播放的完整验收；现有记录不足以声称已完成。
 - [ ] 带凭证的 HLS、跨 CDN 的清单／密钥／分片／Range 请求与复杂认证链，补齐权限边界和真实原生验收。
 - [ ] 后台播放、锁屏控制及中断／恢复验收。

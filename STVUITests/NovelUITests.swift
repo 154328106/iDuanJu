@@ -223,6 +223,11 @@ final class NovelUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["共 3 章"].waitForExistence(timeout: 10), "目录 not loaded on the detail page")
         XCTAssertTrue(app.staticTexts["雾气笼罩的港口小城里，每个人都在等一艘船。"].exists, "intro missing")
         shot("legado_03_detail")
+        el("nav.back").tap()
+        XCTAssertTrue(hit.waitForExistence(timeout: 5), "返回应保留搜索结果")
+        XCTAssertEqual(field.value as? String, "wu")
+        hit.tap()
+        XCTAssertTrue(el("detail.read").waitForExistence(timeout: 10))
         el("detail.read").tap()
         // Reader opens on 第一章, fetched from the fake site.
         XCTAssertTrue(el("novel.page").waitForExistence(timeout: 10), "reader did not open")

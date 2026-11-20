@@ -124,8 +124,8 @@ struct MacCMSProvider: SiteProvider {
             if let fu = resp.url?.host, fu != host, NetGuard.resolvesToBlocked(fu) { throw ProviderError.invalid("跳转到内网地址") }
             data = d
         }
-        guard data.count < 8 << 20, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            throw ProviderError.upstream("采集站没有返回 JSON（可能只支持 XML 或需要 ?ac=detail）")
+        guard data.count < 8 << 20, let o = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? CMSXML.decode(data) else {
+            throw ProviderError.upstream("采集站没有返回有效的 CMS JSON / XML")
         }
         if let code = o["code"], PluginOut.s(code) != "1" {
             throw ProviderError.upstream("采集站：" + PluginOut.s(o["msg"]).nonEmptyOr("请求失败"))
@@ -259,5 +259,48 @@ struct MacCMSProvider: SiteProvider {
         }
         guard let first = st.first else { throw ProviderError.unsupported("没有可播放的线路") }
         return HGResolvedVideo(vid: ep.vid, url: first.url, key: nil, duration: nil, expiresAt: nil, err: nil, streams: st)
+    }
+}
+
+/// MacCMS RSS uses one <dd flag="…"> per playback line and carries pagination on <list>.
+private final class CMSXML: NSObject, XMLParserDelegate {
+    var output: [String: Any] = [:]
+    var videos: [[String: String]] = [], categories: [[String: String]] = []
+    var video: [String: String]?, flags: [String] = [], urls: [String] = []
+    var text = "", categoryID = "", rootSeen = false
+    static let fields = ["id":"vod_id", "name":"vod_name", "pic":"vod_pic", "type":"type_name", "last":"vod_time", "note":"vod_remarks", "actor":"vod_actor", "director":"vod_director", "des":"vod_content", "year":"vod_year", "area":"vod_area", "tid":"type_id"]
+    static func decode(_ data: Data) -> [String: Any]? {
+        guard let xml = String(data: data, encoding: .utf8), !xml.localizedCaseInsensitiveContains("<!DOCTYPE") else { return nil }
+        let delegate = CMSXML(), parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.shouldResolveExternalEntities = false
+        guard parser.parse(), !delegate.output.isEmpty else { return nil }
+        return delegate.output
+    }
+    func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?, attributes attrs: [String: String] = [:]) {
+        if !rootSeen { rootSeen = true; guard name == "rss" else { parser.abortParsing(); return } }
+        text = ""
+        switch name {
+        case "list": output["pagecount"] = attrs["pagecount"]
+        case "ty": categoryID = attrs["id"] ?? ""
+        case "video": video = [:]; flags = []; urls = []
+        case "dd": flags.append(attrs["flag"] ?? "线路\(flags.count + 1)")
+        default: break
+        }
+    }
+    func parser(_ parser: XMLParser, foundCharacters string: String) { text += string }
+    func parser(_ parser: XMLParser, foundCDATA data: Data) { text += String(decoding: data, as: UTF8.self) }
+    func parser(_ parser: XMLParser, didEndElement name: String, namespaceURI: String?, qualifiedName: String?) {
+        switch name {
+        case "ty": categories.append(["type_id": categoryID, "type_name": text])
+        case "class": output["class"] = categories
+        case "list": output["list"] = videos
+        case "dd": urls.append(text)
+        case "video":
+            video?["vod_play_from"] = flags.joined(separator: "$$$"); video?["vod_play_url"] = urls.joined(separator: "$$$")
+            if let video { videos.append(video) }; video = nil
+        default: if let key = Self.fields[name] { video?[key] = text }
+        }
+        text = ""
     }
 }

@@ -336,16 +336,21 @@ enum PluginInstaller {
     }
 
     /// Text pasted / scanned by the user: a manifest URL, a subscription URL, an M3U URL, a bundle JSON or an M3U list.
-    enum Pasted { case plugin(PendingInstall), subscription(String) }
+    enum Pasted { case plugin(PendingInstall), subscription(String), tvbox(TVBoxImport.Config) }
     static func interpret(_ text: String) async throws -> Pasted {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if M3UImport.isChannelList(t) { return .plugin(try prepareM3U(t, url: nil, name: nil, origin: "粘贴")) }
+        if let data = t.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           o["sites"] != nil || o["spider"] != nil || o["lives"] != nil {
+            return .tvbox(try TVBoxImport.parse(data))
+        }
         if t.hasPrefix("http://") || t.hasPrefix("https://") {
             let data = try await download(t, limit: 2 << 20)
             if let list = String(data: data, encoding: .utf8), M3UImport.isChannelList(list) {
                 return .plugin(try prepareM3U(list, url: t, name: nil, origin: t))
             }
             if let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if o["sites"] != nil || o["spider"] != nil || o["lives"] != nil { return .tvbox(try TVBoxImport.parse(data)) }
                 if o["plugins"] != nil || o["cms"] != nil { return .subscription(t) }
                 if o["manifest"] != nil { return .plugin(try prepare(bundle: data, origin: t)) }
                 if o["schema"] != nil { return .plugin(try await prepare(manifestData: data, manifestURL: t, origin: t)) }
@@ -357,6 +362,19 @@ enum PluginInstaller {
     }
 
     /// A reviewed M3U channel list becomes a static video plugin, under the same rules as scripts/source-compat/m3u_to_idj.py.
+    static func prepareLive(_ live: TVBoxImport.Live) async throws -> PendingInstall {
+        let raw = String(decoding: try await download(live.url, limit: 2 << 20), as: UTF8.self)
+        if M3UImport.isChannelList(raw) { return try prepareM3U(raw, url: live.url, name: live.name, origin: "TVBox") }
+        var lines = ["#EXTM3U"]
+        for line in raw.split(whereSeparator: \.isNewline) {
+            guard let split = line.firstIndex(of: ",") else { continue }
+            let title = line[..<split].trimmingCharacters(in: .whitespaces)
+            let url = line[line.index(after: split)...].trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty, url.hasPrefix("https://") { lines += ["#EXTINF:-1," + title, url] }
+        }
+        return try prepareM3U(lines.joined(separator: "\n"), url: live.url, name: live.name, origin: "TVBox")
+    }
+
     static func prepareM3U(_ text: String, url: String?, name: String?, origin: String) throws -> PendingInstall {
         let channels: [M3UImport.Channel]
         do { channels = try M3UImport.parse(text, base: url) }

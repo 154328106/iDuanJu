@@ -686,7 +686,6 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func prepare(_ i: Int) async throws -> Source {
-        if let sourceResolver { return try await sourceResolver(i) }
         if let source = prepared[i] {
             if case .file(let url) = source, !FileManager.default.fileExists(atPath: url.path) {
                 prepared[i] = nil
@@ -700,6 +699,15 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         let bypass = bypassProxy.contains(i)
         let viaAether = PlayerEngineSettings.preferred == .aether && !aetherFailed.contains(i) && aether != nil
         let task = Task<Source, Error> { [weak self] in
+            if let resolve = self?.sourceResolver {
+                let source = try await resolve(i)
+                if case .direct(let url) = source, let token = LocalHLSProxy.token(of: url.absoluteString) {
+                    guard !Task.isCancelled, let self else { LocalHLSProxy.shared.release(token); throw CancellationError() }
+                    if let old = self.prefetchTokens[i], old != token { LocalHLSProxy.shared.release(old) }
+                    self.prefetchTokens[i] = token
+                }
+                return source
+            }
             var stream = want
             if stream == nil {
                 let r = try await Catalog.resolve(series, ep)
@@ -959,6 +967,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     }
 
     private func save(force: Bool) {
+        guard sourceResolver == nil else { return }
         guard let i = readyIndex, episodes.indices.contains(i) else { return }
         guard force || Date().timeIntervalSince(lastSave) > 4 else { return }
         let seconds = force ? engine.currentTime : time
