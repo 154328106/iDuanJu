@@ -12,6 +12,13 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     /// `.remote`: upstream MP4 played by AVFoundation directly (proxy fallback).
     enum Source { case file(URL), stream(HLSPlayback, String), direct(URL), remote(URL, [String: String]) }
 
+    private static func mp4AssetOptions(headers: [String: String] = [:]) -> [String: Any]? {
+        var o: [String: Any] = [:]
+        if #available(iOS 17.0, *) { o[AVURLAssetOverrideMIMETypeKey] = "video/mp4" }
+        if !headers.isEmpty { o["AVURLAssetHTTPHeaderFieldsKey"] = headers }
+        return o.isEmpty ? nil : o
+    }
+
     /// AVPlayerItem for a source. Progressive MP4s get an explicit out-of-band MIME type so AVFoundation
     /// never has to guess the container from an extensionless / query-string URL.
     static func makeItem(_ src: Source) -> AVPlayerItem? {
@@ -19,11 +26,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         case .file(let u): return AVPlayerItem(url: u)
         case .direct(let u):
             let mp4 = u.path.hasSuffix(".mp4") || u.path.hasPrefix("/tg/")
-            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4 ? [AVURLAssetOverrideMIMETypeKey: "video/mp4"] : nil))
+            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4 ? mp4AssetOptions() : nil))
         case .remote(let u, let headers):
-            var o: [String: Any] = [AVURLAssetOverrideMIMETypeKey: "video/mp4"]
-            if !headers.isEmpty { o["AVURLAssetHTTPHeaderFieldsKey"] = headers }
-            return AVPlayerItem(asset: AVURLAsset(url: u, options: o))
+            return AVPlayerItem(asset: AVURLAsset(url: u, options: mp4AssetOptions(headers: headers)))
         case .stream(let loader, let url):
             return loader.makeAsset(url: url).map { AVPlayerItem(asset: $0) }
         }
@@ -660,9 +665,9 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         case .file(let u): return AVURLAsset(url: u)
         case .direct(let u):
             guard u.path.hasSuffix(".mp4") else { return nil }
-            return AVURLAsset(url: u, options: [AVURLAssetOverrideMIMETypeKey: "video/mp4"])
+            return AVURLAsset(url: u, options: mp4AssetOptions())
         case .remote(let u, let h):
-            return AVURLAsset(url: u, options: [AVURLAssetOverrideMIMETypeKey: "video/mp4", "AVURLAssetHTTPHeaderFieldsKey": h])
+            return AVURLAsset(url: u, options: mp4AssetOptions(headers: h))
         case .stream(let loader, let s):
             guard let u = URL(string: s), !MPVPlayerEngine.isPlaylist(u) else { return nil }
             return AVURLAsset(url: u, options: ["AVURLAssetHTTPHeaderFieldsKey": loader.headers])

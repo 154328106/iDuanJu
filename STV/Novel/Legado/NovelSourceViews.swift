@@ -215,7 +215,7 @@ struct NovelSearchView: View {
             DSBackButton { task?.cancel(); dismiss() }
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(STVTheme.secondary)
-                TextField("", text: $query, prompt: Text("书名或作者").foregroundStyle(STVTheme.tertiary))
+                TextField("", text: $query, prompt: Text("书名或作者").foregroundColor(STVTheme.tertiary))
                     .focused($focused).submitLabel(.search).onSubmit(run)
                     .font(.system(size: 15, weight: .medium)).foregroundStyle(STVTheme.text).tint(STVTheme.accent)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
@@ -256,7 +256,7 @@ struct NovelSearchView: View {
             HStack(spacing: 6) {
                 if done < total {
                     Circle().fill(STVTheme.accent).frame(width: 6, height: 6)
-                    (Text("正在搜索 ") + Text("\(done)").foregroundStyle(STVTheme.text).bold() + Text(" / \(total) 个书源 · \(groups.count) 本"))
+                    (Text("正在搜索 ") + Text("\(done)").foregroundColor(STVTheme.text).bold() + Text(" / \(total) 个书源 · \(groups.count) 本"))
                 } else {
                     Text("共 \(groups.count) 本 · \(total) 个书源")
                 }
@@ -610,7 +610,7 @@ struct NovelWebDetailView: View {
             }
             .padding(.bottom, 108)
         }
-        .coordinateSpace(.named("novelDetail"))
+        .coordinateSpace(name: "novelDetail")
         .compatOnScrollY { scrollY = $0 }
         .scrollIndicators(.hidden)
         .ignoresSafeArea(edges: .top)

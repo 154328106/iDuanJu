@@ -128,7 +128,7 @@ struct DramaDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 110)
                 }
-                .coordinateSpace(.named("detail"))
+                .coordinateSpace(name: "detail")
                 .compatOnScrollY { scrollY = $0 }
                 .scrollIndicators(.hidden)
                 .compatDefaultScrollAnchor(DebugScroll.anchor)

@@ -172,6 +172,7 @@ struct CompatUnevenRoundedRectangle: Shape {
     var bottomLeadingRadius: CGFloat = 0
     var bottomTrailingRadius: CGFloat = 0
     var topTrailingRadius: CGFloat = 0
+    var style: RoundedCornerStyle = .continuous
 
     func path(in rect: CGRect) -> Path {
         let tl = min(topLeadingRadius, min(rect.width, rect.height) / 2)

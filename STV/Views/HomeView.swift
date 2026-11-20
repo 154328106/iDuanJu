@@ -62,7 +62,7 @@ enum HomeSource: Hashable, Identifiable {
     @MainActor static var all: [HomeSource] {
         let g = SourceGate.shared
         let nonTVBoxSites = g.visibleSites.filter { src in
-            if case .cms(let k) = src, let s = CMSStore.site(k), s.origin == "TVBox" || s.origin.hasPrefix("TVBox") { return false }
+            if let k = src.cmsKey, let s = CMSStore.site(k), s.origin == "TVBox" || s.origin.hasPrefix("TVBox") { return false }
             return true
         }
         return [.hongguo] + (g.showHuangguo ? [.huangguo] : []) + [.ai] + nonTVBoxSites.map { .site($0) } + [.channels, .manga, .novel]
