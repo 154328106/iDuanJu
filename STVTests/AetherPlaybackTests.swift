@@ -1,11 +1,11 @@
 import XCTest
 @testable import STV
 
-/// AetherEngine really decodes through each input path the coordinator uses.
+/// MPVPlayerEngine really decodes through each input path the coordinator uses.
 @MainActor
-final class AetherPlaybackTests: XCTestCase {
+final class MPVPlaybackTests: XCTestCase {
     private func playFor(_ src: PlaybackCoordinator.Source, seconds want: Double = 1.5, timeout: TimeInterval = 40) async throws -> (Double, String) {
-        let e = try AetherPlayerEngine()
+        let e = try MPVPlayerEngine()
         defer { e.stop() }
         try await e.load(src, stream: nil, start: nil, title: "test")
         e.muted = true
@@ -18,23 +18,23 @@ final class AetherPlaybackTests: XCTestCase {
     /// Local file (红果 episodes after CENC decryption land here).
     func testFixtureFilePlays() async throws {
         let data = try TDLibStreamTests.fixture("player_landscape.mp4")
-        let u = FileManager.default.temporaryDirectory.appendingPathComponent("aether_fixture.mp4")
+        let u = FileManager.default.temporaryDirectory.appendingPathComponent("mpv_fixture.mp4")
         try data.write(to: u)
         let (t, route) = try await playFor(.file(u), seconds: 1.0)
-        print("AETHER file: \(route) t=\(t)")
+        print("MPV file: \(route) t=\(t)")
         XCTAssertGreaterThanOrEqual(t, 1.0)
     }
 
-    /// TDLib streaming: Aether reads through TDLibIOReader (downloadFile offset/limit), no HTTP hop.
-    func testTDLibIOReaderPlays() async throws {
+    /// TDLib streaming: MPV reads through LocalHLSProxy `/tg/` loopback HTTP stream.
+    func testTDLibProxyPlays() async throws {
         let data = try TDLibStreamTests.fixture("player_landscape.mp4")
         let src = MockTDFileSource(data, block: 16_384)
         let s = try XCTUnwrap(LocalHLSProxy.shared.tdURL(TDFileRef(id: 4242, size: data.count), budget: 4 * 1_048_576, source: src, chunk: 65_536))
         defer { if let t = LocalHLSProxy.token(of: s) { LocalHLSProxy.shared.release(t) } }
         let u = try XCTUnwrap(URL(string: s))
-        guard case .td? = AetherPlayerEngine.input(for: .direct(u)) else { return XCTFail("TD route not mapped to IOReader") }
+        guard case .url? = MPVPlayerEngine.input(for: .direct(u)) else { return XCTFail("TD route not mapped") }
         let (t, route) = try await playFor(.direct(u), seconds: 1.0)
-        print("AETHER td: \(route) t=\(t) windows=\(src.requests.count)")
+        print("MPV td: \(route) t=\(t) windows=\(src.requests.count)")
         XCTAssertGreaterThanOrEqual(t, 1.0)
         XCTAssertFalse(src.requests.isEmpty)
     }

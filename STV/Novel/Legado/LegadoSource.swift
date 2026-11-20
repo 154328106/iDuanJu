@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum LegadoSourceImportError: LocalizedError {
     case unsupportedFormat(String)
@@ -118,10 +118,10 @@ struct LegadoAny: Codable, Hashable {
 }
 
 /// Installed book sources (Application Support/NovelSources.json).
-@MainActor @Observable
-final class LegadoSourceStore {
+@MainActor
+final class LegadoSourceStore: ObservableObject {
     static let shared = LegadoSourceStore()
-    private(set) var sources: [LegadoSource] = []
+    @Published private(set) var sources: [LegadoSource] = []
 
     nonisolated static var file: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NovelSources.json")

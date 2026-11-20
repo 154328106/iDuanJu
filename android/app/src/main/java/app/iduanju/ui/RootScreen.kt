@@ -20,7 +20,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dev.chrisbanes.haze.hazeSource
 import app.iduanju.ui.category.CategoryScreen
+import app.iduanju.ui.components.GlassNavigationRail
 import app.iduanju.ui.components.GlassTabBar
+import app.iduanju.ui.components.LayoutMetrics
+import app.iduanju.ui.components.LocalLayoutMetrics
 import app.iduanju.ui.detail.DetailScreen
 import app.iduanju.ui.home.HomeScreen
 import app.iduanju.ui.player.PlayerScreen
@@ -45,8 +48,42 @@ fun RootScreen(initialRoute: String? = null) {
     val atRoot = route in setOf("home", "tvbox", "search", "category", "profile")
     /** Backdrop for the floating tab bar's blur (Haze): everything the NavHost draws. */
     val haze = androidx.compose.runtime.remember { dev.chrisbanes.haze.HazeState() }
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val metrics = remember(maxWidth, maxHeight, cfg.smallestScreenWidthDp) {
+            LayoutMetrics(
+                widthDp = maxWidth.value.toInt(),
+                heightDp = maxHeight.value.toInt(),
+                smallestWidthDp = cfg.smallestScreenWidthDp,
+            )
+        }
+        val showChromeNav = atRoot && !(route == "home" && novelImmersive)
+        val navItems = listOf<Pair<String, @Composable (Boolean) -> Unit>>(
+            "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+            "TVBox" to { on -> Icon(Icons.Filled.LiveTv, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+            "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+            "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+        )
+        val onSelectTab: (Int) -> Unit = {
+            tab = it
+            nav.navigate(listOf("home", "tvbox", "category", "profile")[it]) {
+                popUpTo(nav.graph.startDestinationId) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+        val onSelectSearch: () -> Unit = {
+            nav.navigate("search") {
+                popUpTo(nav.graph.startDestinationId) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+        val searchIcon: @Composable (Boolean) -> Unit = { on ->
+            Icon(Icons.Filled.Search, null, Modifier.size(22.dp), tint = if (on) IdjThemeColors.accent else IdjThemeColors.text)
+        }
+
         // "home/<source>" (我的 → Telegram 频道 / 漫画) switches to the 首页 tab and shows that source page.
         val navigate: (String) -> Unit = { r ->
             if (r.startsWith("home/")) {
@@ -55,8 +92,23 @@ fun RootScreen(initialRoute: String? = null) {
                 nav.navigate("home") { popUpTo(nav.graph.startDestinationId) { saveState = true }; launchSingleTop = true; restoreState = true }
             } else nav.navigate(r)
         }
-        androidx.compose.runtime.CompositionLocalProvider(LocalNavigate provides navigate) {
-            NavHost(nav, startDestination = "home", modifier = Modifier.fillMaxSize().hazeSource(haze)) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalNavigate provides navigate,
+            LocalLayoutMetrics provides metrics,
+        ) {
+            Row(Modifier.fillMaxSize()) {
+                if (showChromeNav && metrics.useRail) {
+                    GlassNavigationRail(
+                        selected = tab,
+                        items = navItems,
+                        onSelect = onSelectTab,
+                        searchSelected = route == "search",
+                        onSearch = onSelectSearch,
+                        searchIcon = searchIcon,
+                        haze = haze,
+                    )
+                }
+                NavHost(nav, startDestination = "home", modifier = Modifier.weight(1f).fillMaxHeight().hazeSource(haze)) {
                 composable("home") { HomeScreen(onOpenDetail = { nav.navigate("detail/$it") }, onSearch = { nav.navigate("search") }, onPlay = { nav.navigate("player/$it/0") }, onOpenManga = { nav.navigate("manga/" + android.net.Uri.encode(it)) }, onImmersiveChanged = { novelImmersive = it }) }
                 composable("tvbox") {
                     app.iduanju.tvbox.TVBoxHubScreen(
@@ -169,34 +221,16 @@ fun RootScreen(initialRoute: String? = null) {
                     )
                 }
             }
-
+            }
         }
-        if (atRoot && !(route == "home" && novelImmersive)) {
+        if (showChromeNav && !metrics.useRail) {
             GlassTabBar(
                 selected = tab,
-                items = listOf(
-                    "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "TVBox" to { on -> Icon(Icons.Filled.LiveTv, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                ),
-                onSelect = {
-                    tab = it
-                    nav.navigate(listOf("home", "tvbox", "category", "profile")[it]) {
-                        popUpTo(nav.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
+                items = navItems,
+                onSelect = onSelectTab,
                 searchSelected = route == "search",
-                onSearch = {
-                    nav.navigate("search") {
-                        popUpTo(nav.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
-                searchIcon = { on -> Icon(Icons.Filled.Search, null, Modifier.size(22.dp), tint = if (on) IdjThemeColors.accent else IdjThemeColors.text) },
+                onSearch = onSelectSearch,
+                searchIcon = searchIcon,
                 haze = haze,
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 4.dp),
             )

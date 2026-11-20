@@ -47,7 +47,7 @@ struct DramaDetailView: View {
     @State private var sourcesVerify: VerifyTarget?
     @State private var verifySheet: VerifyTarget?
     @Environment(\.zoomNS) private var ns
-    private let library = LibraryStore.shared
+    @ObservedObject private var library = LibraryStore.shared
 
 
     @State private var scrollY: CGFloat = 0
@@ -55,43 +55,97 @@ struct DramaDetailView: View {
     @State private var introOpen = false
     @State private var introClamped = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.layoutMetrics) private var layout
 
     private var pinned: Bool { scrollY > 236 }
     private var title: String { detail?.title ?? series.title }
 
+    private var useTwoPane: Bool { layout.tier == .expanded && detail != nil }
+
     /// ui-redesign 12 / 13: blurred poster-colour hero with a poster card, stats card, actions, tags, folding intro,
     /// 选集 before 系列 / 演员; a pinned nav once the hero scrolls away and a floating play bar once the main button does.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                hero
-                if let d = detail { detailBody(d) }
-                else if let error { ErrorStateView(error: error) { Task { await load() } }.padding(.top, 24) }
-                else {
-                    VStack(spacing: 10) {
-                        ShimmerBlock().frame(height: 66).clipShape(RoundedRectangle(cornerRadius: 16))
-                        ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 16) }
-                    }.padding(.horizontal, 20).padding(.top, 18)
+        Group {
+            if useTwoPane, let d = detail {
+                HStack(alignment: .top, spacing: 28) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            CoverView(url: cover, corner: 20, fallback: series.cover)
+                                .aspectRatio(3 / 4, contentMode: .fit)
+                                .frame(maxHeight: 420)
+                                .shadow(color: .black.opacity(0.42), radius: 18, y: 10)
+                            Text(series.source.label)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(STVTheme.accent)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(STVTheme.accentSoft, in: Capsule())
+                            Text(title)
+                                .font(.system(size: 24, weight: .heavy))
+                                .foregroundStyle(STVTheme.text)
+                            if !d.episodes.isEmpty {
+                                Text("全 \(max(d.totalEps, d.episodes.count)) 集")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(STVTheme.secondary)
+                            }
+                            HStack(spacing: 10) {
+                                NavigationLink(value: Route.play(series, library.progress(for: series)?.episodeIndex)) {
+                                    PillButtonLabel(title: playTitle, icon: "play.fill", tone: .ink, expand: true)
+                                }
+                                .buttonStyle(PressScale(scale: 0.98))
+                                heart(48)
+                            }
+                        }
+                        .padding(.bottom, 32)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(width: 340)
+
+                    ScrollView {
+                        detailBody(d)
+                            .padding(.bottom, 48)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxWidth: .infinity)
                 }
+                .padding(.top, 64)
+                .padding(.horizontal, 28)
+                .frame(maxWidth: 1160)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        hero
+                        if let d = detail { detailBody(d) }
+                        else if let error { ErrorStateView(error: error) { Task { await load() } }.padding(.top, 24) }
+                        else {
+                            VStack(spacing: 10) {
+                                ShimmerBlock().frame(height: 66).clipShape(RoundedRectangle(cornerRadius: 16))
+                                ForEach(0..<3, id: \.self) { _ in ShimmerBlock().frame(height: 16) }
+                            }.padding(.horizontal, 20).padding(.top, 18)
+                        }
+                    }
+                    .frame(maxWidth: layout.detailMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 110)
+                }
+                .coordinateSpace(.named("detail"))
+                .compatOnScrollY { scrollY = $0 }
+                .scrollIndicators(.hidden)
+                .compatDefaultScrollAnchor(DebugScroll.anchor)
             }
-            .padding(.bottom, 110)
         }
-        .coordinateSpace(.named("detail"))
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, y in scrollY = y }
-        .scrollIndicators(.hidden)
-        .defaultScrollAnchor(DebugScroll.anchor)
         .accessibilityIdentifier("screen.detail")
         .ignoresSafeArea(edges: .top)
         .background(STVTheme.bg.ignoresSafeArea())
         .overlay(alignment: .top) { navBar }
-        .overlay(alignment: .bottom) { playBar }
+        .overlay(alignment: .bottom) { if !useTwoPane { playBar } }
         .toolbar(.hidden, for: .navigationBar)
         .zoomDestination(series.id, ns)
         .task {
             if let seededDetail { detail = seededDetail; selectResumeGroup() }
             else if detail == nil { await load() }
         }
-        .onChange(of: detail?.episodes.count) { _, _ in selectResumeGroup() }
+        .compatOnChange(of: detail?.episodes.count) { selectResumeGroup() }
         .task(id: detail?.seriesId) {
             guard let d = detail else { return }
             if series.source.isLongVideo {
@@ -146,7 +200,7 @@ struct DramaDetailView: View {
             Image(systemName: on ? "heart.fill" : "heart")
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(on ? STVTheme.accent : STVTheme.text)
-                .contentTransition(.symbolEffect(.replace))
+                .compatSymbolReplace()
                 .frame(width: size, height: size)
                 .background(Circle().fill(STVTheme.glass))
                 .overlay(Circle().strokeBorder(STVTheme.hairline, lineWidth: 1))
@@ -217,7 +271,7 @@ struct DramaDetailView: View {
             heart(50)
         }
         .padding(.horizontal, 20).padding(.top, 16)
-        .onGeometryChange(for: Bool.self) { $0.frame(in: .named("detail")).maxY < 60 } action: { out in
+        .compatOnFrame(in: .named("detail")) { f in let out = f.maxY < 60
             withAnimation(DS.panel) { actionsOut = out }
         }
 
@@ -289,7 +343,7 @@ struct DramaDetailView: View {
             .background {
                 // Measure the full height once to know whether 展开 is needed.
                 Text(text).font(.system(size: 14)).lineSpacing(5).fixedSize(horizontal: false, vertical: true).hidden()
-                    .onGeometryChange(for: Bool.self) { $0.size.height > 70 } action: { introClamped = $0 }
+                    .compatOnSize { introClamped = $0.height > 70 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if introClamped && !introOpen {
@@ -324,7 +378,7 @@ struct DramaDetailView: View {
             .padding(.top, 12)
         }
         if range.end >= range.start {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+            LazyVGrid(columns: layout.episodeGridItems(spacing: 8), spacing: 8) {
                 ForEach(range.start...range.end, id: \.self) { i in
                     let on = resume?.episodeIndex == i
                     NavigationLink(value: Route.play(series, i)) {

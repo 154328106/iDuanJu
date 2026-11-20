@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 02 · TVBox 点播展示页 + 03 · TVBox 直播展示页
 struct TVBoxHubView: View {
-    private let store = TVBoxStore.shared
-    private let gate = SourceGate.shared
+    @ObservedObject private var store = TVBoxStore.shared
+    @ObservedObject private var gate = SourceGate.shared
 
     @State private var mode = 0 // 0 = 点播, 1 = 直播
     @State private var selectedSiteKey: String?
@@ -81,7 +81,7 @@ struct TVBoxHubView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: activeRepo?.id) { _, _ in
+        .compatOnChange(of: activeRepo?.id) {
             if currentSite == nil && !lives.isEmpty { mode = 1 }
         }
         .sheet(isPresented: $showPicker) {
@@ -119,7 +119,7 @@ struct TVBoxHubView: View {
                     .navigationTitle(mode == 0 ? "切换点播站点" : "切换直播源")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ToolbarItem(placement: .navigationBarTrailing) {
                             Button("切换配置仓") { showPicker = false; Router.push(.tvboxConfig) }
                         }
                     }
@@ -180,7 +180,7 @@ private struct TVBoxVodCatalogPane: View {
     let repoId: String
     let site: TVBoxRepoSite
     let allSites: [TVBoxRepoSite]
-    private let store = TVBoxStore.shared
+    @ObservedObject private var store = TVBoxStore.shared
 
     @State private var query = ""
     @State private var submittedQuery = ""
@@ -196,7 +196,8 @@ private struct TVBoxVodCatalogPane: View {
         [("", "最新")] + site.categories.map { ($0.id, $0.name) }
     }
 
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    @Environment(\.layoutMetrics) private var layout
+    private var cols: [GridItem] { layout.posterGridItems(spacing: 10) }
 
     var body: some View {
         let taskKey = "\(site.key)|\(selCat)|\(submittedQuery)|\(searchAllSites)"
@@ -209,7 +210,7 @@ private struct TVBoxVodCatalogPane: View {
                         .font(.subheadline).foregroundStyle(STVTheme.text)
                         .submitLabel(.search)
                         .onSubmit { submittedQuery = query.trimmingCharacters(in: .whitespaces) }
-                        .onChange(of: query) { _, v in if v.trimmingCharacters(in: .whitespaces).isEmpty { submittedQuery = "" } }
+                        .compatOnChange(of: query) { v in if v.trimmingCharacters(in: .whitespaces).isEmpty { submittedQuery = "" } }
                     Button {
                         searchAllSites.toggle()
                         if !query.trimmingCharacters(in: .whitespaces).isEmpty { submittedQuery = query.trimmingCharacters(in: .whitespaces) }
@@ -374,7 +375,7 @@ private struct TVBoxVodCatalogPane: View {
 private struct TVBoxLiveCatalogPane: View {
     let repoId: String
     let live: TVBoxRepoLive
-    private let store = TVBoxStore.shared
+    @ObservedObject private var store = TVBoxStore.shared
 
     @State private var channels: [TVBoxLiveChannel] = []
     @State private var loading = false

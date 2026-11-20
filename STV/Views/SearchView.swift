@@ -13,12 +13,13 @@ struct SearchView: View {
         #endif
         return .hongguo
     }()
-    @State private var pager = Pager()
+    @StateObject private var pager = Pager()
     @State private var hot: [HGSeries] = []
     @State private var hotError: Error?
     @State private var discoverSeed = 0
     @State private var editingHistory = false
-    private let library = LibraryStore.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var library = LibraryStore.shared
 
     var body: some View {
         VStack(spacing: 10) {
@@ -35,7 +36,7 @@ struct SearchView: View {
             if let q = initialQuery, submitted.isEmpty, !q.isEmpty { query = q; submit() }
             if hot.isEmpty { await loadHot() }
         }
-        .onChange(of: source) { run() }
+        .compatOnChange(of: source) { run() }
     }
 
     // MARK: landing
@@ -82,7 +83,7 @@ struct SearchView: View {
                     HStack(spacing: 8) {
                         ForEach(0..<min(3, hot.count), id: \.self) { i in TopRankCard(series: hot[i], rank: i + 1) }
                     }.padding(.horizontal, 16)
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                    LazyVGrid(columns: layout.wideGridItems(spacing: 14), spacing: 14) {
                         ForEach(Array(hot.dropFirst(3).enumerated()), id: \.element.id) { i, s in CompactRankRow(series: s, rank: i + 4) }
                     }.padding(.horizontal, 16)
                 }
@@ -97,7 +98,7 @@ struct SearchView: View {
             TextTabStrip(items: SourceGate.shared.searchSources, selection: $source) { $0.label }
             if let e = pager.error, pager.items.isEmpty { ErrorStateView(error: e) { run() } }
             else if !pager.isLoading && pager.items.isEmpty {
-                ContentUnavailableView.search(text: submitted)
+                CompatEmptyStateView(title: "无搜索结果", systemImage: "magnifyingglass", description: "没有找到与“\(submitted)”相关的内容")
             } else {
                 NumberedGrid(items: pager.items, numbered: false, hasMore: pager.hasMore, loading: pager.isLoading) { pager.loadMore() }
             }

@@ -95,13 +95,16 @@ fun TVBoxLivePlayerScreen(
     val exo = remember {
         val ok = OkHttpClient.Builder().followRedirects(true).build()
         val ds = OkHttpDataSource.Factory(ok).setUserAgent(MacCMS.UA)
-        ExoPlayer.Builder(ctx)
+        ExoPlayer.Builder(ctx, app.iduanju.ui.player.DecoderCaps.renderers(ctx))
             .setMediaSourceFactory(DefaultMediaSourceFactory(ds))
             .build()
     }
 
+    val isTablet = app.iduanju.ui.components.LocalLayoutMetrics.current.isTablet
     DisposableEffect(Unit) {
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (!isTablet) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlaybackStateChanged(playbackState: Int) {

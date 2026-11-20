@@ -50,7 +50,7 @@ fun ActorProfileScreen(actor: HGCelebrity, onBack: () -> Unit, onOpen: (String) 
     val intro = profile?.actor?.intro.orEmpty().ifBlank { actor.intro }
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding()) {
         DSNavBar(name, leading = { BackButton(onClick = onBack) })
-        LazyVerticalGrid(GridCells.Fixed(3), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {

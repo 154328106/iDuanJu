@@ -4,8 +4,8 @@ import SwiftUI
 /// Embedded as a home source page and also pushable from 我的.
 struct ChannelFeedView: View {
     var embedded = false
-    private let store = TGStore.shared
-    private let gate = SourceGate.shared
+    @ObservedObject private var store = TGStore.shared
+    @ObservedObject private var gate = SourceGate.shared
     @State private var only: String?
     @State private var viewer: ViewerPayload?
     @State private var blockTarget: TGPost?

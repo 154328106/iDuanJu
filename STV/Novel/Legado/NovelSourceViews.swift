@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 /// 书源管理: import 「阅读」(Legado) JSON sources from a URL, the clipboard or a file; toggle / delete.
 struct NovelSourcesView: View {
     @Environment(\.dismiss) private var dismiss
-    private let store = LegadoSourceStore.shared
+    @ObservedObject private var store = LegadoSourceStore.shared
     @State private var importing = false
     @State private var login: LegadoSource?
     @State private var filter: Filter = .all
@@ -128,7 +128,7 @@ struct CardSlice: View {
     var last: Bool
     var radius: CGFloat = 18
     var body: some View {
-        UnevenRoundedRectangle(topLeadingRadius: first ? radius : 0, bottomLeadingRadius: last ? radius : 0,
+        CompatUnevenRoundedRectangle(topLeadingRadius: first ? radius : 0, bottomLeadingRadius: last ? radius : 0,
                                bottomTrailingRadius: last ? radius : 0, topTrailingRadius: first ? radius : 0, style: .continuous)
             .fill(STVTheme.card)
     }
@@ -139,7 +139,7 @@ struct CardSlice: View {
 /// Searches every enabled 书源 at once; results are merged by 书名 + 作者 as sources answer.
 struct NovelSearchView: View {
     @Environment(\.dismiss) private var dismiss
-    private let sources = LegadoSourceStore.shared
+    @ObservedObject private var sources = LegadoSourceStore.shared
     @State private var query = ""
     @State private var groups: [Group] = []
     @State private var done = 0
@@ -192,7 +192,7 @@ struct NovelSearchView: View {
                     }
                     .padding(.bottom, 40)
                 }
-                .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 4 } action: { _, value in scrolled = value }
+                .compatOnScrolled(threshold: 4) { scrolled = $0 }
                 .scrollDismissesKeyboard(.immediately)
             }
             .dsAmbient(cool: true)
@@ -431,7 +431,7 @@ struct NovelWebDetailView: View {
     @State private var introOpen = false
 
     private var allItems: [LegadoSearchItem] { items + alternatives.filter { candidate in !items.contains { $0.id == candidate.id } } }
-    private let store = NovelStore.shared
+    @ObservedObject private var store = NovelStore.shared
 
     private var item: LegadoSearchItem { allItems[min(pick, allItems.count - 1)] }
     private var source: LegadoSource? { LegadoSourceStore.shared.source(item.sourceURL) }
@@ -473,7 +473,7 @@ struct NovelWebDetailView: View {
                 actionRow
                     .padding(.horizontal, 16)
                     .padding(.top, 15)
-                    .onGeometryChange(for: Bool.self) { $0.frame(in: .named("novelDetail")).maxY < 60 } action: { out in
+                    .compatOnFrame(in: .named("novelDetail")) { f in let out = f.maxY < 60
                         withAnimation(DS.panel) { actionsOut = out }
                     }
 
@@ -611,7 +611,7 @@ struct NovelWebDetailView: View {
             .padding(.bottom, 108)
         }
         .coordinateSpace(.named("novelDetail"))
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, y in scrollY = y }
+        .compatOnScrollY { scrollY = $0 }
         .scrollIndicators(.hidden)
         .ignoresSafeArea(edges: .top)
         .background(STVTheme.bg.ignoresSafeArea())

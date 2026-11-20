@@ -90,10 +90,16 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
     var fillMode by remember { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
     var autoNext by remember { mutableStateOf(true) }
+    var padDrawerOpen by remember { mutableStateOf(true) }
     val activity = ctx as? android.app.Activity
-    val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val metrics = app.iduanju.ui.components.LocalLayoutMetrics.current
+    val landscape = metrics.isLandscape
     fun setLandscape(on: Boolean) {
-        activity?.requestedOrientation = if (on) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        activity?.requestedOrientation = when {
+            on -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            metrics.isTablet -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
     androidx.activity.compose.BackHandler(enabled = landscape) { setLandscape(false) }
     LaunchedEffect(landscape) {
@@ -237,7 +243,13 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    val isPortraitMedia = remember(player.videoSize, seriesId) {
+        val vs = player.videoSize
+        if (vs.width > 0 && vs.height > 0) vs.height >= vs.width else !seriesId.startsWith("cms:")
+    }
+    val showPadSplit = metrics.isTablet && landscape && metrics.widthDp >= 840 && isPortraitMedia && detail != null && padDrawerOpen
+    Row(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.weight(1f).fillMaxHeight().background(Color.Black)) {
         AndroidView(
             factory = {
                 PlayerView(it).apply {
@@ -505,7 +517,73 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 }
             }
         }
-
+        // Tablet portrait-video split toggle chip (top-end when drawer is collapsed)
+        if (metrics.isTablet && landscape && metrics.widthDp >= 840 && isPortraitMedia && detail != null && !padDrawerOpen && showChrome) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 14.dp, end = 16.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0x9915181F))
+                    .border(1.dp, Color.White.copy(0.16f), RoundedCornerShape(50))
+                    .clickable { padDrawerOpen = true }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text("展开选集", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+    if (showPadSplit) {
+        val d = detail!!
+        val pc = IdjDarkColors
+        Column(
+            Modifier
+                .width(340.dp)
+                .fillMaxHeight()
+                .background(Color(0xFF15181F))
+                .border(1.dp, Color.White.copy(0.08f))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(d.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "收起",
+                    color = pc.accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(pc.accentSoft)
+                        .clickable { padDrawerOpen = false }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.weight(1f)) {
+                Column(Modifier.fillMaxSize()) {
+                    EpisodesPanel(d, epIndex, pc, onPick = { selectEpisode(it) }, onSeason = { id -> onSwitchSeries(id) })
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(0.06f))
+                    .border(1.dp, Color.White.copy(0.09f), RoundedCornerShape(14.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("当前解码与音轨", color = Color.White.copy(0.6f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                val info = listOfNotNull(tags.res, tags.range, tags.codec, tags.audio).joinToString(" · ").ifEmpty { "Media3 + FFmpeg 软解就绪" }
+                Text(info, color = pc.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
     }
 }
 
@@ -613,7 +691,7 @@ private fun EpisodesPanel(d: HGSeriesDetail, epIndex: Int, pc: IdjColors, onPick
     }
     val slice = d.episodes.withIndex().toList().drop(range * 30).take(30)
     androidx.compose.animation.AnimatedContent(slice, label = "eps", transitionSpec = { fadeIn(DS.select()) togetherWith fadeOut(DS.select()) }) { sl ->
-        LazyVerticalGrid(GridCells.Fixed(6), Modifier.heightIn(max = 300.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.episodeCols), Modifier.heightIn(max = 300.dp).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(sl.size) { k ->
                 val (i, ep) = sl[k]
                 val on = i == epIndex

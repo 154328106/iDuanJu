@@ -357,7 +357,7 @@ private fun TVBoxVodCatalogPane(
     val latestWatch = store.recentWatches.firstOrNull()
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols),
         state = gridState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 112.dp),
@@ -365,7 +365,7 @@ private fun TVBoxVodCatalogPane(
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
         // 搜索胶囊（支持站内搜 / 全站聚合搜）
-        item(span = { GridItemSpan(3) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -415,7 +415,7 @@ private fun TVBoxVodCatalogPane(
 
         // 分类胶囊
         if (submittedQuery.isBlank()) {
-            item(span = { GridItemSpan(3) }) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     itemsIndexed(cats) { idx, (_, name) ->
                         val on = idx == selCat
@@ -437,7 +437,7 @@ private fun TVBoxVodCatalogPane(
 
         // 轻量「继续观看」单行条
         if (latestWatch != null && submittedQuery.isBlank()) {
-            item(span = { GridItemSpan(3) }) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -483,7 +483,7 @@ private fun TVBoxVodCatalogPane(
         }
 
         // 区块标题
-        item(span = { GridItemSpan(3) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (submittedQuery.isNotBlank()) "搜索「$submittedQuery」" else cats.getOrNull(selCat)?.second ?: "最新更新",
@@ -552,7 +552,7 @@ private fun TVBoxVodCatalogPane(
         }
 
         // 加载/空状态尾项
-        item(span = { GridItemSpan(3) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
                 when {
                     loading -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = c.secondary)

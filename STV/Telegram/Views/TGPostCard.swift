@@ -42,7 +42,7 @@ struct TGPostCard: View {
     }
 
     private var folded: some View {
-        Button { withAnimation(.snappy) { unfolded = true } } label: {
+        Button { withAnimation(.compatSnappy) { unfolded = true } } label: {
             HStack(spacing: 8) {
                 Image(systemName: "eye.slash").font(.caption)
                 Text("已屏蔽 · \(channel?.displayName ?? "@" + post.channel)").font(.caption.weight(.semibold))

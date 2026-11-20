@@ -7,7 +7,7 @@ struct TVBoxLivePlayerView: View {
     let liveId: String
     let startChannelIndex: Int
 
-    private let store = TVBoxStore.shared
+    @ObservedObject private var store = TVBoxStore.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var channels: [TVBoxLiveChannel] = []
@@ -79,7 +79,7 @@ struct TVBoxLivePlayerView: View {
                     Spacer()
 
                     HStack(spacing: 8) {
-                        landPill("频道列表", icon: "list.bullet", active: drawerOpen) { withAnimation(.snappy) { drawerOpen.toggle() } }
+                        landPill("频道列表", icon: "list.bullet", active: drawerOpen) { withAnimation(.compatSnappy) { drawerOpen.toggle() } }
                         let count = max(1, currentChannel?.urls.count ?? 1)
                         landPill("线路 \(lineIdx + 1)/\(count)") { lineIdx = (lineIdx + 1) % count }
                         landPill(fillMode ? "画面 满屏" : "画面 16:9") { fillMode.toggle() }
@@ -192,7 +192,7 @@ struct TVBoxLivePlayerView: View {
                 play(urlString: ch.urls.first)
             }
         }
-        .onChange(of: streamURL) { _, u in play(urlString: u) }
+        .compatOnChange(of: streamURL) { u in play(urlString: u) }
     }
 
     private func play(urlString: String?) {

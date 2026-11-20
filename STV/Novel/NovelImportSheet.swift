@@ -8,7 +8,7 @@ struct NovelImportSheet: View {
     /// 书源 page opens the sheet without the 书籍 group.
     var showBooks = true
     @Environment(\.dismiss) private var dismiss
-    private let store = LegadoSourceStore.shared
+    @ObservedObject private var store = LegadoSourceStore.shared
     @State private var url = ""
     @State private var busy = false
     @State private var fileImport = false
@@ -67,11 +67,11 @@ struct NovelImportSheet: View {
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 34)
             .animation(DS.panel, value: result)
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .compatScrollBounceBasedOnSize()
         .presentationDetents(showBooks ? [.height(640), .large] : [.height(520), .large])
         .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(28)
-        .presentationBackground(STVTheme.sheet)
+        .compatPresentationCornerRadius(28)
+        .compatPresentationBackground(STVTheme.sheet)
         .fileImporter(isPresented: $fileImport, allowedContentTypes: [.json, .plainText, .text]) { r in
             guard case .success(let u) = r else { return }
             let scoped = u.startAccessingSecurityScopedResource()

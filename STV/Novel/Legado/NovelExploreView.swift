@@ -92,7 +92,7 @@ struct NovelExploreView: View {
             }), label: { $0 }, small: true, idPrefix: "novel.rank.group")
             .padding(.horizontal, 18)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .compatScrollBounceBasedOnSize(axes: .horizontal)
         .mask(FadeMask())
     }
 
@@ -113,9 +113,9 @@ struct NovelExploreView: View {
                 .padding(.leading, 16).padding(.trailing, 24)
                 .padding(.vertical, 4)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .compatScrollBounceBasedOnSize(axes: .horizontal)
             .mask(FadeMask())
-            .onChange(of: categoryID) { _, id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
+            .compatOnChange(of: categoryID) { id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
         }
     }
 
@@ -138,9 +138,9 @@ struct NovelExploreView: View {
                 .frame(height: 34)
                 .padding(.horizontal, 18)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .compatScrollBounceBasedOnSize(axes: .horizontal)
             .mask(FadeMask())
-            .onChange(of: categoryID) { _, id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
+            .compatOnChange(of: categoryID) { id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
         }
     }
 
@@ -195,7 +195,7 @@ struct NovelExploreView: View {
         }
         .id(categoryID)
         .transition(.opacity)
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 4 } action: { _, value in scrolled = value }
+        .compatOnScrolled(threshold: 4) { scrolled = $0 }
     }
 
     private func podiumView(_ topThree: [LegadoSearchItem]) -> some View {
@@ -298,7 +298,7 @@ struct NovelExploreView: View {
                     .frame(minHeight: 44)
                 }
                 .listRowBackground(STVTheme.card)
-            }.novelScreen().presentationCornerRadius(28).navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .topBarLeading) { NovelBackButton { choosingSource = false } } }
+            }.novelScreen().compatPresentationCornerRadius(28).navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .navigationBarLeading) { NovelBackButton { choosingSource = false } } }
         }
     }
 
@@ -322,12 +322,12 @@ struct NovelExploreView: View {
                     .accessibilityIdentifier("novel.rank.filter." + c.title)
                 }
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlHeight = $0 }
+            .compatOnSize { controlHeight = $0.height }
             .padding(.horizontal, 16)
         }
         .frame(height: min(240, controlHeight))
         .accessibilityIdentifier("novel.rank.controls")
-        .scrollBounceBehavior(.basedOnSize)
+        .compatScrollBounceBasedOnSize()
     }
 
     private func select(_ category: LegadoClient.ExploreCategory) {
@@ -434,16 +434,16 @@ private struct ExploreTextControl: View {
     var body: some View {
         TextField(category.displayTitle.isEmpty ? category.title : category.displayTitle, text: $text)
             .textFieldStyle(.roundedBorder).frame(minWidth: 140).disabled(!enabled)
-            .onChange(of: text) { _, value in
+            .compatOnChange(of: text) { value in
                 pending?.cancel()
                 guard value != category.value else { return }
                 pending = Task { do { try await Task.sleep(for: .milliseconds(450)); onValue(value) } catch {} }
             }
-            .onChange(of: enabled) { _, value in
+            .compatOnChange(of: enabled) { value in
                 pending?.cancel()
                 if value && text != category.value { pending = Task { do { try await Task.sleep(for: .milliseconds(450)); onValue(text) } catch {} } }
             }
-            .onChange(of: category.value) { _, value in text = value }
+            .compatOnChange(of: category.value) { value in text = value }
             .onDisappear { pending?.cancel() }
     }
 }

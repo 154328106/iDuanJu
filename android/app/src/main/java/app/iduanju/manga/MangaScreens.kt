@@ -121,9 +121,9 @@ fun MangaHomePage(onOpen: (String) -> Unit) {
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= grid.layoutInfo.totalItemsCount - 6 } }
     LaunchedEffect(nearEnd, items.size) { if (nearEnd && items.isNotEmpty()) more() }
 
-    LazyVerticalGrid(GridCells.Fixed(3), state = grid, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp),
+    LazyVerticalGrid(GridCells.Fixed(app.iduanju.ui.components.LocalLayoutMetrics.current.posterCols), state = grid, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item(span = { GridItemSpan(3) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp)) {
                 MangaSourceStrip(store.providers.map { it.source to it.label }, source, { next ->
                     if (next != source) { source = next; searching = null; query = "" }
@@ -160,7 +160,7 @@ fun MangaHomePage(onOpen: (String) -> Unit) {
                 Text(m.tags.take(2).joinToString(" · ").ifEmpty { m.author }, color = c.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        item(span = { GridItemSpan(3) }) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 when { loading -> CircularProgressIndicator(color = c.secondary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)); error != null -> Text(error!!, color = c.accentWarm, fontSize = 12.sp) }
                 Text("来源：${p.note}", color = c.secondary, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))

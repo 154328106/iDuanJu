@@ -274,10 +274,10 @@ struct ChipRow<T: Hashable>: View {
                 // shadow (`.chip.all.on`) inside them, and the negative padding below gives the space back.
                 .padding(.vertical, 6)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .compatScrollBounceBasedOnSize(axes: .horizontal)
             .mask { if fade { FadeMask() } else { Color.black } }
             .padding(.vertical, -6)
-            .onChange(of: selection) { _, it in withAnimation(DS.select) { proxy.scrollTo(it, anchor: .center) } }
+            .compatOnChange(of: selection) { it in withAnimation(DS.select) { proxy.scrollTo(it, anchor: .center) } }
         }
     }
 }

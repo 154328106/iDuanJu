@@ -226,19 +226,30 @@ struct ErrorStateView: View {
         return t.source == .huangguo ? "需要验证" : "需要站点验证（自动验证未通过）"
     }
     var body: some View {
-        ContentUnavailableView {
-            Label(title,
-                  systemImage: error.verifyTarget == nil ? "wifi.exclamationmark" : "shield.lefthalf.filled")
-        } description: {
+        VStack(spacing: 14) {
+            Image(systemName: error.verifyTarget == nil ? "wifi.exclamationmark" : "shield.lefthalf.filled")
+                .font(.system(size: 38, weight: .light))
+                .foregroundStyle(STVTheme.secondary)
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(STVTheme.text)
             Text(error.localizedDescription)
-        } actions: {
-            if let t = error.verifyTarget {
-                Button("去验证") { verify = t }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
-                Button("重试") { CFSolver.shared.resetCooldown(); retry() }.tint(STVTheme.secondary)
-            } else {
-                Button("重试") { CFSolver.shared.resetCooldown(); retry() }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
+                .font(.subheadline)
+                .foregroundStyle(STVTheme.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            HStack(spacing: 12) {
+                if let t = error.verifyTarget {
+                    Button("去验证") { verify = t }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
+                    Button("重试") { CFSolver.shared.resetCooldown(); retry() }.tint(STVTheme.secondary)
+                } else {
+                    Button("重试") { CFSolver.shared.resetCooldown(); retry() }.buttonStyle(.borderedProminent).tint(STVTheme.accent)
+                }
             }
+            .padding(.top, 4)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
         .sheet(item: $verify) { t in SiteVerifySheet(target: t, onDone: retry) }
         .task {
             #if DEBUG

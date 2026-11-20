@@ -2,13 +2,13 @@ import AVFoundation
 import AVKit
 import UIKit
 
-/// Which playback core plays an episode. AetherEngine is the default; AVPlayer is the fallback for
-/// sources Aether cannot take (out-of-band AES keys via the resource loader, FairPlay) and for any
-/// episode Aether failed to open.
+/// Which playback core plays an episode. MPVKit (`libmpv` + `FFmpeg` + `libdovi` + `libplacebo`, iOS 16+)
+/// is the default for Dolby Vision, HDR10, DTS/TrueHD/AC3/EAC3, and ASS subtitles; AVPlayer is the fallback
+/// for sources MPV cannot take (out-of-band AES keys via the resource loader, FairPlay) and for any failure.
 enum PlayerEngineKind: String, CaseIterable, Sendable {
-    case aether, avplayer
-    var label: String { self == .aether ? "AetherEngine" : "系统播放器" }
-    var short: String { self == .aether ? "Aether" : "AVPlayer" }
+    case mpv, avplayer
+    var label: String { self == .mpv ? "MPVKit (DV/DTS)" : "系统播放器" }
+    var short: String { self == .mpv ? "MPV" : "AVPlayer" }
 }
 
 enum PlayerEngineSettings {
@@ -16,9 +16,14 @@ enum PlayerEngineSettings {
     static var preferred: PlayerEngineKind {
         get {
             #if DEBUG
-            if let e = ProcessInfo.processInfo.environment["STV_ENGINE"], let k = PlayerEngineKind(rawValue: e) { return k }
+            if let e = ProcessInfo.processInfo.environment["STV_ENGINE"] {
+                if e == "aether" || e == "mpv" { return .mpv }
+                if let k = PlayerEngineKind(rawValue: e) { return k }
+            }
             #endif
-            return UserDefaults.standard.string(forKey: key).flatMap(PlayerEngineKind.init(rawValue:)) ?? .aether
+            guard let raw = UserDefaults.standard.string(forKey: key) else { return .mpv }
+            if raw == "aether" { return .mpv }
+            return PlayerEngineKind(rawValue: raw) ?? .mpv
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
     }

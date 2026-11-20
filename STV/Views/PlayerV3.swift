@@ -77,7 +77,7 @@ struct PlayerCenterControls: View {
                     }
                     Image(systemName: co.paused ? "play.fill" : "pause.fill").font(.system(size: 26, weight: .regular))
                         .offset(x: co.paused ? 2 : 0)
-                        .contentTransition(.symbolEffect(.replace))
+                        .compatSymbolReplace()
                 }
                 .frame(width: 68, height: 68)
             }
@@ -443,6 +443,7 @@ struct EpisodesPopover: View {
     var dateLine: String? = nil
     let onPick: (Int) -> Void
     var onSeason: (String) -> Void = { _ in }
+    @Environment(\.layoutMetrics) private var layout
     @State private var group = 0
 
     var body: some View {
@@ -463,12 +464,12 @@ struct EpisodesPopover: View {
                 }
                 if ranges.count > 1 {
                     chips(ranges.map { EpisodeGroups.label($0, episodes: episodes) }, selected: group, height: 28, font: 13, id: "player.epgroup") { i in
-                        withAnimation(.snappy) { group = i }
+                        withAnimation(.compatSnappy) { group = i }
                     }
                 }
                 let r = ranges.indices.contains(group) ? ranges[group] : EpisodeRange(0, max(0, episodes.count - 1))
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                    LazyVGrid(columns: layout.episodeGridItems(spacing: 8), spacing: 8) {
                         ForEach(Array(r.start...min(r.end, episodes.count - 1)), id: \.self) { i in
                             let on = i == current
                             Button { onPick(i) } label: {

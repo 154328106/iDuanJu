@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import Observation
+import Combine
 
 struct TVBoxLiveChannel: Codable, Hashable, Identifiable {
     var id: String { name }
@@ -65,14 +65,14 @@ private struct TVBoxStoreSnapshot: Codable {
     var recentWatches: [TVBoxRecentWatch]
 }
 
-@MainActor @Observable
-final class TVBoxStore {
+@MainActor
+final class TVBoxStore: ObservableObject {
     static let shared = TVBoxStore()
 
-    private(set) var repos: [TVBoxRepo] = []
-    private(set) var activeRepoId: String?
-    private(set) var favoriteChannels: [String] = []
-    private(set) var recentWatches: [TVBoxRecentWatch] = []
+    @Published private(set) var repos: [TVBoxRepo] = []
+    @Published private(set) var activeRepoId: String?
+    @Published private(set) var favoriteChannels: [String] = []
+    @Published private(set) var recentWatches: [TVBoxRecentWatch] = []
 
     var activeRepo: TVBoxRepo? {
         repos.first { $0.id == activeRepoId } ?? repos.first

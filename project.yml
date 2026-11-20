@@ -2,7 +2,7 @@ name: STV
 options:
   bundleIdPrefix: com.local
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "16.0"
   createIntermediateGroups: true
 settings:
   SWIFT_VERSION: "5.0"
@@ -13,9 +13,9 @@ packages:
     exactVersion: 1.5.2-tdlib-1.8.69-6126ecae
   QuickJS:
     path: Packages/QuickJS
-  AetherEngine:
-    url: https://github.com/superuser404notfound/AetherEngine
-    from: 7.62.0
+  MPVKit:
+    url: https://github.com/mpvkit/MPVKit
+    from: 1.0.0
 targets:
   STV:
     type: application
@@ -26,8 +26,8 @@ targets:
       - package: TDLibKit
       - package: QuickJS
         product: CQuickJS
-      - package: AetherEngine
-        product: AetherEngine
+      - package: MPVKit
+        product: MPVKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.local.STV
       GENERATE_INFOPLIST_FILE: YES

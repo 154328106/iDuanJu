@@ -33,7 +33,7 @@ struct TVBoxVodPlayerView: View {
     let initialCover: String
     let startEp: Int
 
-    private let store = TVBoxStore.shared
+    @ObservedObject private var store = TVBoxStore.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var currentSiteKey: String = ""
@@ -280,7 +280,7 @@ struct TVBoxVodPlayerView: View {
             await loadDetail(siteKey: activeSiteKey, seriesId: activeSeriesId)
             await loadCrossSiteMatches(title: resolvedTitle, excludeSiteKey: activeSiteKey)
         }
-        .onChange(of: activeStream?.url) { _, newURL in
+        .compatOnChange(of: activeStream?.url) { newURL in
             guard let u = newURL, let url = URL(string: u) else { return }
             let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": PluginHostContext.defaultUA]])
             player.replaceCurrentItem(with: AVPlayerItem(asset: asset))

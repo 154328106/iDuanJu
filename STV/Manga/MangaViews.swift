@@ -13,7 +13,8 @@ struct MangaHomeView: View {
     @State private var error: String?
     @State private var query = ""
     @State private var searching: String?
-    private let store = MangaStore.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var store = MangaStore.shared
 
     private var provider: MangaProvider { MangaFixtures.provider ?? source.provider }
     private var cats: [MangaCategory] { _ = PluginStore.shared.revision; return provider.categories }
@@ -50,7 +51,7 @@ struct MangaHomeView: View {
                 }
                 if !store.recent.isEmpty && searching == nil { continueRow }
                 if let error { Text(error).font(.caption).foregroundStyle(STVTheme.accentWarm).padding(.horizontal, 16) }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 14) {
+                LazyVGrid(columns: layout.posterGridItems(spacing: 10), spacing: 14) {
                     ForEach(items) { m in
                         NavigationLink(value: Route.manga(m)) { MangaCell(item: m) }.buttonStyle(.plain)
                             .accessibilityIdentifier("manga.cell.\(m.mangaId)")
@@ -69,7 +70,7 @@ struct MangaHomeView: View {
         .navigationTitle(embedded ? "" : "漫画").navigationBarTitleDisplayMode(.inline)
         .toolbar(embedded ? .hidden : .visible, for: .navigationBar)
         .task(id: "\(source.rawValue)|\(category?.id ?? "")") { await load(more: false) }
-        .onChange(of: sources) { _, now in if !now.contains(source) { category = nil; source = .baozi } }
+        .compatOnChange(of: sources) { now in if !now.contains(source) { category = nil; source = .baozi } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("manga.home")
     }
@@ -127,7 +128,8 @@ struct MangaCell: View {
 
 /// 书架: favorites + offline chapters.
 struct MangaLibraryView: View {
-    private let store = MangaStore.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var store = MangaStore.shared
     var body: some View {
         List {
             Section("收藏（\(store.favorites.count)）") {
@@ -162,7 +164,8 @@ struct MangaDetailView: View {
     @State private var error: String?
     @State private var ascending = true
     @State private var reader: ReaderTarget?
-    private let store = MangaStore.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var store = MangaStore.shared
     private var provider: MangaProvider { MangaFixtures.provider ?? item.source.provider }
 
     struct ReaderTarget: Identifiable { let chapters: [MangaChapter]; let index: Int; let page: Int; var id: Int { index } }
@@ -264,7 +267,8 @@ struct MangaReaderView: View {
     @State private var baseScale: CGFloat = 1
     @State private var visible: Set<Int> = []
     @Environment(\.dismiss) private var dismiss
-    private let store = MangaStore.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var store = MangaStore.shared
     private var provider: MangaProvider { MangaFixtures.provider ?? item.source.provider }
     private var chapter: MangaChapter { chapters[index] }
 
@@ -279,14 +283,14 @@ struct MangaReaderView: View {
         }
         .statusBarHidden(!chrome)
         .task(id: index) { await load() }
-        .onChange(of: page) { _, p in
+        .compatOnChange(of: page) { p in
             store.record(item, chapter, page: p, of: pages.count)
             preload(from: p)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("manga.reader")
         .preferredColorScheme(.dark)
-        .onChange(of: vertical) { _, _ in visible = [] }
+        .compatOnChange(of: vertical) { visible = [] }
     }
 
     private var verticalReader: some View {
@@ -308,7 +312,7 @@ struct MangaReaderView: View {
                     .frame(width: geo.size.width * scale)
                 }
             }
-            .gesture(MagnifyGesture().onChanged { scale = max(1, min(3, baseScale * $0.magnification)) }.onEnded { _ in baseScale = scale })
+            .gesture(MagnificationGesture().onChanged { scale = max(1, min(3, baseScale * $0)) }.onEnded { _ in baseScale = scale })
             .onTapGesture(count: 2) { withAnimation { scale = scale > 1 ? 1 : 2; baseScale = scale } }
             .onTapGesture { withAnimation { chrome.toggle() } }
             .onAppear { let target = page; if target > 0 { proxy.scrollTo(target, anchor: .top) } }
@@ -316,23 +320,24 @@ struct MangaReaderView: View {
     }
 
     private var pagedReader: some View {
-        TabView(selection: $page) {
-            ForEach(pages.indices, id: \.self) { i in
-                ZoomableImage(url: pages[i], headers: provider.imageHeaders, zoomed: $zoomed).tag(i)
-                    .accessibilityIdentifier("manga.page.\(i)")
+        GeometryReader { geo in
+            TabView(selection: $page) {
+                ForEach(pages.indices, id: \.self) { i in
+                    ZoomableImage(url: pages[i], headers: provider.imageHeaders, zoomed: $zoomed).tag(i)
+                        .accessibilityIdentifier("manga.page.\(i)")
+                }
+                chapterEnd.tag(pages.count)
             }
-            chapterEnd.tag(pages.count)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
+            .scrollDisabled(zoomed)
+            .onTapGesture(coordinateSpace: .local) { p in pagedTap(p, width: geo.size.width) }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        // Zoomed: drags pan the image instead of turning the page (zoom out, or double tap, to page again).
-        .scrollDisabled(zoomed)
-        .onTapGesture(coordinateSpace: .global) { p in pagedTap(p) }
     }
 
     /// Paged mode tap zones: left third = previous page, right third = next (past the last page → next
     /// chapter), middle = show / hide the bar. Zoomed pages leave taps to the image.
-    private func pagedTap(_ p: CGPoint) {
-        let w = UIScreen.main.bounds.width
+    private func pagedTap(_ p: CGPoint, width w: CGFloat) {
         guard !zoomed, w > 0 else { withAnimation { chrome.toggle() }; return }
         let x = p.x / w
         if x < 1.0 / 3, page > 0 {

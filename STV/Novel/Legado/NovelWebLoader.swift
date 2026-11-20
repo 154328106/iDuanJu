@@ -1,21 +1,21 @@
 import Foundation
-import Observation
+import Combine
 
 /// Fetches 书源 chapters on demand (and the next ones ahead of the reader), caching them on disk.
-@MainActor @Observable
-final class NovelWebLoader {
+@MainActor
+final class NovelWebLoader: ObservableObject {
     static let shared = NovelWebLoader()
     /// Bumped whenever a chapter arrives or fails, so open readers re-paginate.
-    private(set) var revision = 0
-    private(set) var failed: [String: String] = [:]
-    @ObservationIgnored private var running: [String: Task<Void, Error>] = [:]
-    @ObservationIgnored private var prefetchDrivers: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var speculative: [String: Set<String>] = [:]
-    @ObservationIgnored private var demand: [String: Set<UUID>] = [:]
-    @ObservationIgnored private var readerRequests: [String: [String: Task<Void, Never>]] = [:]
-    @ObservationIgnored private var prefetchFailures: [String: Int] = [:]
-    @ObservationIgnored private var activeReaderBook: String?
-    @ObservationIgnored private var downloads: [String: Task<Void, Never>] = [:]
+    @Published private(set) var revision = 0
+    @Published private(set) var failed: [String: String] = [:]
+    private var running: [String: Task<Void, Error>] = [:]
+    private var prefetchDrivers: [String: Task<Void, Never>] = [:]
+    private var speculative: [String: Set<String>] = [:]
+    private var demand: [String: Set<UUID>] = [:]
+    private var readerRequests: [String: [String: Task<Void, Never>]] = [:]
+    private var prefetchFailures: [String: Int] = [:]
+    private var activeReaderBook: String?
+    private var downloads: [String: Task<Void, Never>] = [:]
     struct DownloadState {
         var completed = 0
         var total = 0
@@ -23,7 +23,7 @@ final class NovelWebLoader {
         var active = false
         var message = ""
     }
-    private(set) var downloadStates: [String: DownloadState] = [:]
+    @Published private(set) var downloadStates: [String: DownloadState] = [:]
     private let store = NovelStore.shared
 
     private func key(_ b: NovelBook, _ i: Int) -> String { NovelStore.chapterFile(b, i).path }

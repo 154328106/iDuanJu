@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 /// 01 · TVBox 接入与多配置仓管理页
 struct TVBoxConfigView: View {
-    private let store = TVBoxStore.shared
-    private let gate = SourceGate.shared
+    @ObservedObject private var store = TVBoxStore.shared
+    @ObservedObject private var gate = SourceGate.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var urlText = ""
@@ -240,7 +240,7 @@ struct TVBoxConfigView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let activeRepo, !activeRepo.sites.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(busy ? "处理中…" : "全部测速") {
                         runTask {
                             await store.pingAllSites(repoId: activeRepo.id) { statusMsg = $0 }

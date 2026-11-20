@@ -5,8 +5,8 @@ struct NovelDownloadView: View {
     var chapter: Int = 0
     @Environment(\.dismiss) private var dismiss
     @AppStorage("novel.prefetch") private var prefetch = 3
-    private let loader = NovelWebLoader.shared
-    private let store = NovelStore.shared
+    @ObservedObject private var loader = NovelWebLoader.shared
+    @ObservedObject private var store = NovelStore.shared
 
     var body: some View {
         NavigationStack {
@@ -45,7 +45,7 @@ struct NovelDownloadView: View {
             .novelScreen()
             .navigationTitle("缓存与下载")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { NovelBackButton { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarLeading) { NovelBackButton { dismiss() } } }
         }
     }
 }

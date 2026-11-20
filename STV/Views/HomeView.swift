@@ -70,13 +70,13 @@ enum HomeSource: Hashable, Identifiable {
 }
 
 /// Caches the first page of each rank board for the home cards.
-@MainActor @Observable
-final class BoardCache {
+@MainActor
+final class BoardCache: ObservableObject {
     static let shared = BoardCache()
-    var items: [String: [HGSeries]] = [:]
-    var loading: Set<String> = []
-    var failed: Set<String> = []
-    var errors: [String: Error] = [:]
+    @Published var items: [String: [HGSeries]] = [:]
+    @Published var loading: Set<String> = []
+    @Published var failed: Set<String> = []
+    @Published var errors: [String: Error] = [:]
     func load(_ b: BoardSpec, force: Bool = false) {
         guard !loading.contains(b.id), force || items[b.id] == nil else { return }
         loading.insert(b.id); failed.remove(b.id); errors[b.id] = nil
@@ -143,7 +143,7 @@ struct HomeView: View {
         .dsAmbient(visible: !pinned)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showChannels) { channelPanel }
-        .onChange(of: SourceGate.shared.visibleSites) { _, _ in if !HomeSource.all.contains(source) { source = .hongguo } }
+        .compatOnChange(of: SourceGate.shared.visibleSites) { if !HomeSource.all.contains(source) { source = .hongguo } }
     }
 
     // MARK: Header (search + filter, source bar)
@@ -240,8 +240,8 @@ private struct HomeFeedPage: View {
     @State private var legacyChannels: [HuangguoChannel] = []
     @State private var legacyError: Error?
     @State private var heroIndex = 0
-    private let cache = BoardCache.shared
-    private let library = LibraryStore.shared
+    @ObservedObject private var cache = BoardCache.shared
+    @ObservedObject private var library = LibraryStore.shared
     private let gutter: CGFloat = 16
     /// DEBUG `STV_HOME_SCROLL=bottom` opens the feed scrolled to the end (simulator screenshots).
     private static var debugAnchor: UnitPoint? {
@@ -281,8 +281,8 @@ private struct HomeFeedPage: View {
             .animation(.easeOut(duration: 0.25), value: heroPicks.isEmpty)
         }
         .scrollIndicators(.hidden)
-        .defaultScrollAnchor(Self.debugAnchor)
-        .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.contentInsets.top > 4 } action: { _, v in onScrolled(v) }
+        .compatDefaultScrollAnchor(Self.debugAnchor)
+        .compatOnScrolled(threshold: 4) { onScrolled($0) }
         .accessibilityIdentifier("home.page.\(source.label)")
         .refreshable { if tab == .actorRank { await ActorRankStore.shared.reload() } else { boards.forEach { cache.load($0, force: true) } } }
         .task(id: tab) {
@@ -290,8 +290,8 @@ private struct HomeFeedPage: View {
             if case .huangguo(.legacy) = tab, legacyChannels.isEmpty { await loadLegacy() }
         }
         .onAppear { boards.prefix(1).forEach { cache.load($0) }; reportHero() }
-        .onChange(of: tab) { _, _ in boards.prefix(1).forEach { cache.load($0) } }
-        .onChange(of: heroKey) { _, _ in reportHero() }
+        .compatOnChange(of: tab) { boards.prefix(1).forEach { cache.load($0) } }
+        .compatOnChange(of: heroKey) { reportHero() }
     }
 
     private var heroKey: String { (heroPicks.indices.contains(heroIndex) ? heroPicks[heroIndex].cover : "") + "\(heroIndex)" }
@@ -315,7 +315,7 @@ private struct HomeFeedPage: View {
                 }
             }.padding(.horizontal, gutter)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .compatScrollBounceBasedOnSize(axes: .horizontal)
         .mask(FadeMask())
         .padding(.top, 18)
     }
@@ -391,7 +391,7 @@ private struct DynamicSiteFeed: View {
     var onHero: (String) -> Void
     @State private var categories: [SiteCategory] = []
     @State private var selected = ""
-    @State private var pager = Pager()
+    @StateObject private var pager = Pager()
     @State private var heroCover: String?
 
     var body: some View {
@@ -403,7 +403,7 @@ private struct DynamicSiteFeed: View {
                 } else if pager.items.isEmpty && pager.isLoading {
                     cardsSkeleton.padding(.horizontal, 16)
                 } else if pager.items.isEmpty {
-                    ContentUnavailableView("该分类暂无内容", systemImage: "rectangle.stack", description: Text("部分采集站的父分类不直接提供资源，请选择动作片、国产剧等具体分类。"))
+                    CompatEmptyStateView(title: "该分类暂无内容", systemImage: "rectangle.stack", description: "部分采集站的父分类不直接提供资源，请选择动作片、国产剧等具体分类。")
                 } else {
                     NumberedGrid(items: pager.items, numbered: false, hasMore: pager.hasMore, loading: pager.isLoading) { pager.loadMore() }
                 }
@@ -414,7 +414,7 @@ private struct DynamicSiteFeed: View {
         .accessibilityIdentifier("home.page.\(source.label)")
         .refreshable { await refresh() }
         .task { await refresh() }
-        .onChange(of: heroCover) { _, cover in if let cover { onHero(cover) } }
+        .compatOnChange(of: heroCover) { cover in if let cover { onHero(cover) } }
     }
 
     private var chips: some View {
@@ -434,7 +434,7 @@ private struct DynamicSiteFeed: View {
                 }
             }.padding(.horizontal, 16)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .compatScrollBounceBasedOnSize(axes: .horizontal)
         .padding(.bottom, 4)
     }
 
@@ -531,7 +531,7 @@ struct HomeChannelBar<T: Hashable>: View {
                 .accessibilityIdentifier("home.channels")
                 .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.88),
                                              .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
-                .onChange(of: selection) { _, it in withAnimation(.snappy) { proxy.scrollTo(it, anchor: .center) } }
+                .compatOnChange(of: selection) { it in withAnimation(.compatSnappy) { proxy.scrollTo(it, anchor: .center) } }
                 .onAppear { proxy.scrollTo(selection, anchor: .center) }
             }
             Button(action: onExpand) {
@@ -718,7 +718,7 @@ struct HomeContinueRow: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 2)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .compatScrollBounceBasedOnSize(axes: .horizontal)
         }
     }
 
@@ -778,7 +778,7 @@ struct HomeShelf: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .compatScrollBounceBasedOnSize(axes: .horizontal)
             }
         }
     }
@@ -795,6 +795,7 @@ struct HomeBadge: View {
 
 /// 分段：左写接口真实榜单名，右侧「全部」进完整榜单；下面按封面比例的网格。
 struct HomeSection: View {
+    @Environment(\.layoutMetrics) private var layout
     static func columns(landscape: Bool) -> [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: landscape ? 12 : 10, alignment: .top), count: landscape ? 2 : 3)
     }
@@ -819,7 +820,8 @@ struct HomeSection: View {
             }
             if !items.isEmpty {
                 let landscape = items.first?.isLandscapeCover ?? false
-                LazyVGrid(columns: Self.columns(landscape: landscape), alignment: .leading, spacing: 16) {
+                let gridCols = landscape ? layout.wideGridItems(spacing: 12, alignment: .top) : layout.posterGridItems(spacing: 10, alignment: .top)
+                LazyVGrid(columns: gridCols, alignment: .leading, spacing: 16) {
                     ForEach(items) { s in
                         NavigationLink(value: Route.series(s)) { HomePosterCard(series: s) }.buttonStyle(.plain)
                             .accessibilityIdentifier("home.card")
@@ -864,7 +866,7 @@ struct HomePosterCard: View {
 /// Full list of one board, 3-column numbered grid with infinite paging.
 struct BoardListView: View {
     let board: BoardSpec
-    @State private var pager = Pager()
+    @StateObject private var pager = Pager()
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         ScrollView {

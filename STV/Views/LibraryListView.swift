@@ -3,7 +3,7 @@ import SwiftUI
 struct LibraryListView: View {
     enum Kind { case favorites, history }
     let kind: Kind
-    private let library = LibraryStore.shared
+    @ObservedObject private var library = LibraryStore.shared
     @Environment(\.zoomNS) private var ns
     @State private var confirmClear = false
 
@@ -31,7 +31,7 @@ struct LibraryListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if kind == .history, !library.continueWatching.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("清空") { confirmClear = true }.accessibilityIdentifier("history.clear")
                 }
             }
@@ -78,6 +78,6 @@ struct LibraryListView: View {
     }
 
     private func empty(_ t: String, _ icon: String) -> some View {
-        ContentUnavailableView(t, systemImage: icon).padding(.top, 80)
+        CompatEmptyStateView(title: t, systemImage: icon).padding(.top, 80)
     }
 }

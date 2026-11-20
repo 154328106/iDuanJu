@@ -2,8 +2,8 @@ import SwiftUI
 
 struct ProfileView: View {
     @State private var message: String?
-    private let library = LibraryStore.shared
-    private let gate = SourceGate.shared
+    @ObservedObject private var library = LibraryStore.shared
+    @ObservedObject private var gate = SourceGate.shared
 
     var body: some View {
         ScrollView {

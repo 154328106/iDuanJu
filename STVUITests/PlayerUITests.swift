@@ -228,7 +228,7 @@ final class PlayerUITests: XCTestCase {
     }
 
     func testNaturalEndStartsNextEpisodeOnBothEngines() {
-        for engine in ["avplayer","aether"] {
+        for engine in ["avplayer","mpv"] {
             launch(["STV_FX_EPISODES":"4", "STV_KEEP_CHROME":"1", "STV_ENGINE":engine, "STV_SEEK":"58"])
             XCTAssertTrue(el("player.progress").waitForExistence(timeout:30))
             assertEpisode(2)

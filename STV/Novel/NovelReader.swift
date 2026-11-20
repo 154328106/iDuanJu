@@ -150,10 +150,11 @@ struct NovelPagedView: UIViewControllerRepresentable {
 /// tap the middle or swipe up for the toolbar (目录 · 书籍 · 进度 · 亮度 · 字体) and 听书.
 struct NovelReaderView: View {
     @State private var book: NovelBook
-    private let store = NovelStore.shared
-    @State private var prefs = NovelPrefs.shared
-    @State private var fonts = NovelFonts.shared
-    @State private var loader = NovelWebLoader.shared
+    @Environment(\.layoutMetrics) private var layout
+    @ObservedObject private var store = NovelStore.shared
+    @ObservedObject private var prefs = NovelPrefs.shared
+    @ObservedObject private var fonts = NovelFonts.shared
+    @ObservedObject private var loader = NovelWebLoader.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var paginator: NovelPaginator
@@ -167,7 +168,7 @@ struct NovelReaderView: View {
     @State private var hint = true
     @State private var lastLight: NovelPrefs.Theme = .white
     @State private var autoTurn = false
-    @State private var speaker = NovelSpeaker()
+    @StateObject private var speaker = NovelSpeaker()
     @State private var opened = Date()
     @State private var brightness = 0.5
     @State private var tocSearch = false
@@ -196,16 +197,20 @@ struct NovelReaderView: View {
             ZStack(alignment: .bottom) {
                 pal.bg.ignoresSafeArea()
                 if ready {
-                    if prefs.turn == .scroll {
-                        scrollReader(geo)
-                    } else {
-                        NovelPagedView(paginator: paginator, handle: handle, start: ref, style: prefs.turn, insets: insets,
-                            highlight: highlight, version: version,
-                            onPage: { r in ref = r; save() },
-                            onCenter: { menu ? hideMenu() : showMenu() },
-                            onSwipeUp: { showMenu() })
-                            .ignoresSafeArea()
+                    Group {
+                        if prefs.turn == .scroll {
+                            scrollReader(geo)
+                        } else {
+                            NovelPagedView(paginator: paginator, handle: handle, start: ref, style: prefs.turn, insets: insets,
+                                highlight: highlight, version: version,
+                                onPage: { r in ref = r; save() },
+                                onCenter: { menu ? hideMenu() : showMenu() },
+                                onSwipeUp: { showMenu() })
+                                .ignoresSafeArea()
+                        }
                     }
+                    .frame(maxWidth: layout.readerMaxWidth)
+                    .frame(maxWidth: .infinity)
                 }
                 if hint && !menu {
                     Text("↑上滑显示工具栏").font(.system(size: 12)).foregroundStyle(pal.secondary)
@@ -230,8 +235,8 @@ struct NovelReaderView: View {
                     Task { _ = try? await loader.refreshToc(book) }
                 }
             }
-            .onChange(of: layoutKey(geo)) { _, _ in relayout(geo) }
-            .onChange(of: book.id) { _, _ in configure(geo); restore(); if book.isWeb { loader.prefetch(book, around: ref.chapter) } }
+            .compatOnChange(of: layoutKey(geo)) { relayout(geo) }
+            .compatOnChange(of: book.id) { configure(geo); restore(); if book.isWeb { loader.prefetch(book, around: ref.chapter) } }
         }
         .statusBarHidden(!menu)
         .sheet(isPresented: $showDownloads) { NovelDownloadView(book: book, chapter: ref.chapter) }
@@ -250,15 +255,15 @@ struct NovelReaderView: View {
             }
         }
         .preferredColorScheme(prefs.theme == .night ? .dark : .light)
-        .onChange(of: speaker.sentence) { _, s in if let s { follow(s) } }
-        .onChange(of: loader.revision) { _, _ in
+        .compatOnChange(of: speaker.sentence) { s in if let s { follow(s) } }
+        .compatOnChange(of: loader.revision) {
             guard book.isWeb else { return }
             let c = ref.chapter, o = offsetInChapter
             paginator.invalidate()
             ref = paginator.ref(chapter: c, offset: o)
             version += 1
         }
-        .onChange(of: ref.chapter) { _, c in if book.isWeb { loader.prefetch(book, around: c) } }
+        .compatOnChange(of: ref.chapter) { c in if book.isWeb { loader.prefetch(book, around: c) } }
         .onDisappear { loader.cancelPrefetch(book); store.addReadTime(book, Date().timeIntervalSince(opened)); speaker.stop() }
         .task {
             // WeRead shows the hint briefly when a book opens.
@@ -311,7 +316,7 @@ struct NovelReaderView: View {
                     ForEach(book.chapters.indices, id: \.self) { i in
                         NovelTextView(text: scrollText(i))
                             .id(i)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("novel.scroll")) } action: { f in
+                            .compatOnFrame(in: .named("novel.scroll")) { f in
                             trackScroll(i, f)
                         }
                     }
@@ -325,9 +330,9 @@ struct NovelReaderView: View {
                     .padding(.horizontal, hMargin).frame(maxWidth: .infinity, minHeight: 28, alignment: .leading).background(pal.bg)
             }
             .onAppear { proxy.scrollTo(ref.chapter, anchor: .top) }
-            .onChange(of: version) { _, _ in proxy.scrollTo(ref.chapter, anchor: .top) }
+            .compatOnChange(of: version) { proxy.scrollTo(ref.chapter, anchor: .top) }
             .onTapGesture { menu ? hideMenu() : showMenu() }
-            .onChange(of: speaker.sentence) { _, s in
+            .compatOnChange(of: speaker.sentence) { s in
                 // 听书 in scroll mode: keep the sentence on screen (anchor at the same relative position).
                 guard let s, book.chapters.indices.contains(speaker.chapter) else { return }
                 let len = max(1, book.chapters[speaker.chapter].length)
@@ -377,7 +382,7 @@ struct NovelReaderView: View {
                 toolbar
             }
             .background(pal.panel.ignoresSafeArea(edges: .bottom))
-            .clipShape(UnevenRoundedRectangle(topLeadingRadius: tab == nil ? 0 : 16, topTrailingRadius: tab == nil ? 0 : 16))
+            .clipShape(CompatUnevenRoundedRectangle(topLeadingRadius: tab == nil ? 0 : 16, topTrailingRadius: tab == nil ? 0 : 16))
             .shadow(color: .black.opacity(tab == nil ? 0.04 : 0.10), radius: 8, y: -2)
         }
     }
@@ -727,7 +732,7 @@ struct NovelReaderView: View {
     /// While reading aloud with the menu closed: state + play / pause, tap to open the 听书 panel.
     private var miniPlayer: some View {
         HStack(spacing: 10) {
-            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: !speaker.paused)
+            Image(systemName: "waveform").compatSymbolVariableColor(isActive: !speaker.paused)
                 .font(.system(size: 15)).foregroundStyle(NovelLayout.accent)
             Text(speaker.paused ? "已暂停" : "朗读中").font(.system(size: 13, weight: .medium)).foregroundStyle(pal.ink)
             Button { speaker.toggle() } label: {

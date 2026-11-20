@@ -19,7 +19,7 @@ struct CategoryView: View {
     @State private var selected: [String: String] = [:]
     /// Display names of the selected option per dimension (the panel reloads per 剧种).
     @State private var selectedNames: [String: String] = [:]
-    @State private var pager = Pager()
+    @StateObject private var pager = Pager()
     @State private var panelGeneration = 0
     @State private var collapsed = false
     @State private var scrolled = false
@@ -39,7 +39,7 @@ struct CategoryView: View {
                 .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
-            .onScrollGeometryChange(for: Bool.self) { g in g.contentOffset.y + g.contentInsets.top > 6 } action: { _, v in
+            .compatOnScrolled(threshold: 6) { v in
                 withAnimation(.easeOut(duration: 0.2)) { scrolled = v }
             }
             .overlay(alignment: .top) { topFade }
@@ -58,12 +58,12 @@ struct CategoryView: View {
             if mode == .filter, panel == nil { await loadPanel() }
             if pager.items.isEmpty { reload() }
         }
-        .onChange(of: mode) {
+        .compatOnChange(of: mode) {
             collapsed = false
             Task { if mode == .filter, panel == nil { await loadPanel() }; reload() }
         }
-        .onChange(of: genre) { if !genre.subs.contains(sub) { sub = genre.subs[0] }; reload() }
-        .onChange(of: sub) { reload() }
+        .compatOnChange(of: genre) { if !genre.subs.contains(sub) { sub = genre.subs[0] }; reload() }
+        .compatOnChange(of: sub) { reload() }
     }
 
     /// `.topfade`: page colour under the status bar, fading out over the content once it scrolls.
@@ -87,7 +87,7 @@ struct CategoryView: View {
             ErrorStateView(error: e) { reload() }.padding(.top, 24)
         } else {
             let items = pager.items
-            LazyVGrid(columns: Self.cols, spacing: 16) {
+            LazyVGrid(columns: cols, spacing: 16) {
                 ForEach(Array(items.prefix(3).enumerated()), id: \.element.id) { i, s in
                     PosterCellView(series: s, rank: i + 1)
                 }
@@ -117,14 +117,14 @@ struct CategoryView: View {
             else { ShimmerBlock().frame(height: 230).padding(.horizontal, 16) }
         }
         .padding(.top, 22)
-        .onGeometryChange(for: Bool.self) { g in g.frame(in: .named("category")).maxY < 40 } action: { v in
+        .compatOnFrame(in: .named("category")) { f in let v = f.maxY < 40
             if v != collapsed { collapsed = v }
         }
         if let e = pager.error, pager.items.isEmpty {
             ErrorStateView(error: e) { reload() }.padding(.top, 24)
         } else if panel != nil {
             let items = pager.items
-            LazyVGrid(columns: Self.cols, spacing: 16) {
+            LazyVGrid(columns: cols, spacing: 16) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, s in
                     PosterCellView(series: s, subtitle: DS.genres(s) ?? DS.heat(s))
                         .onAppear { if i == items.count - 1, pager.hasMore, !pager.isLoading { pager.loadMore() } }
@@ -197,7 +197,7 @@ struct CategoryView: View {
                 }
                 .animation(DS.select, value: list)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .compatScrollBounceBasedOnSize(axes: .horizontal)
             Button { resetAll() } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.counterclockwise").font(.system(size: 12, weight: .semibold))
@@ -263,7 +263,8 @@ struct CategoryView: View {
         }
     }
 
-    private static let cols = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3)
+    @Environment(\.layoutMetrics) private var layout
+    private var cols: [GridItem] { layout.posterGridItems(spacing: 10, alignment: .top) }
 
     // MARK: Data
 

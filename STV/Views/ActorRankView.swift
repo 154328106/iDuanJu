@@ -2,14 +2,14 @@ import SwiftUI
 
 // MARK: - 剧星榜 (hongguo-open-player 顶部「剧星榜」入口：演员排名、人气、升降、性别筛选 → 演员主页)
 
-@MainActor @Observable
-final class ActorRankStore {
+@MainActor
+final class ActorRankStore: ObservableObject {
     static let shared = ActorRankStore()
-    private(set) var actors: [HGRankedActor] = []
-    private(set) var rankDate = ""
-    private(set) var hasMore = true
-    private(set) var loading = false
-    private(set) var error: Error?
+    @Published private(set) var actors: [HGRankedActor] = []
+    @Published private(set) var rankDate = ""
+    @Published private(set) var hasMore = true
+    @Published private(set) var loading = false
+    @Published private(set) var error: Error?
     private var nextOffset = 0
     private var sessionId = ""
     private var loadedAt = Date.distantPast
@@ -49,7 +49,7 @@ final class ActorRankStore {
 /// Embeddable list (Home tab) — no own ScrollView.
 struct ActorRankList: View {
     @State private var gender: HGRankedActor.Gender = .all
-    private let store = ActorRankStore.shared
+    @ObservedObject private var store = ActorRankStore.shared
 
     var body: some View {
         let list = store.filtered(gender)

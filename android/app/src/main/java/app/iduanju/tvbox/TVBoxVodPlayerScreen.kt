@@ -97,7 +97,7 @@ fun TVBoxVodPlayerScreen(
     val exo = remember {
         val ok = OkHttpClient.Builder().followRedirects(true).build()
         val ds = OkHttpDataSource.Factory(ok).setUserAgent(MacCMS.UA)
-        ExoPlayer.Builder(ctx)
+        ExoPlayer.Builder(ctx, app.iduanju.ui.player.DecoderCaps.renderers(ctx))
             .setMediaSourceFactory(DefaultMediaSourceFactory(ds))
             .build()
     }

@@ -8,9 +8,9 @@ import AVFoundation
 /// always excluding the edge-back strip. Brightness is restored when the player goes away.
 enum AdjustSide { case brightness, volume }
 
-@MainActor @Observable
-final class PlayerAdjuster {
-    var hud: (side: AdjustSide, value: Double)?
+@MainActor
+final class PlayerAdjuster: ObservableObject {
+    @Published var hud: (side: AdjustSide, value: Double)?
     private var originalBrightness: CGFloat?
     private var startValue: Double = 0
     private var hideTask: Task<Void, Never>?

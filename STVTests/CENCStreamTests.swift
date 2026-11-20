@@ -134,7 +134,7 @@ final class CENCStreamLiveTests: XCTestCase {
         defer { if let t = LocalHLSProxy.token(of: p) { LocalHLSProxy.shared.release(t) } }
         try await LocalHLSProxy.shared.prepareCENC(p)
         let tPlan = Date().timeIntervalSince(t0)
-        let e = try AetherPlayerEngine()
+        let e = try MPVPlayerEngine()
         defer { e.stop() }
         try await e.load(.direct(URL(string: p)!), stream: nil, start: nil, title: "hg")
         e.muted = true
@@ -259,7 +259,7 @@ final class CENCThrottledStartupTests: XCTestCase {
     /// Seconds from load to 1 s of decoded playback.
     private func firstSecond(_ src: PlaybackCoordinator.Source) async throws -> Double {
         let t = Date()
-        let e = try AetherPlayerEngine()
+        let e = try MPVPlayerEngine()
         defer { e.stop() }
         try await e.load(src, stream: nil, start: nil, title: "t")
         e.muted = true

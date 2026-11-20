@@ -34,7 +34,7 @@ struct NovelTextView: UIViewRepresentable {
 /// 小说 tab: unified STVTheme shelf — one atmospheric continue hero, borderless quick strip, open 3-column grid.
 struct NovelHomeView: View {
     var embedded = false
-    private let store = NovelStore.shared
+    @ObservedObject private var store = NovelStore.shared
     private enum ShelfFilter: String, CaseIterable { case all = "全部", reading = "在读", local = "本地" }
 
     @State private var filter: ShelfFilter = .all
@@ -50,7 +50,8 @@ struct NovelHomeView: View {
     @State private var importSheet = false
     @State private var sourceImport = false
 
-    private let cols = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3)
+    @Environment(\.layoutMetrics) private var layout
+    private var cols: [GridItem] { layout.posterGridItems(spacing: 12, alignment: .top) }
 
     private var filteredShelf: [NovelBook] {
         switch filter {

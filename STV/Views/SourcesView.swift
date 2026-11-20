@@ -3,7 +3,7 @@ import SwiftUI
 /// 我的 → 片源管理. 红果 is always on; 黄果 (18+) and long-video sites are opt-in and can be
 /// hidden behind Face ID (`SourceGate`).
 struct SourcesView: View {
-    private let gate = SourceGate.shared
+    @ObservedObject private var gate = SourceGate.shared
     @State private var message: String?
     @State private var bufferMB = BufferSettings.megabytes
     @State private var cacheBytes: Int64 = 0
@@ -48,13 +48,13 @@ struct SourcesView: View {
                             }
                             .pickerStyle(.segmented)
                             .accessibilityIdentifier("settings.prebuffer")
-                            .onChange(of: bufferMB) { _, v in BufferSettings.megabytes = v }
+                            .compatOnChange(of: bufferMB) { v in BufferSettings.megabytes = v }
                         }.padding(14)
                         Toggle(isOn: Binding(get: { adStrip }, set: { adStrip = $0; HLSAdFilter.enabled = $0 })) {
                             label("去广告", "nosign", sub: "去掉 HLS 片源里插播的广告片段（adjump、异域名短片段、AES 片源中的明文短片段、重复片段）；不会整段丢弃正片的分段标记")
                         }.padding(14).accessibilityIdentifier("settings.adstrip")
                         VStack(alignment: .leading, spacing: 10) {
-                            label("播放内核", "cpu", sub: "AetherEngine（FFmpeg 解封装，支持 MKV/FLV/AVI 等与真实音轨/字幕列表）；遇到 CENC/FairPlay 或加载失败自动回退系统播放器")
+                            label("播放内核", "cpu", sub: "MPVKit（libmpv + FFmpeg + libdovi，兼容 iOS 16+，支持杜比视界/HDR10/DTS/TrueHD 与真实音轨/字幕）；遇到 CENC/FairPlay 或加载失败自动回退系统播放器")
                             Picker("播放内核", selection: Binding(get: { engineKind }, set: { engineKind = $0; PlayerEngineSettings.preferred = $0 })) {
                                 ForEach(PlayerEngineKind.allCases, id: \.self) { Text($0.label).tag($0) }
                             }
@@ -86,7 +86,7 @@ struct SourcesView: View {
                 }
             }.padding(.vertical, 12)
         }
-        .defaultScrollAnchor(DebugScroll.anchor)
+        .compatDefaultScrollAnchor(DebugScroll.anchor)
         .background(STVTheme.bg.ignoresSafeArea())
         .navigationTitle("片源管理")
         .navigationBarTitleDisplayMode(.inline)
@@ -142,6 +142,9 @@ struct SourcesView: View {
         case .xvideos: "HLS 自适应 + MP4 · 需代理"
         case .xnxx: "HLS 自适应 + MP4 · 需代理"
         case .pornhub: "HLS 1080P/720P/480P · 需代理"
+        case .youporn: "HLS + MP4 · 与 Pornhub 同系，地区受限时可换"
+        case .redtube: "HLS + MP4 · 与 Pornhub 同系"
+        case .hqporner: "MP4 360/720/1080 · 嵌入页直链"
         default: s.pluginID != nil ? "JS 插件 · " + (PluginStore.snapshot(s.pluginID!)?.manifest.httpDomains.first ?? "") :
                  s.cmsKey != nil ? "苹果 CMS 采集站 · " + (CMSStore.site(s.cmsKey!).flatMap { URL(string: $0.api)?.host } ?? "") : s.siteHost
         }
@@ -176,22 +179,19 @@ struct PlayerCoreLicenses: View {
              links: [("网关源码提交", "https://github.com/my-name-is-alan/get_video_streaming/commit/0613b49")],
              note: "当前 Medusa 封装移植自网关。KS/自定义变换源自 OpenHongguo 05aa580，按原生合成向量核对；具体来源和修改范围见 THIRD_PARTY_NOTICES.md。",
              files: ["HGCurrentPlayer-Apache-2.0"]),
-        Item(id: "aether", title: "AetherEngine 7.62.0", license: "LGPL-3.0 + App Store / DRM Exception · Copyright © 2026 Vincent Herbst",
-             links: [("源码（7.62.0 标签）", "https://github.com/superuser404notfound/AetherEngine/tree/7.62.0")],
-             note: "播放内核，静态链接，未修改。依据其 App Store / DRM 例外条款分发；对应源码见上方 7.62.0 标签。",
-             files: ["AetherEngine-LICENSE"]),
-        Item(id: "ffmpeg", title: "FFmpeg（via FFmpegBuild 3.14.0）", license: "LGPL-2.1-or-later（未启用 GPL / version3）",
-             links: [("FFmpegBuild 3.14.0 源码与构建脚本", "https://github.com/superuser404notfound/FFmpegBuild/tree/3.14.0"),
-                     ("ffmpeg.org", "https://ffmpeg.org")],
-             note: "以动态框架形式（Frameworks/AetherLib*.framework）随应用分发，可替换重链接；FFmpegBuild 的本地补丁与 libzvbi 修改见其 build.sh。libzvbi 库源码为 LGPL-2.0-or-later（按 LGPL-2.1 分发），ure.c 为 MIT。",
-             files: ["FFmpeg-LGPL-2.1", "libzvbi-ure-MIT"]),
+        Item(id: "mpvkit", title: "MPVKit 1.0.0（mpv v0.41.0）", license: "LGPL-2.1-or-later",
+             links: [("MPVKit 1.0.0", "https://github.com/mpvkit/MPVKit/tree/1.0.0"), ("mpv.io", "https://mpv.io")],
+             note: "iOS 16+ 主力播放内核，内置 libmpv + MoltenVK + libplacebo + libass + libdovi，支持杜比视界、HDR10 与 DTS/TrueHD 软解。",
+             files: ["FFmpeg-LGPL-2.1"]),
+        Item(id: "ffmpeg", title: "FFmpeg（via MPVKit 1.0.0）", license: "LGPL-2.1-or-later（未启用 GPL）",
+             links: [("MPVKit 源码与构建脚本", "https://github.com/mpvkit/MPVKit"), ("ffmpeg.org", "https://ffmpeg.org")],
+             note: "随 MPVKit 提供的 LGPL 音视频解复用与解码栈（含 DTS / TrueHD / AC3 / E-AC3 软解）。",
+             files: ["FFmpeg-LGPL-2.1"]),
         Item(id: "dav1d", title: "dav1d", license: "BSD-2-Clause · Copyright © VideoLAN and dav1d authors",
-             links: [("code.videolan.org/videolan/dav1d", "https://code.videolan.org/videolan/dav1d")], note: "AV1 解码（AetherLibdav1d）。", files: ["dav1d-BSD-2-Clause"]),
-        Item(id: "zimg", title: "zimg", license: "WTFPL",
-             links: [("github.com/sekrit-twc/zimg", "https://github.com/sekrit-twc/zimg")], note: "缩放 / 色彩转换（AetherLibzimg）。", files: ["zimg-WTFPL"]),
-        Item(id: "dovi", title: "libdovi（dovi_tool dolby_vision crate，via LibDovi 2.2.0）", license: "MIT · Copyright (c) quietvoid and contributors",
-             links: [("github.com/quietvoid/dovi_tool", "https://github.com/quietvoid/dovi_tool"), ("LibDovi 2.2.0", "https://github.com/superuser404notfound/LibDovi/tree/2.2.0")],
-             note: "Dolby Vision RPU 解析（静态库，MIT 选项）。", files: ["LibDovi-LICENSE"]),
+             links: [("code.videolan.org/videolan/dav1d", "https://code.videolan.org/videolan/dav1d")], note: "AV1 解码（Libdav1d）。", files: ["dav1d-BSD-2-Clause"]),
+        Item(id: "dovi", title: "libdovi（dovi_tool dolby_vision crate）", license: "MIT · Copyright (c) quietvoid and contributors",
+             links: [("github.com/quietvoid/dovi_tool", "https://github.com/quietvoid/dovi_tool")],
+             note: "Dolby Vision Profile 5/7/8 RPU 解析（MIT）。", files: ["LibDovi-LICENSE"]),
     ]
     private func text(_ f: String) -> String {
         Bundle.main.url(forResource: f, withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? f
@@ -299,7 +299,7 @@ struct LicensesView: View {
                 .background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 14))
             }.padding(16)
         }
-        .defaultScrollAnchor(DebugScroll.anchor)
+        .compatDefaultScrollAnchor(DebugScroll.anchor)
         .background(STVTheme.bg.ignoresSafeArea())
         .navigationTitle("开源许可")
         .navigationBarTitleDisplayMode(.inline)
@@ -342,7 +342,7 @@ struct SiteLogView: View {
         .navigationTitle("站点诊断日志")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button(copied ? "已复制" : "复制") {
                     UIPasteboard.general.string = (summary + [""] + lines).joined(separator: "\n"); copied = true
                 }
