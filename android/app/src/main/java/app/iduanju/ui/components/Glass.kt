@@ -52,31 +52,60 @@ fun GlassTabBar(
     onSelect: (Int) -> Unit,
     haze: dev.chrisbanes.haze.HazeState? = null,
     modifier: Modifier = Modifier,
+    searchSelected: Boolean = false,
+    onSearch: (() -> Unit)? = null,
+    searchIcon: (@Composable (Boolean) -> Unit)? = null,
 ) {
     val c = IdjThemeColors
+    val blur = haze != null && android.os.Build.VERSION.SDK_INT >= 31
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        GlassCapsule(Modifier.widthIn(max = 400.dp).fillMaxWidth().padding(horizontal = 16.dp), haze = haze) {
-            items.forEachIndexed { i, (label, icon) ->
-                val on = i == selected
+        Row(
+            Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GlassCapsule(Modifier.weight(1f), haze = haze) {
+                items.forEachIndexed { i, (label, icon) ->
+                    val on = i == selected && !searchSelected
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(if (on) c.text.copy(0.10f) else Color.Transparent)
+                            .clickable { onSelect(i) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            icon(on)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                label,
+                                color = if (on) c.text else c.secondary,
+                                fontSize = 11.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+            }
+            if (onSearch != null && searchIcon != null) {
                 Box(
                     Modifier
-                        .weight(1f)
-                        .height(48.dp)
+                        .size(60.dp)
+                        .shadow(18.dp, RoundedCornerShape(percent = 50), ambientColor = Color.Black.copy(0.18f), spotColor = Color.Black.copy(0.18f))
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(if (on) c.text.copy(0.10f) else Color.Transparent)
-                        .clickable { onSelect(i) },
+                        .then(if (blur) Modifier.hazeEffect(haze!!, dev.chrisbanes.haze.HazeStyle(c.surface, emptyList(), 24.dp, noiseFactor = 0f)) else Modifier)
+                        .background(if (searchSelected) c.text.copy(0.14f) else c.surface.copy(alpha = if (blur) 0.55f else 0.92f))
+                        .border(
+                            0.8.dp,
+                            Brush.verticalGradient(listOf(c.text.copy(0.18f), c.text.copy(0.05f))),
+                            RoundedCornerShape(percent = 50),
+                        )
+                        .clickable(onClick = onSearch),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        icon(on)
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            label,
-                            color = if (on) c.text else c.secondary,
-                            fontSize = 11.sp,
-                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                        )
-                    }
+                    searchIcon(searchSelected)
                 }
             }
         }

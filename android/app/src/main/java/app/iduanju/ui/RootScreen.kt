@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -40,8 +41,8 @@ fun RootScreen(initialRoute: String? = null) {
     var novelImmersive by remember { mutableStateOf(false) }
     val back = nav.currentBackStackEntryAsState().value
     val route = back?.destination?.route ?: "home"
-    LaunchedEffect(route) { when(route) { "home" -> tab=0; "search" -> tab=1; "category" -> tab=2; "profile" -> tab=3 } }
-    val atRoot = route in setOf("home", "search", "category", "profile")
+    LaunchedEffect(route) { when (route) { "home" -> tab = 0; "tvbox" -> tab = 1; "category" -> tab = 2; "profile" -> tab = 3 } }
+    val atRoot = route in setOf("home", "tvbox", "search", "category", "profile")
     /** Backdrop for the floating tab bar's blur (Haze): everything the NavHost draws. */
     val haze = androidx.compose.runtime.remember { dev.chrisbanes.haze.HazeState() }
 
@@ -57,6 +58,70 @@ fun RootScreen(initialRoute: String? = null) {
         androidx.compose.runtime.CompositionLocalProvider(LocalNavigate provides navigate) {
             NavHost(nav, startDestination = "home", modifier = Modifier.fillMaxSize().hazeSource(haze)) {
                 composable("home") { HomeScreen(onOpenDetail = { nav.navigate("detail/$it") }, onSearch = { nav.navigate("search") }, onPlay = { nav.navigate("player/$it/0") }, onOpenManga = { nav.navigate("manga/" + android.net.Uri.encode(it)) }, onImmersiveChanged = { novelImmersive = it }) }
+                composable("tvbox") {
+                    app.iduanju.tvbox.TVBoxHubScreen(
+                        onOpenConfig = { nav.navigate("tvbox/config") },
+                        onOpenVodPlayer = { siteKey, sid, title, cover, ep ->
+                            nav.navigate(
+                                "tvbox/vod/${android.net.Uri.encode(siteKey)}/${android.net.Uri.encode(sid)}/$ep?title=${android.net.Uri.encode(title)}&cover=${android.net.Uri.encode(cover)}",
+                            )
+                        },
+                        onOpenLivePlayer = { repoId, liveId, chIdx ->
+                            nav.navigate("tvbox/live/${android.net.Uri.encode(repoId)}/${android.net.Uri.encode(liveId)}/$chIdx")
+                        },
+                    )
+                }
+                composable("tvbox/config") {
+                    app.iduanju.tvbox.TVBoxConfigScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLive = { repoId, liveId ->
+                            nav.navigate("tvbox/live/${android.net.Uri.encode(repoId)}/${android.net.Uri.encode(liveId)}/0")
+                        },
+                    )
+                }
+                composable(
+                    "tvbox/vod/{siteKey}/{sid}/{ep}?title={title}&cover={cover}",
+                    arguments = listOf(
+                        navArgument("siteKey") { type = NavType.StringType },
+                        navArgument("sid") { type = NavType.StringType },
+                        navArgument("ep") { type = NavType.IntType },
+                        navArgument("title") { defaultValue = "" },
+                        navArgument("cover") { defaultValue = "" },
+                    ),
+                ) { e ->
+                    val args = requireNotNull(e.arguments)
+                    app.iduanju.tvbox.TVBoxVodPlayerScreen(
+                        siteKey = args.getString("siteKey").orEmpty(),
+                        seriesId = args.getString("sid").orEmpty(),
+                        initialTitle = args.getString("title").orEmpty(),
+                        initialCover = args.getString("cover").orEmpty(),
+                        startEp = args.getInt("ep"),
+                        onBack = { nav.popBackStack() },
+                        onSwitchSiteSeries = { newSiteKey, newSid, title, cover ->
+                            nav.navigate(
+                                "tvbox/vod/${android.net.Uri.encode(newSiteKey)}/${android.net.Uri.encode(newSid)}/0?title=${android.net.Uri.encode(title)}&cover=${android.net.Uri.encode(cover)}",
+                            ) {
+                                popUpTo("tvbox/vod/{siteKey}/{sid}/{ep}?title={title}&cover={cover}") { inclusive = true }
+                            }
+                        },
+                    )
+                }
+                composable(
+                    "tvbox/live/{repoId}/{liveId}/{chIdx}",
+                    arguments = listOf(
+                        navArgument("repoId") { type = NavType.StringType },
+                        navArgument("liveId") { type = NavType.StringType },
+                        navArgument("chIdx") { type = NavType.IntType },
+                    ),
+                ) { e ->
+                    val args = requireNotNull(e.arguments)
+                    app.iduanju.tvbox.TVBoxLivePlayerScreen(
+                        repoId = args.getString("repoId").orEmpty(),
+                        liveId = args.getString("liveId").orEmpty(),
+                        startChannelIndex = args.getInt("chIdx"),
+                        onBack = { nav.popBackStack() },
+                    )
+                }
                 composable("search") { SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("category") { CategoryScreen(onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("library/{kind}") { e -> app.iduanju.ui.library.LibraryListScreen(e.arguments!!.getString("kind")!!, onBack = { nav.popBackStack() }, onOpenDetail = { nav.navigate("detail/$it") }) }
@@ -111,18 +176,27 @@ fun RootScreen(initialRoute: String? = null) {
                 selected = tab,
                 items = listOf(
                     "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "搜索" to { on -> Icon(Icons.Filled.Search, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "TVBox" to { on -> Icon(Icons.Filled.LiveTv, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
                     "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
                     "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
                 ),
                 onSelect = {
                     tab = it
-                    nav.navigate(listOf("home", "search", "category", "profile")[it]) {
+                    nav.navigate(listOf("home", "tvbox", "category", "profile")[it]) {
                         popUpTo(nav.graph.startDestinationId) { saveState = true }
                         launchSingleTop = true
                         restoreState = true
                     }
                 },
+                searchSelected = route == "search",
+                onSearch = {
+                    nav.navigate("search") {
+                        popUpTo(nav.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                searchIcon = { on -> Icon(Icons.Filled.Search, null, Modifier.size(22.dp), tint = if (on) IdjThemeColors.accent else IdjThemeColors.text) },
                 haze = haze,
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 4.dp),
             )

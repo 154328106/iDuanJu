@@ -14,6 +14,8 @@ class IdjApp : Application(), coil.ImageLoaderFactory {
     lateinit var library: LibraryStore
         private set
     lateinit var cms: app.iduanju.data.CMSStore
+    lateinit var tvbox: app.iduanju.tvbox.TVBoxStore
+        private set
     lateinit var plugins: app.iduanju.plugin.PluginStore
         private set
     lateinit var tg: app.iduanju.tg.TGStore
@@ -45,6 +47,7 @@ class IdjApp : Application(), coil.ImageLoaderFactory {
         app.iduanju.core.hls.HLSAdFilter.enabled = getSharedPreferences("idj", MODE_PRIVATE).getBoolean("stv.hls.adstrip", true)
         library = LibraryStore(this)
         cms = app.iduanju.data.CMSStore(this)
+        tvbox = app.iduanju.tvbox.TVBoxStore(this).also { it.migrateLegacySitesIfNeeded(cms.sites) }
         plugins = app.iduanju.plugin.PluginStore(this)
         tg = app.iduanju.tg.TGStore(this)
         manga = app.iduanju.manga.MangaStore(this)

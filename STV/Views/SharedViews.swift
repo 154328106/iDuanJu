@@ -83,6 +83,9 @@ enum Route: Hashable {
     case mangaLibrary
     case tdChat(Int64, String)
     case plugins
+    case tvboxConfig
+    case tvboxVod(String, String, String, String, Int)
+    case tvboxLive(String, String, Int)
 }
 
 struct ZoomNamespaceKey: EnvironmentKey { static let defaultValue: Namespace.ID? = nil }
@@ -123,6 +126,11 @@ extension View {
             case .mangaLibrary: MangaLibraryView()
             case .tdChat(let id, let t): TDChatView(chatId: id, title: t)
             case .plugins: PluginsView()
+            case .tvboxConfig: TVBoxConfigView()
+            case .tvboxVod(let siteKey, let sid, let title, let cover, let ep):
+                TVBoxVodPlayerView(siteKey: siteKey, seriesId: sid, initialTitle: title, initialCover: cover, startEp: ep)
+            case .tvboxLive(let repoId, let liveId, let chIdx):
+                TVBoxLivePlayerView(repoId: repoId, liveId: liveId, startChannelIndex: chIdx)
             }
         }
     }
