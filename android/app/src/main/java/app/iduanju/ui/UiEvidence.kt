@@ -8,4 +8,7 @@ object UiEvidence {
     var scroll = false
     var landscape = false
     var switchEpisode = false
+    /** Written by PlayerScreen's position poll in every build; native playback tests read them. */
+    @Volatile var playerPositionMs = 0L
+    @Volatile var playerPlaying = false
 }

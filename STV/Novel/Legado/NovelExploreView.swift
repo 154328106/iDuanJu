@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Source-defined sections, sidebar categories, and ranked cover rows.
 struct NovelExploreView: View {
-    var onRead: (NovelBook) -> Void
     @Environment(\.dismiss) private var dismiss
     // Keep the user's choice instead of resetting to the first (possibly unavailable) source every visit.
     @AppStorage("novel.rank.source") private var sourceID = ""
@@ -19,9 +18,10 @@ struct NovelExploreView: View {
     @State private var generation = UUID()
     @State private var controlHeight: CGFloat = 0
     private let accent = STVTheme.accent
-    private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && ($0.bookSourceType ?? 0) == 0 && !($0.exploreUrl ?? "").isEmpty } }
+    private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && $0.supported && ($0.isRSS || !($0.exploreUrl ?? "").isEmpty) } }
     private var groups: [String] { categories.reduce(into: [String]()) { if !$0.contains($1.group) { $0.append($1.group) } } }
 
+    @State private var scrolled = false
     @State private var searching = false
     @Namespace private var railNS
 
@@ -34,6 +34,7 @@ struct NovelExploreView: View {
                 } trailing: {
                     RoundIconButton(systemName: "magnifyingglass") { searching = true }.accessibilityIdentifier("novel.rank.search")
                 }
+                .dsPinned(scrolled)
                 if sources.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(STVTheme.tertiary)
@@ -53,8 +54,9 @@ struct NovelExploreView: View {
             }
             .dsAmbient(cool: true)
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: LegadoSearchItem.self) { NovelWebDetailView(items: [$0]) }
             .fullScreenCover(isPresented: $managing) { NovelSourcesView() }
-            .fullScreenCover(isPresented: $searching) { NovelSearchView(onRead: onRead) }
+            .fullScreenCover(isPresented: $searching) { NovelSearchView() }
             .sheet(isPresented: $choosingSource) { sourceSheet }
             .task(id: sources.map(\.id)) { if !sources.contains(where: { $0.id == sourceID }) { sourceID = sources.first?.id ?? "" } }
             .task(id: sourceID) { await refreshCategories() }
@@ -115,7 +117,7 @@ struct NovelExploreView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink { NovelWebDetailView(items: [item], onRead: onRead).toolbar(.visible, for: .navigationBar) } label: { bookRow(item, rank: index + 1) }
+                    NavigationLink(value: item) { bookRow(item, rank: index + 1) }
                         .buttonStyle(PressScale(scale: 0.98))
                         .overlay(alignment: .top) { if index > 0 { Hairline() } }
                         .accessibilityIdentifier("novel.rank.book.\(index)")
@@ -143,6 +145,7 @@ struct NovelExploreView: View {
         }
         .id(categoryID)
         .transition(.opacity)
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 4 } action: { _, value in scrolled = value }
     }
     private func bookRow(_ item: LegadoSearchItem, rank: Int) -> some View {
         let tags = item.kind.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.prefix(2)
@@ -201,6 +204,7 @@ struct NovelExploreView: View {
             .padding(.horizontal, 16)
         }
         .frame(height: min(240, controlHeight))
+        .accessibilityIdentifier("novel.rank.controls")
         .scrollBounceBehavior(.basedOnSize)
     }
 

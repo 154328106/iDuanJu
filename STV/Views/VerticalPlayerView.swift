@@ -19,6 +19,7 @@ struct VerticalPlayerView: View {
 struct PlayerScreen: View {
     let series: HGSeries
     let startIndex: Int?
+    private let suppliedDetail: HGSeriesDetail?
     var onSwitchSeries: (HGSeries) -> Void = { _ in }
     @State private var co: PlaybackCoordinator
     @State private var seasons: [HGSeries] = []
@@ -61,9 +62,10 @@ struct PlayerScreen: View {
 
     private var landscape: Bool { vClass == .compact }
 
-    init(series: HGSeries, startIndex: Int?, onSwitchSeries: @escaping (HGSeries) -> Void = { _ in }) {
+    init(series: HGSeries, startIndex: Int?, detail: HGSeriesDetail? = nil, resolve: ((Int) async throws -> PlaybackCoordinator.Source)? = nil, onSwitchSeries: @escaping (HGSeries) -> Void = { _ in }) {
         self.series = series; self.startIndex = startIndex; self.onSwitchSeries = onSwitchSeries
-        _co = State(initialValue: PlaybackCoordinator(series: series))
+        suppliedDetail = detail
+        _co = State(initialValue: PlaybackCoordinator(series: series, resolve: resolve))
     }
 
     // MARK: Geometry
@@ -98,7 +100,7 @@ struct PlayerScreen: View {
                     Color.black
                     // A single in-window layer remains the PiP source across paging, rotation and buffering.
                     PlayerLayerView(coordinator: co, fill: fillScreen, engine: co.engineKind)
-                        .accessibilityElement(children: .contain).accessibilityIdentifier("player.video").accessibilityValue(fillScreen ? "fill" : "fit")
+                        .accessibilityElement(children: .contain).accessibilityIdentifier(suppliedDetail == nil ? "player.video" : "novel.media.status").accessibilityValue(suppliedDetail == nil ? (fillScreen ? "fill" : "fit") : String(format: "已播放 %.2f 秒", co.time))
                         .frame(width: area.width, height: area.height).offset(x: area.minX, y: area.minY - pageDrift(co.current ?? 0, page: full.height))
                         .allowsHitTesting(false)
                     if let held = co.heldFrame {
@@ -417,10 +419,10 @@ struct PlayerScreen: View {
                 PlayerIconButton(symbol: "pip.enter", label: "画中画") { co.togglePiP() }
                     .disabled(!co.pipPossible).opacity(co.pipPossible ? 1 : 0.55)
                     .accessibilityIdentifier("player.pip")
-                PlayerIconButton(symbol: library.isFavorite(series) ? "heart.fill" : "heart",
+                if suppliedDetail == nil { PlayerIconButton(symbol: library.isFavorite(series) ? "heart.fill" : "heart",
                                  label: library.isFavorite(series) ? "取消收藏" : "收藏") {
                     library.toggleFavorite(series); flashChrome()
-                }
+                } }
                 moreMenu
             }
             .padding(.horizontal, 16).padding(.top, ins.top)
@@ -538,6 +540,7 @@ struct PlayerScreen: View {
 
     private func landSubline(_ i: Int) -> String {
         let e = co.episodes[i]
+        if suppliedDetail != nil { return "第 \(e.ep) 章 · " + e.title }
         if longForm {
             return co.episodes.count > 1 ? "S1:E\(e.ep)" + (e.title.isEmpty ? "" : " · " + e.title) : (series.subtitle ?? Fmt.meta(series))
         }
@@ -629,7 +632,9 @@ struct PlayerScreen: View {
         let e = co.episodes[i]
         let longList = longForm
         let line: String, strong: String, rest: String
-        if longList {
+        if suppliedDetail != nil {
+            line = ""; strong = "第\(e.ep)章"; rest = " · " + e.title
+        } else if longList {
             if co.episodes.count > 1 { line = ""; strong = "S1:E\(e.ep)"; rest = e.title.isEmpty ? "" : " · " + e.title }
             else { line = series.subtitle ?? Fmt.meta(series); strong = ""; rest = "" }
         } else {
@@ -967,7 +972,8 @@ struct PlayerScreen: View {
 
     private func load() async {
         do {
-            let d = try await Catalog.detail(series)
+            let d: HGSeriesDetail
+            if let suppliedDetail { d = suppliedDetail } else { d = try await Catalog.detail(series) }
             try Task.checkCancellation()
             loadError = nil
             guard !d.episodes.isEmpty else { throw ProviderError.upstream("暂无可播放分集") }
@@ -975,7 +981,7 @@ struct PlayerScreen: View {
             co.detail = d
             co.select(start)
             flashChrome()
-            seasons = await SeasonStore.seasons(for: d, series: series)
+            if suppliedDetail == nil { seasons = await SeasonStore.seasons(for: d, series: series) }
         } catch { if !Task.isCancelled { loadError = error } }
     }
 

@@ -163,6 +163,10 @@ final class NovelPageView: UIView {
                 if x.length > 0 { t.addAttribute(.backgroundColor, value: s.highlight, range: NSRange(location: x.location - r.location, length: x.length)) }
             }
             textView.attributedText = t
+            // Nonvisual body readiness for VoiceOver and native QA; footer existence also matches loading placeholders.
+            textView.isAccessibilityElement = true
+            textView.accessibilityIdentifier = "novel.page.body"
+            textView.accessibilityValue = t.string
         }
         [header, textView, footer].forEach(addSubview)
     }

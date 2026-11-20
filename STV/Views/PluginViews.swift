@@ -8,6 +8,8 @@ struct PluginsView: View {
     private let gate = SourceGate.shared
     @State private var pending: PendingInstall?
     @State private var updates: [PendingInstall] = []
+    @State private var liveLists: [TVBoxImport.Live] = []
+    @State private var showLive = false
     @State private var busy: String?
     @State private var message: String?
     @State private var showURL = false
@@ -37,7 +39,7 @@ struct PluginsView: View {
                 }
                 group("添加插件") {
                     action("从网址添加", "link", id: "plugins.add.url") { urlText = ""; showURL = true }
-                    action("从文件导入（.idjplugin）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
+                    action("从文件导入（插件 / M3U / TVBox JSON）", "doc.badge.plus", id: "plugins.add.file") { showFile = true }
                     action("粘贴插件内容", "doc.on.clipboard", id: "plugins.add.paste") { showPaste = true }
                     action(busy == "update" ? "正在检查更新…" : "检查更新", "arrow.triangle.2.circlepath", id: "plugins.update") { await checkUpdates() }
                 }
@@ -48,6 +50,7 @@ struct PluginsView: View {
                             Text("查看权限变化").font(.caption).foregroundStyle(STVTheme.accent) }.padding(14)
                     }.buttonStyle(.plain).background(STVTheme.surface, in: RoundedRectangle(cornerRadius: 14)).padding(.horizontal, 16)
                 }
+                if !liveLists.isEmpty { group("TVBox 直播") { action("选择直播列表（\(liveLists.count)）", "list.bullet", id: "plugins.tvbox.live") { showLive = true } } }
                 group("订阅") {
                     ForEach(store.subscriptions) { s in subscriptionBlock(s) }
                     action("添加订阅地址", "plus.circle", id: "plugins.sub.add") { subText = ""; showSub = true }
@@ -105,19 +108,36 @@ struct PluginsView: View {
             TextField("https://…/manifest.json 或 .idjplugin", text: $urlText).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("取消", role: .cancel) {}
             Button("下一步") { interpret(urlText) }
-        } message: { Text("支持 manifest.json、.idjplugin 或订阅列表链接") }
+        } message: { Text("支持 TVBox 配置、M3U、插件和订阅链接") }
         .alert("订阅地址", isPresented: $showSub) {
             TextField("https://…/plugins.json", text: $subText).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("取消", role: .cancel) {}
             Button("添加") { Task { do { try await store.addSubscription(subText); message = "已添加订阅" } catch { message = error.localizedDescription } } }
         }
         .sheet(isPresented: $showPaste) { PasteSheet { text in showPaste = false; if let text { interpret(text) } } }
+        .sheet(isPresented: $showLive) { NavigationStack { List(liveLists, id: \.url) { live in
+            Button(live.name) { showLive = false; prepare { try await PluginInstaller.prepareLive(live) } }
+        }.navigationTitle("选择直播列表") } }
         .sheet(isPresented: $showCMS) { AddCMSSheet { showCMS = false; if let m = $0 { message = m } } }
         .fileImporter(isPresented: $showFile, allowedContentTypes: [.json, .data, .plainText, .item]) { r in
             guard case let .success(url) = r else { return }
             let ok = url.startAccessingSecurityScopedResource()
             defer { if ok { url.stopAccessingSecurityScopedResource() } }
             guard let d = try? Data(contentsOf: url), d.count < 4 << 20 else { message = "无法读取文件"; return }
+            if let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+               o["sites"] != nil || o["spider"] != nil || o["lives"] != nil {
+                do {
+                    let config = try TVBoxImport.parse(d)
+                    Task { await importTVBox(config, origin: "文件：" + url.lastPathComponent) }
+                }
+                catch { message = error.localizedDescription }
+                return
+            }
+            if let list = String(data: d, encoding: .utf8), M3UImport.isChannelList(list) {
+                let name = url.deletingPathExtension().lastPathComponent
+                prepare { try PluginInstaller.prepareM3U(list, url: nil, name: name, origin: "文件：" + url.lastPathComponent) }
+                return
+            }
             prepare { try PluginInstaller.prepare(bundle: d, origin: "文件：" + url.lastPathComponent) }
         }
         .accessibilityIdentifier("plugins.root")
@@ -151,10 +171,33 @@ struct PluginsView: View {
                 switch try await Task.detached { try await PluginInstaller.interpret(t) }.value {
                 case .plugin(let p): pending = p
                 case .subscription(let u): try await store.addSubscription(u); message = "这是订阅列表，已添加到「订阅」"
+                case .tvbox(let config): await importTVBox(config, origin: "粘贴")
                 }
             } catch { message = error.localizedDescription }
             busy = nil
         }
+    }
+
+    @MainActor private func importTVBox(_ config: TVBoxImport.Config, origin: String) async {
+        busy = "prepare"; message = nil
+        var added = 0
+        var failures: [String] = []
+        liveLists = config.lives
+        for offset in stride(from: 0, to: config.sites.count, by: 8) {
+            await withTaskGroup(of: String?.self) { group in
+                for site in config.sites[offset..<min(offset + 8, config.sites.count)] {
+                    group.addTask { @MainActor in
+                        do { _ = try await cms.add(name: site.name, api: site.api, adult: site.adult, origin: origin); return nil }
+                        catch { return "\(site.name)：\(error.localizedDescription)" }
+                    }
+                }
+                for await failure in group { if let failure { failures.append(failure) } else { added += 1 } }
+            }
+        }
+        let skipped = config.skipped > 0 ? "，跳过 \(config.skipped) 个脚本/不兼容站点" : ""
+        let failed = failures.isEmpty ? "" : "，验证失败 \(failures.count) 个：" + failures.prefix(3).joined(separator: "；")
+        message = "已导入 TVBox「\(config.name)」：添加 \(added)/\(config.sites.count) 个采集站\(skipped)\(failed)"
+        busy = nil
     }
 
     private func checkUpdates() async {
@@ -334,7 +377,7 @@ private struct PasteSheet: View {
         NavigationStack {
             TextEditor(text: $text).font(.system(.footnote, design: .monospaced)).padding(8)
                 .overlay(alignment: .topLeading) {
-                    if text.isEmpty { Text("粘贴 .idjplugin 内容（JSON）或插件 / 订阅链接").foregroundStyle(.secondary).padding(14).allowsHitTesting(false) }
+                    if text.isEmpty { Text("粘贴 .idjplugin、M3U 频道列表、TVBox JSON 或插件 / 订阅链接").foregroundStyle(.secondary).padding(14).allowsHitTesting(false) }
                 }
                 .navigationTitle("粘贴插件").navigationBarTitleDisplayMode(.inline)
                 .toolbar {

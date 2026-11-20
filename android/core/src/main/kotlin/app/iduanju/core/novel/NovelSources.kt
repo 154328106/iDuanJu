@@ -14,8 +14,10 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class NovelSource(val json: JSONObject) {
-    val id: String get() = json.optString("bookSourceUrl")
-    val name: String get() = json.optString("bookSourceName", id)
+    val id: String get() = json.optString("bookSourceUrl",json.optString("sourceUrl"))
+    val isRSS:Boolean get() = json.optString("_idjSourceKind")=="rss" || (json.has("sourceUrl") && (!json.has("bookSourceUrl")||json.has("ruleArticles")||json.has("sortUrl")))
+    val isMedia:Boolean get() = !isRSS && json.optInt("bookSourceType",0) in listOf(LegadoSourceType.audio,LegadoSourceType.video)
+    val name: String get() = json.optString("bookSourceName",json.optString("sourceName",id))
     val enabled: Boolean get() = json.optBoolean("enabled", true)
     fun rules(name: String): JSONObject = json.optJSONObject(name)
         ?: runCatching { JSONObject(json.optString(name)) }.getOrDefault(JSONObject())
@@ -29,21 +31,34 @@ data class NovelCategory(val title: String, val url: String, val group: String =
     val id get() = "$selectionKey|$url|${action.orEmpty()}"
     val isControl get() = type != "url"
 }
-data class NovelChapter(val title: String, val url: String)
+data class NovelChapter(val title: String, val url: String, val index:Int=0)
 
-/** Text-source subset of Legado: CSS/Jsoup rules, simple JSON paths, GET/POST and discovery. */
+/** Guarded Legado source adapters: common catalog/text runtime plus explicit RSS and native media dispatch. */
 object NovelSources {
     fun configureStorage(root: java.io.File) { NovelScript.configure(root) }
     const val userAgent = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     private val http = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).followRedirects(false).build()
     @Volatile var fixture: ((String) -> String)? = null
+    /** Optional diagnostic observer; disabled by default. Never provides cookies or auth headers. */
+    @Volatile var requestObserver: ((method:String,url:String,body:String?) -> Unit)? = null
 
-    fun import(text: String): List<NovelSource> {
-        val trimmed = text.trim().removePrefix("\uFEFF")
-        val array = if (trimmed.startsWith("[")) JSONArray(trimmed) else JSONArray().put(JSONObject(trimmed))
-        return (0 until array.length()).mapNotNull { i -> array.optJSONObject(i)?.let { o ->
-            if (o.optInt("bookSourceType", 0) != 0 || o.optString("bookSourceUrl").isBlank()) null else NovelSource(o)
-        } }.distinctBy { it.id }
+    data class ImportReport(val sources:List<NovelSource>,val unsupported:Int,val invalid:Int) {
+        val message:String get() = if(sources.isEmpty() && unsupported>0) "暂不支持漫画/下载型书源；不是坏源或网站失效" else
+            "已导入 ${sources.size} 个书源（含RSS）" + (if(unsupported>0) "；跳过 $unsupported 个不支持的源类型（不是坏源）" else "") + (if(invalid>0) "；忽略 $invalid 个无效条目" else "")
+    }
+    fun import(text:String):List<NovelSource> = importReport(text).sources
+    fun importReport(text:String):ImportReport {
+        val trimmed=text.trim().removePrefix("\uFEFF")
+        val array=if(trimmed.startsWith("["))JSONArray(trimmed)else JSONArray().put(JSONObject(trimmed))
+        val rows=(0 until array.length()).mapNotNull{array.optJSONObject(it)}
+        require(rows.none{it.has("sites")||it.has("spider")||it.has("lives")}){"这是 TVBox 配置，小说导入器不支持；不是坏源"}
+        rows.filter{NovelSource(it).isRSS}.forEach {
+            it.put("_idjSourceKind","rss").put("bookSourceUrl",it.optString("sourceUrl")).put("bookSourceName",it.optString("sourceName",it.optString("sourceUrl")))
+        }
+        fun isUnsupported(row:JSONObject):Boolean = row.optInt("bookSourceType",0) !in listOf(0,1,4)
+        val unsupported=rows.count{isUnsupported(it)}
+        val valid=rows.filter{!isUnsupported(it)&&it.optString("bookSourceUrl").isNotBlank()}.map{NovelSource(it)}.distinctBy{it.id}
+        return ImportReport(valid,unsupported,array.length()-rows.count{isUnsupported(it)||it.optString("bookSourceUrl").isNotBlank()})
     }
 
     fun absolute(raw: String, base: String): String {
@@ -95,7 +110,12 @@ object NovelSources {
             val req=Request.Builder().url(address).header("User-Agent",userAgent)
             if(uri.host==originalHost)headers?.let { for(k in it.keys())req.header(k,it.getString(k)) }
             if(verb=="POST")req.post(body.toRequestBody((headers?.optString("Content-Type")?.takeIf{it.isNotBlank()} ?: "application/octet-stream").toMediaType()))
-            http.newCall(req.build()).execute().use { response ->
+            val built=req.build()
+            requestObserver?.let { observe ->
+                val body=if(built.body!=null){val buffer=okio.Buffer();built.body!!.writeTo(buffer);buffer.readUtf8()}else null
+                observe(built.method,built.url.toString(),body)
+            }
+            http.newCall(built).execute().use { response ->
                 if(response.isRedirect) {
                     address=absolute(response.header("Location") ?: error("书源跳转缺少地址"),address)
                     if(response.code in listOf(301,302,303))verb="GET"
@@ -144,7 +164,12 @@ object NovelSources {
                 val ct = if(body.trimStart().startsWith('{')) "application/json; charset=utf-8" else "application/x-www-form-urlencoded; charset=$charset"
                 req.post(body.toRequestBody(ct.toMediaType()))
             }
-            http.newCall(req.build()).execute().use { response ->
+            val built=req.build()
+            requestObserver?.let { observe ->
+                val body=if(built.body!=null){val buffer=okio.Buffer();built.body!!.writeTo(buffer);buffer.readUtf8()}else null
+                observe(built.method,built.url.toString(),body)
+            }
+            http.newCall(built).execute().use { response ->
                 if (response.isRedirect) {
                     address = absolute(response.header("Location") ?: error("书源跳转缺少地址"), address)
                 } else {
@@ -176,7 +201,8 @@ object NovelSources {
         return try { decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString() } catch (_: java.nio.charset.CharacterCodingException) { String(bytes, java.nio.charset.Charset.forName("GB18030")) }
     }
 
-    fun categories(source: NovelSource): List<NovelCategory> {
+    fun categories(source: NovelSource): List<NovelCategory> = if(source.isRSS)LegadoRss.categories(source)else categories(source,0)
+    private fun categories(source: NovelSource,repairPass:Int): List<NovelCategory> {
         var raw = source.json.optString("exploreUrl").trim()
         if (raw.isEmpty()) return emptyList()
         if(raw.startsWith("@js:") || raw.startsWith("<js>")) raw = NovelScript(source,source.id).eval(script(raw))?.toString().orEmpty()
@@ -184,8 +210,17 @@ object NovelSources {
         val initial = NovelScript.exploreInfo(source.id)
         val info = JSONObject(initial.toString())
         var changed = false
-        parsed.filter { it.isControl }.forEach { c -> if (!info.has(c.title)) { info.put(c.title, c.defaultValue.ifEmpty { c.chars.firstOrNull().orEmpty() }); changed = true } }
+        var repairedDependentValue = false
+        parsed.filter { it.isControl }.forEach { c ->
+            val invalid=c.type in listOf("select","toggle")&&c.chars.isNotEmpty()&&info.has(c.title)&&info.optString(c.title) !in c.chars
+            if(!info.has(c.title)||invalid){
+                val fallback=c.defaultValue.ifEmpty{c.chars.firstOrNull().orEmpty()}
+                info.put(c.title,if(c.type in listOf("select","toggle")&&c.chars.isNotEmpty()&&fallback !in c.chars)c.chars.first() else fallback)
+                changed=true;repairedDependentValue=repairedDependentValue||invalid
+            }
+        }
         if (changed) NovelScript.mergeExploreInfo(source.id,initial,info)
+        if(repairedDependentValue&&repairPass<3)return categories(source,repairPass+1)
         return parsed.map { c ->
             val display = if (c.viewName.isBlank()) c.title else runCatching{NovelScript(source,source.id).eval(script(c.viewName))?.toString()}.getOrNull() ?: c.title
             c.copy(value=info.optString(c.title),displayTitle=display)
@@ -476,7 +511,7 @@ object NovelSources {
         return text.trim()
     }
 
-    private fun document(text: String): Any = when {
+    internal fun document(text: String): Any = when {
         text.trimStart().startsWith('{') -> JSONObject(text)
         text.trimStart().startsWith('[') -> JSONArray(text)
         Regex("<[A-Za-z!/]").containsMatchIn(text) -> Jsoup.parse(text)
@@ -525,9 +560,15 @@ object NovelSources {
         return document(v)
     }
 
+    /** Preserve a multiline URL+JSON POST recipe; only plain multi-link values take first line. */
+    internal fun firstRequestURL(raw:String):String {
+        val text=raw.trim();val options=Regex(",\\s*\\{").find(text)
+        return if(options!=null && !text.substring(0,options.range.first).contains('\n') && !text.substring(0,options.range.first).contains('\r')) text else firstLine(text)
+    }
     internal fun firstLine(text: String) = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
 
     fun search(source: NovelSource, key: String, page: Int = 1, category: NovelCategory? = null): List<NovelHit> {
+        if(source.isRSS)return LegadoRss.list(source,key,page,category)
         val raw = category?.url ?: source.json.optString("searchUrl")
         require(raw.isNotBlank()) { "书源没有搜索地址" }
         val response = page(raw, source, key, page)
@@ -540,12 +581,13 @@ object NovelSources {
             // Optional fields (author, cover, latest…) must not drop the whole list when their rule fails, same as iOS.
             fun optional(k:String)=runCatching{v(k)}.getOrDefault("")
             // Legado reads URL rules with getString0: several matches give the first one, not a newline-joined list.
-            val name = stripInvisible(v("name")).trim(); val url = firstLine(v("bookUrl"))
+            val name = stripInvisible(v("name")).trim(); val url = firstRequestURL(v("bookUrl"))
             if (name.isBlank() || url.isBlank()) null else NovelHit(name, optional("author"), absolute(url, base), runCatching{absolute(firstLine(optional("coverUrl")),base)}.getOrDefault(""),optional("kind"),optional("lastChapter"))
         }.distinctBy { it.url }
     }
 
     fun details(source: NovelSource, bookURL: String): NovelBookDetails = NovelScript.withBook(bookURL) {
+        if(source.isRSS)return@withBook LegadoRss.details(source,bookURL)
         var detail:Any = document(page(bookURL, source).text)
         val info=source.rules("ruleBookInfo")
         if(info.optString("init").isNotBlank()) detail=nodes(detail,info.getString("init"),source,bookURL).firstOrNull() ?: detail
@@ -561,17 +603,22 @@ object NovelSources {
             val doc = if (url == bookURL) detail else document(page(url, source).text)
             for (n in nodes(doc, rules.optString("chapterList"),source,url)) {
                 val title = ruleValue(n, rules.optString("chapterName"),source,url); val address = ruleValue(n, rules.optString("chapterUrl"),source,url)
-                if (title.isNotBlank() && address.isNotBlank()) out += NovelChapter(title, absolute(address, url))
+                // Legado-E BookChapterList.kt:258-273 falls back to the TOC base for non-volume entries.
+                val volumeRule=rules.optString("isVolume")
+                val isVolume=volumeRule.isNotBlank() && ruleValue(n,volumeRule,source,url).lowercase() in setOf("true","1")
+                if (title.isNotBlank() && (address.isNotBlank() || !isVolume)) out += NovelChapter(title, absolute(address.ifBlank{url}, url))
             }
             val next = ruleValue(doc, rules.optString("nextTocUrl"),source,url)
             for(link in next.lines().filter{it.isNotBlank()}){val target=absolute(link,url);if(target !in seen && target !in queue)queue.add(target)}
         }
-        NovelBookDetails(name, author, intro, if (cover.isBlank()) "" else runCatching{absolute(cover, bookURL)}.getOrDefault(""), kind, latest, out.distinctBy { it.url })
+        NovelBookDetails(name, author, intro, if (cover.isBlank()) "" else runCatching{absolute(cover, bookURL)}.getOrDefault(""), kind, latest, out.distinctBy { it.url }.mapIndexed{i,ch->ch.copy(index=i)})
     }
 
     fun chapters(source: NovelSource, bookURL: String): List<NovelChapter> = details(source, bookURL).chapters
 
-    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) {
+    fun content(source: NovelSource, chapter: NovelChapter, nextChapter: String? = null, bookURL: String? = null): String = NovelScript.withBook(bookURL) { NovelScript.withChapter(chapter,nextChapter) {
+        require(!source.isMedia){"媒体源应进入原生播放，不得当作文本缓存"}
+        if(source.isRSS)return@withChapter LegadoRss.content(source,chapter.url)
         val rules = source.rules("ruleContent"); var url = chapter.url; val seen = hashSetOf<String>(); val parts = arrayListOf<String>(); var imageOnly = false
         while (seen.size < 30 && seen.add(url)) {
             val doc = document(page(url, source).text)
@@ -588,7 +635,7 @@ object NovelSources {
         }
         require(text.isNotBlank()) { if(imageOnly) "本章是图片页，请换文字版书源" else "章节正文为空或书源规则不兼容" }
         text
-    }
+    } }
 
     fun cleanText(raw: String): String = Jsoup.parse(raw.replace(Regex("(?i)<br\\s*/?>|</p>|</div>"), "\n")).wholeText()
         .lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")

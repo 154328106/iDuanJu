@@ -39,6 +39,7 @@ struct NovelHomeView: View {
     @State private var busy = false
     @State private var errors: [String] = []
     @State private var reading: NovelBook?
+    @State private var detailBook: NovelBook?
     @State private var deleting: NovelBook?
     @State private var searching = false
     @State private var managing = false
@@ -70,7 +71,7 @@ struct NovelHomeView: View {
                 } else {
                     LazyVGrid(columns: cols, spacing: 16) {
                         ForEach(store.shelf) { b in
-                            Button { reading = b } label: { bookCell(b) }
+                            Button { if b.isWeb { detailBook = b } else { reading = b } } label: { bookCell(b) }
                                 .buttonStyle(PressScale(scale: 0.97))
                                 .contextMenu { Button("删除", systemImage: "trash", role: .destructive) { deleting = b } }
                                 .accessibilityIdentifier("novel.book.\(b.title)")
@@ -83,7 +84,7 @@ struct NovelHomeView: View {
             .animation(DS.panel, value: store.books.count)
         }
         .scrollIndicators(.hidden)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub], allowsMultipleSelection: true) { r in
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .epub, .item], allowsMultipleSelection: true) { r in
             guard case .success(let urls) = r, !urls.isEmpty else { return }
             busy = true
             Task { errors = await store.importFiles(urls); busy = false }
@@ -95,19 +96,16 @@ struct NovelHomeView: View {
             Button("删除", role: .destructive) { if let b = deleting { store.remove(b) }; deleting = nil }
         } message: { Text("会同时删除阅读进度和本机保存的文件。") }
         .fullScreenCover(item: $reading) { b in NovelReaderView(book: store.book(b.id) ?? b) }
-        .fullScreenCover(isPresented: $searching) {
-            NovelSearchView { b in
-                searching = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
+        .fullScreenCover(item: $detailBook) { book in
+            if let source = book.sourceURL, let url = book.bookURL {
+                NavigationStack {
+                    NovelWebDetailView(items: [LegadoSearchItem(name: book.title, author: book.author ?? "", kind: "", intro: "", cover: book.coverURL ?? "", latest: "", bookURL: url, sourceURL: source, sourceName: LegadoSourceStore.shared.source(source)?.bookSourceName ?? "当前书源")])
+                }
             }
         }
+        .fullScreenCover(isPresented: $searching) { NovelSearchView() }
         .fullScreenCover(isPresented: $managing) { NovelSourcesView() }
-        .fullScreenCover(isPresented: $exploring) {
-            NovelExploreView { b in
-                exploring = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reading = b }
-            }
-        }
+        .fullScreenCover(isPresented: $exploring) { NovelExploreView() }
         .sheet(isPresented: $importSheet) {
             NovelImportSheet(onLocalFiles: {
                 importSheet = false
@@ -217,7 +215,8 @@ struct NovelHomeView: View {
                 Thread.sleep(forTimeInterval: 0.2)
                 return (d, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!)
             }
-            if let sd = FileManager.default.contents(atPath: dir + "/sources.json"), let list = try? LegadoSourceStore.parse(sd) {
+            if ProcessInfo.processInfo.environment["STV_LEGADO_FIXTURE_IMPORT"] != "0",
+            let sd = FileManager.default.contents(atPath: dir + "/sources.json"), let list = try? LegadoSourceStore.parse(sd) {
                 // Only the fixture sources (a previous run may have imported a big collection).
                 LegadoSourceStore.shared.remove(Set(LegadoSourceStore.shared.sources.map(\.id)))
                 LegadoSourceStore.shared.add(list)
@@ -247,15 +246,7 @@ struct NovelCover: View {
             } else if let u = book.coverURL {
                 WebCover(url: u, title: book.title)
             } else {
-                let h = abs(book.title.hashValue % 360)
-                LinearGradient(colors: [Color(hue: Double(h) / 360, saturation: 0.35, brightness: 0.72),
-                        Color(hue: Double(h) / 360, saturation: 0.45, brightness: 0.48)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                VStack(spacing: 6) {
-                    Text(book.title).font(.custom("STSongti-SC-Bold", size: 15)).foregroundStyle(.white)
-                        .multilineTextAlignment(.center).lineLimit(4)
-                    if let a = book.author { Text(a).font(.system(size: 10)).foregroundStyle(.white.opacity(0.8)).lineLimit(1) }
-                }.padding(10)
+                GeneratedBookCover(title: book.title, author: book.author)
             }
         }
         .overlay {
@@ -264,5 +255,64 @@ struct NovelCover: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .shadow(color: .black.opacity(0.22), radius: 5, y: 4)
+    }
+}
+
+/// `.poster.book` for books without artwork: palette picked from the title, 162° base, top-right glow, diagonal
+/// sheen and darker foot; serif title near the top, author at the foot. Below 80 pt it takes the `.poster.book.s`
+/// layout (smaller title, no author).
+struct GeneratedBookCover: View {
+    let title: String
+    var author: String? = nil
+
+    private static let palettes: [(UInt32, UInt32, UInt32)] = [
+        (0x8A2F2B, 0xF0A05C, 0x231012), (0x21407C, 0x74ACFF, 0x0E1830), (0x43307A, 0xB894FF, 0x150F2B),
+        (0x11615A, 0x62DABC, 0x08201F), (0x80601F, 0xF4CB73, 0x2A1F0C), (0x74264E, 0xFF95BA, 0x260C1A),
+        (0x35424E, 0xA5B9CE, 0x11161B), (0x28552F, 0xA0DF80, 0x0C1A0E), (0x5F2D80, 0xFFA070, 0x1E0F2A),
+        (0x184666, 0xF2B55C, 0x0A1822),
+    ]
+
+    /// Java `String.hashCode`, so a title gets the same palette as on Android; `hashValue` is reseeded every launch.
+    private static func palette(_ title: String) -> (Color, Color, Color) {
+        var h: Int32 = 0
+        for u in title.utf16 { h = h &* 31 &+ Int32(u) }
+        let p = palettes[Int(((h % 10) + 10) % 10)]
+        return (Color(hex: p.0), Color(hex: p.1), Color(hex: p.2))
+    }
+
+    /// Start and end of a CSS `linear-gradient(<deg>)` across a w×h box.
+    private static func line(_ deg: Double, _ w: CGFloat, _ h: CGFloat) -> (UnitPoint, UnitPoint) {
+        let a = deg * .pi / 180, dx = sin(a), dy = -cos(a)
+        let half = (abs(w * dx) + abs(h * dy)) / 2
+        return (UnitPoint(x: 0.5 - dx * half / w, y: 0.5 - dy * half / h), UnitPoint(x: 0.5 + dx * half / w, y: 0.5 + dy * half / h))
+    }
+
+    var body: some View {
+        GeometryReader { g in
+            let w = max(g.size.width, 1), h = max(g.size.height, 1), small = w < 80
+            let c = Self.palette(title)
+            let base = Self.line(162, w, h), sheen = Self.line(118, w, h)
+            ZStack(alignment: .top) {
+                LinearGradient(colors: [c.0, c.2], startPoint: base.0, endPoint: base.1)
+                EllipticalGradient(stops: [.init(color: c.1.opacity(0.8), location: 0), .init(color: c.1.opacity(0), location: 0.62)])
+                    .frame(width: 1.9 * w, height: 1.24 * h)
+                    .position(x: 0.72 * w, y: 0.16 * h)
+                LinearGradient(stops: [.init(color: .clear, location: 0.5), .init(color: .white.opacity(0.06), location: 0.5),
+                                       .init(color: .white.opacity(0.06), location: 0.63), .init(color: .clear, location: 0.63)],
+                               startPoint: sheen.0, endPoint: sheen.1)
+                LinearGradient(stops: [.init(color: .clear, location: 0.55), .init(color: .black.opacity(0.35), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+                Text(title).font(.custom("STSongti-SC-Bold", size: small ? 10.5 : 15)).tracking(small ? 0 : 1)
+                    .lineSpacing(small ? 1 : 3).multilineTextAlignment(.center).lineLimit(3)
+                    .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 4, y: 1)
+                    .padding(.horizontal, small ? 3 : 10).padding(.top, h * (small ? 0.15 : 0.17))
+                    .frame(width: w)
+                if !small, let author, !author.isEmpty {
+                    Text(author).font(.system(size: 10)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                        .padding(.horizontal, 6).frame(width: w, height: h - 10, alignment: .bottom)
+                }
+            }
+            .frame(width: w, height: h)
+        }
     }
 }

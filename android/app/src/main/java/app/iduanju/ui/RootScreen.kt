@@ -65,7 +65,15 @@ fun RootScreen(initialRoute: String? = null) {
                 composable("plugins") { app.iduanju.ui.profile.PluginsScreen(onBack = { nav.popBackStack() }) }
                 composable("novel") { app.iduanju.novel.NovelScreen(onBack = { nav.popBackStack() }) }
                 composable("licenses") { app.iduanju.ui.profile.LicensesScreen(onBack = { nav.popBackStack() }) }
-                composable("actorRank") { app.iduanju.ui.profile.ActorRankScreen(onBack = { nav.popBackStack() }, onSearch = { nav.navigate("actorSearch/" + android.net.Uri.encode(it)) }) }
+                composable("actorRank") { app.iduanju.ui.profile.ActorRankScreen(onBack = { nav.popBackStack() }) }
+                composable("actor/{id}?name={name}&avatar={avatar}&role={role}&intro={intro}",
+                    arguments = listOf("name", "avatar", "role", "intro").map { navArgument(it) { defaultValue = "" } }) { entry ->
+                    val args = requireNotNull(entry.arguments)
+                    val actor = app.iduanju.core.hongguo.HGCelebrity(requireNotNull(args.getString("id")),
+                        args.getString("name").orEmpty(), args.getString("avatar").orEmpty(),
+                        args.getString("role").orEmpty(), args.getString("intro").orEmpty())
+                    app.iduanju.ui.profile.ActorProfileScreen(actor, onBack = { nav.popBackStack() }, onOpen = { nav.navigate("detail/$it") })
+                }
                 composable("actorSearch/{name}") { e -> SearchScreen(onOpenDetail = { nav.navigate("detail/$it") }, initialQuery = e.arguments!!.getString("name")!!) }
                 composable("board/{genre}/{sub}") { e -> app.iduanju.ui.category.BoardScreen(app.iduanju.ui.home.BoardSpec(app.iduanju.core.hongguo.HGRankGenre.valueOf(e.arguments!!.getString("genre")!!), app.iduanju.core.hongguo.HGRankSub.valueOf(e.arguments!!.getString("sub")!!)), onBack = { nav.popBackStack() }, onOpenDetail = { nav.navigate("detail/$it") }) }
                 composable("detail/{sid}", arguments = listOf(navArgument("sid") { type = NavType.StringType })) { e ->
@@ -102,10 +110,10 @@ fun RootScreen(initialRoute: String? = null) {
             GlassTabBar(
                 selected = tab,
                 items = listOf(
-                    "首页" to { on -> Icon(Icons.Filled.Home, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "搜索" to { on -> Icon(Icons.Filled.Search, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
-                    "我的" to { on -> Icon(Icons.Filled.Person, null, tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "首页" to { on -> Icon(Icons.Filled.Home, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "搜索" to { on -> Icon(Icons.Filled.Search, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "找剧" to { on -> Icon(Icons.Filled.GridView, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
+                    "我的" to { on -> Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = if (on) IdjThemeColors.text else IdjThemeColors.secondary) },
                 ),
                 onSelect = {
                     tab = it

@@ -51,6 +51,7 @@ class IdjApp : Application(), coil.ImageLoaderFactory {
         huangguo = app.iduanju.core.huangguo.HuangguoClient(filesDir, app.iduanju.huangguo.PrefsMap(this), app.iduanju.huangguo.WebViewCookieJar)
         app.iduanju.core.hls.HLSAdFilter.enabled = settings.adStripEnabled
         updater = app.iduanju.update.AppUpdater(this)
+        app.iduanju.core.novel.LegadoWebView.backstage = app.iduanju.novel.AndroidBackstageWebView(this)
     }
 
     companion object {

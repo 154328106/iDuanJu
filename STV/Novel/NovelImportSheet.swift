@@ -124,9 +124,10 @@ struct NovelImportSheet: View {
     private func report(_ f: () throws -> (added: Int, updated: Int, unsupported: Int)) {
         do {
             let r = try f()
-            result = Result(ok: true, title: "新增 \(r.added) 个，更新 \(r.updated) 个",
-                            detail: r.unsupported > 0 ? "其中 \(r.unsupported) 个暂不支持，已自动停用" : nil)
-        } catch { result = Result(ok: false, title: "导入失败", detail: "不是有效的书源 JSON") }
+            let allUnsupported = r.unsupported > 0 && r.unsupported == r.added + r.updated
+            result = Result(ok: !allUnsupported, title: allUnsupported ? "当前书源类型不支持" : "新增 \(r.added) 个，更新 \(r.updated) 个",
+                            detail: r.unsupported > 0 ? "其中 \(r.unsupported) 个类型/规则暂不支持，不会启用。漫画/仅下载类型或所需规则尚未实现；文本、有声、视频和 RSS 按各自运行时处理，不表示网站失效。" : nil)
+        } catch { result = Result(ok: false, title: "导入失败", detail: (error as? LegadoSourceImportError)?.localizedDescription ?? "不是有效的 Legado 文本/媒体/RSS 源 JSON") }
     }
 
     private func importClipboard() {
@@ -136,7 +137,11 @@ struct NovelImportSheet: View {
     }
 
     private func importURL() {
-        guard let u = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)), u.scheme?.hasPrefix("http") == true else {
+        let text=url.trimmingCharacters(in:.whitespacesAndNewlines)
+        if text.hasPrefix("{") || text.hasPrefix("[") {
+            focused=false;report {try store.importText(text)};return
+        }
+        guard let u = URL(string: text), u.scheme?.hasPrefix("http") == true else {
             result = Result(ok: false, title: "网址无效", detail: "请输入 http(s) 开头的书源地址"); return
         }
         focused = false; busy = true

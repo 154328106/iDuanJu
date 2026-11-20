@@ -11,6 +11,16 @@ object DecoderCaps {
     private val infos by lazy { runCatching { MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder } }.getOrDefault(emptyList()) }
     private val memo = HashMap<String, Boolean>()
 
+    /** Android 9 x86 images can crash the entire OMX service on HE-AAC v2 in the Google AAC decoder. */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    fun renderers(context: android.content.Context): androidx.media3.exoplayer.DefaultRenderersFactory {
+        val factory = androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        if (android.os.Build.VERSION.SDK_INT == 28 && android.os.Build.SUPPORTED_ABIS.any { it.startsWith("x86") }) {
+            factory.setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        }
+        return factory
+    }
+
     fun mime(codec: String): String? = when (codec.lowercase()) {
         "bytevc1", "hevc", "h265", "hvc1", "hev1" -> "video/hevc"
         "h264", "avc1", "avc" -> "video/avc"

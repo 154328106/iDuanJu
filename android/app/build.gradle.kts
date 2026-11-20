@@ -36,7 +36,13 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName(if (System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()) "debug" else "distribution")
         }
-        debug { }
+        debug {
+            // Opt-in parallel QA install; never re-sign/uninstall or overwrite the owner's existing app.
+            when (providers.gradleProperty("idjIsolatedQa").orNull) {
+                "true" -> applicationIdSuffix = ".legadoport"
+                "mac" -> applicationIdSuffix = ".legadoportmac" // separate local signer; preserve existing QA/user apps
+            }
+        }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -50,7 +56,7 @@ val copyBundledPlugins by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/idj-assets/plugins"))
 }
 val copySharedLicenses by tasks.registering(Sync::class) {
-    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*", "Rhino-*") }
+    from(rootProject.file("../STV/Resources/Licenses")) { include("HGCurrentPlayer-*", "Rhino-*", "legado-E-*", "FFmpeg-LGPL-2.1.txt") }
     into(layout.buildDirectory.dir("generated/idj-assets/licenses"))
 }
 tasks.named("preBuild") { dependsOn(copyBundledPlugins, copySharedLicenses) }
@@ -67,6 +73,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
@@ -83,3 +90,6 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
+
+// Same self-owned Legado port fixtures used by core JVM and iOS tests.
+android.sourceSets.getByName("androidTest").assets.srcDir("../../shared/legado-port")
