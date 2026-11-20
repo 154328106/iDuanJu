@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,7 +60,6 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
     val searchResults = remember { NovelSearchResults() }
     val searchList = rememberLazyListState()
     val rankList = rememberLazyListState()
-    val categoryList = rememberLazyListState()
     var query by remember { mutableStateOf("") }
     var importText by remember { mutableStateOf("") }
     var importing by remember { mutableStateOf(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.page=="import") }
@@ -410,101 +410,265 @@ fun NovelScreen(onBack: () -> Unit, embedded: Boolean = false, onFullScreenChang
             catch (e: Exception) { error = e.message ?: "详情加载失败" }
             finally { fetching = false }
         }
-        NovelBookDetail(book,bookDetails,source?.name.orEmpty(),chapters,fetching || busy,error,
-            remember(shelfRevision,book.url,bookSource){cache.books().any{it.source==bookSource&&it.book.url==book.url}},
-            downloadBusy,if(downloadTotal==0)0f else downloadDone.toFloat()/downloadTotal,
-            onBack={back()},onSwitch={findSources()},
-            onAdd={scope.launch{withContext(Dispatchers.IO){cache.saveBook(bookSource,book,chapters,bookDetails)};shelfRevision++}},
-            onDownload={if(source?.isMedia==true)error="媒体离线下载尚未实现，请使用原生播放" else scope.launch{withContext(Dispatchers.IO){cache.saveBook(bookSource,book,chapters,bookDetails)};shelfRevision++;showDownload=true}},
-            onRead={requestedChapter -> work{withContext(Dispatchers.IO){cache.saveBook(bookSource,book,chapters,bookDetails)};shelfRevision++
-                val last=runCatching{JSONObject(prefs.getString("last","{}")!!)}.getOrDefault(JSONObject())
-                val index=if(last.optString("source")==bookSource && last.optString("url")==book.url)last.optInt("chapter",0).coerceIn(0,chapters.lastIndex) else 0
-                read(requestedChapter ?: index)
-            }},onRetry={attempt++},mediaType=source?.json?.optInt("bookSourceType")?:0)
+        val knownSourceCount = remember(searchResults.groups, alternatives, book.url, bookSource) {
+            val fromSearch = searchResults.groups.firstOrNull { g ->
+                g.editions.any { it.source.id == bookSource && it.book.url == book.url }
+            }?.editions?.size ?: 1
+            maxOf(fromSearch, alternatives.size + 1, 1)
+        }
+        NovelBookDetail(
+            book = book,
+            info = bookDetails,
+            sourceName = source?.name.orEmpty(),
+            chapters = chapters,
+            loading = fetching || busy,
+            error = error,
+            onShelf = remember(shelfRevision, book.url, bookSource) { cache.books().any { it.source == bookSource && it.book.url == book.url } },
+            downloading = downloadBusy,
+            downloadProgress = if (downloadTotal == 0) 0f else downloadDone.toFloat() / downloadTotal,
+            cachedCount = cachedCount,
+            sourceCount = knownSourceCount,
+            onBack = { back() },
+            onSwitch = { findSources() },
+            onAdd = { scope.launch { withContext(Dispatchers.IO) { cache.saveBook(bookSource, book, chapters, bookDetails) }; shelfRevision++ } },
+            onDownload = {
+                if (source?.isMedia == true) error = "媒体离线下载尚未实现，请使用原生播放"
+                else scope.launch { withContext(Dispatchers.IO) { cache.saveBook(bookSource, book, chapters, bookDetails) }; shelfRevision++; showDownload = true }
+            },
+            onRead = { requestedChapter ->
+                work {
+                    withContext(Dispatchers.IO) { cache.saveBook(bookSource, book, chapters, bookDetails) }; shelfRevision++
+                    val last = runCatching { JSONObject(prefs.getString("last", "{}")!!) }.getOrDefault(JSONObject())
+                    val index = if (last.optString("source") == bookSource && last.optString("url") == book.url) last.optInt("chapter", 0).coerceIn(0, chapters.lastIndex) else 0
+                    read(requestedChapter ?: index)
+                }
+            },
+            onRetry = { attempt++ },
+            mediaType = source?.json?.optInt("bookSourceType") ?: 0,
+        )
     }
-    if(!sourcePage && currentBook==null && text.isEmpty()) Column(Modifier.fillMaxSize().then(if(embedded&&shelf&&!searching)Modifier else Modifier.dsAmbient(cool=!shelf||searching)).then(if(!embedded && shelf && !searching) Modifier.statusBarsPadding() else Modifier)) {
+    if (!sourcePage && currentBook == null && text.isEmpty()) Column(
+        Modifier
+            .fillMaxSize()
+            .then(if (embedded && shelf && !searching) Modifier else Modifier.dsAmbient(cool = !shelf || searching))
+            .then(if (!embedded && shelf && !searching) Modifier.statusBarsPadding() else Modifier)
+    ) {
         val list = if (searching) searchList else rankList
         val pinned by remember(list) { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0 } }
-        if (!shelf || searching) DSNavBar(if (searching) "搜书" else "小说榜单", modifier = Modifier.dsPinned(pinned).statusBarsPadding(),
-            leading = { BackButton { back() } }, trailing = {
-                if (searching) CapsuleButton("书源", BooksIcon) { sourcePage = true }
-                else RoundIconButton(Icons.Rounded.Search, "搜书") { searching = true }
-            })
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize=13.sp, modifier=Modifier.padding(vertical=8.dp)) }
-        if(shelf && !searching) {
-            NovelShelf(cache.books().map{it.source to it.book},File(context.filesDir,"novel-local.txt").exists(),
-                onContinue = { id, book ->
-                    openResult(id, book)
-                    val sc = sources.firstOrNull { it.id == id }
-                    if (sc != null && chapters.isNotEmpty()) work {
-                        val last = JSONObject(prefs.getString("last", "{}")!!)
-                        val index = if (last.optString("source") == id && last.optString("url") == book.url) last.optInt("chapter") else 0
-                        read(index.coerceIn(chapters.indices), sc, book)
-                        continuingFromShelf = true
+        if (shelf && !searching) {
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            val hasLocal = File(context.filesDir, "novel-local.txt").exists()
+            val shelfEntries = remember(shelfRevision, hasLocal, text) {
+                val last = runCatching { JSONObject(prefs.getString("last", "{}")!!) }.getOrDefault(JSONObject())
+                val lastSrc = last.optString("source")
+                val lastUrl = last.optString("url")
+                val lastCh = last.optInt("chapter", -1)
+                val out = mutableListOf<ShelfEntry>()
+                if (hasLocal) {
+                    val name = prefs.getString("localName", "本地小说") ?: "本地小说"
+                    val author = prefs.getString("localAuthor", "") ?: ""
+                    val ch = if (lastSrc == "local") lastCh else -1
+                    out += ShelfEntry("local", NovelHit(name, author, "local", kind = "TXT 文件"), localRanges.size, ch, localRanges.getOrNull(ch)?.title.orEmpty(), isLocal = true)
+                }
+                cache.books().sortedByDescending { it.addedAt }.forEach { saved ->
+                    val isLast = saved.source == lastSrc && saved.book.url == lastUrl
+                    val ch = if (isLast && lastCh in saved.chapters.indices) lastCh else -1
+                    val mergedBook = saved.details?.let { d ->
+                        saved.book.copy(
+                            cover = d.cover.ifBlank { saved.book.cover },
+                            author = d.author.ifBlank { saved.book.author },
+                            kind = d.kind.ifBlank { saved.book.kind },
+                            latest = d.latest.ifBlank { saved.book.latest },
+                        )
+                    } ?: saved.book
+                    out += ShelfEntry(saved.source, mergedBook, saved.chapters.size, ch, saved.chapters.getOrNull(ch)?.title.orEmpty(), isLocal = false)
+                }
+                out.sortedByDescending { it.currentChapter >= 0 }
+            }
+            fun openLocalFile() = work {
+                val bytes = withContext(Dispatchers.IO) { File(context.filesDir, "novel-local.txt").readBytes() }
+                openLocal(bytes, (prefs.getString("localName", "本地小说") ?: "本地小说") + ".txt")
+            }
+            NovelShelf(
+                entries = shelfEntries,
+                onContinue = { entry ->
+                    if (entry.isLocal) {
+                        openLocalFile()
+                    } else {
+                        openResult(entry.sourceId, entry.book)
+                        val sc = sources.firstOrNull { it.id == entry.sourceId }
+                        if (sc != null && chapters.isNotEmpty()) work {
+                            val last = runCatching { JSONObject(prefs.getString("last", "{}")!!) }.getOrDefault(JSONObject())
+                            val index = if (last.optString("source") == entry.sourceId && last.optString("url") == entry.book.url) last.optInt("chapter") else 0
+                            read(index.coerceIn(chapters.indices), sc, entry.book)
+                            continuingFromShelf = true
+                        }
                     }
                 },
-                onBook = { id, book -> openResult(id, book) },
-                onLocal={work{val bytes=withContext(Dispatchers.IO){File(context.filesDir,"novel-local.txt").readBytes()};openLocal(bytes,(prefs.getString("localName","本地小说")?:"本地小说")+".txt")}},
-                onImport={importResult=null;importing=true},onSearch={searching=true},
-                onRank={shelf=false;searching=false;hits=emptyList()},onSources={sourcePage=true},embedded=embedded)
+                onBook = { entry -> if (entry.isLocal) openLocalFile() else openResult(entry.sourceId, entry.book) },
+                onImport = { importResult = null; importing = true },
+                onSearch = { searching = true },
+                onRank = { shelf = false; searching = false; hits = emptyList() },
+                onSources = { sourcePage = true },
+                embedded = embedded,
+            )
+        } else if (searching) {
+            Box(Modifier.fillMaxWidth().dsPinned(pinned).statusBarsPadding()) {
+                NovelSearchTopBar(
+                    value = query,
+                    enabledSources = sources.count { it.enabled },
+                    onValue = { query = it },
+                    onSubmit = ::submitSearch,
+                    onBack = { back() },
+                    onSources = { sourcePage = true },
+                )
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp)) }
+            if (searchResults.total > 0) {
+                val inFlight = searchResults.finished < searchResults.total
+                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 4.dp, bottom = 2.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (inFlight) Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent))
+                        Text(
+                            if (inFlight) "正在搜索 ${searchResults.finished} / ${searchResults.total} 个书源 · ${searchResults.groups.size} 本"
+                            else "共 ${searchResults.groups.size} 本 · ${searchResults.total} 个书源",
+                            color = c.secondary,
+                            fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (searchResults.failures > 0) Text("${searchResults.failures} 个失败", color = c.accentWarm, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                    }
+                    if (inFlight) {
+                        Spacer(Modifier.height(7.dp))
+                        DSProgressBar(searchResults.finished.toFloat() / searchResults.total)
+                    }
+                }
+            }
+            LazyColumn(state = searchList, modifier = Modifier.weight(1f).imePadding(), contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp)) {
+                if (searchResults.groups.isEmpty() && searchResults.finished == searchResults.total) {
+                    item {
+                        EmptyNovel(
+                            if (searchResults.total > 0) "没有找到书籍" else "搜索你的下一本书",
+                            "输入书名或作者，同时搜索已启用的书源，相同书籍会自动合并。",
+                        )
+                    }
+                }
+                itemsIndexed(searchResults.groups, key = { _, m -> m.first.source.id + "|" + m.first.book.url }) { index, match ->
+                    val edition = match.first
+                    if (index > 0) Hairline(Modifier.padding(start = if (index == 1) 18.dp else 89.dp, end = 18.dp))
+                    NovelSearchRow(
+                        book = edition.book,
+                        query = query,
+                        sourceName = edition.source.name,
+                        sourceCount = match.editions.size,
+                        lead = index == 0,
+                    ) { openResult(edition.source.id, edition.book) }
+                }
+            }
         } else {
             var expanded by remember { mutableStateOf(false) }
-            if (searching) {
-                NovelSearchField(query, { query = it }, ::submitSearch)
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (searchResults.total > 0) Text("${searchResults.finished}/${searchResults.total} 个书源 · ${searchResults.groups.size} 本" +
-                        (if (searchResults.failures > 0) " · ${searchResults.failures} 个失败" else ""), color = c.secondary, fontSize = 12.sp)
-                    Spacer(Modifier.weight(1f))
-                    if (query.isNotBlank()) MiniButton("搜索", ::submitSearch)
-                }
-                if (searchResults.finished < searchResults.total) DSProgressBar(searchResults.finished.toFloat() / searchResults.total, Modifier.padding(horizontal = 20.dp))
-                LazyColumn(state = searchList, modifier = Modifier.weight(1f).imePadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
-                    if (searchResults.groups.isEmpty() && searchResults.finished == searchResults.total) item {
-                        EmptyNovel(if (searchResults.total > 0) "没有找到书籍" else "搜索你的下一本书", "输入书名或作者，搜索已启用的书源。")
-                    }
-                    items(searchResults.groups, key = { it.first.source.id + "|" + it.first.book.url }) { match ->
-                        val edition = match.first
-                        NovelResult(edition.book, null, edition.source.name, match.editions.size) { openResult(edition.source.id, edition.book) }
-                        Hairline(Modifier.padding(start = 16.dp))
-                    }
-                }
-                return@Column
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
-                Box {
-                    CapsuleButton(source?.name ?: "选择书源",BooksIcon,Icons.Rounded.ExpandMore){expanded=true}
-                    DropdownMenu(expanded,{expanded=false}){sources.filter{it.enabled}.forEach{sc->DropdownMenuItem(text={Text(sc.name)},onClick={selected=sc.id;expanded=false})}}
-                }
+            val groups = remember(categories) { categories.map { it.group }.distinct() }
+            val groupCats = remember(categories, selectedGroup) { categories.filter { it.group == selectedGroup && !it.isControl } }
+            val groupControls = remember(categories, selectedGroup) { categories.filter { it.group == selectedGroup && it.isControl } }
+
+            // Compact single-row rank header: Back + 小说榜单 + Source picker capsule + Search
+            Row(
+                Modifier.fillMaxWidth().dsPinned(pinned).statusBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                BackButton { back() }
+                Text("小说榜单", color = c.text, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                 Spacer(Modifier.weight(1f))
-                Text("实时书源榜单",color=c.tertiary,fontSize=11.sp)
+                Box {
+                    CapsuleButton(source?.name ?: "选择书源", trailing = Icons.Rounded.ExpandMore) { expanded = true }
+                    DropdownMenu(expanded, { expanded = false }) {
+                        sources.filter { it.enabled }.forEach { sc ->
+                            DropdownMenuItem(text = { Text(sc.name) }, onClick = { selected = sc.id; expanded = false })
+                        }
+                    }
+                }
+                RoundIconButton(Icons.Rounded.Search, "搜书") { searching = true }
             }
-            if(categories.isNotEmpty()) UnderlineTabs(categories.map{it.group}.distinct(),selectedGroup,{it},small=true,modifier=Modifier.padding(horizontal=20.dp),onSelect={group->
-                if(!busy){
-                    selectedGroup=group
-                    val first=categories.firstOrNull{it.group==group&&!it.isControl&&it.url.isNotBlank()}
-                    if(first!=null)search(true,first) else {hits=emptyList();category=null;more=false}
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
+
+            // Full-width 2-tier horizontal navigation (no cramped 86dp left rail)
+            if (groups.size > 1) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(top = 6.dp, bottom = 4.dp)) {
+                    UnderlineTabs(groups, selectedGroup, { it }, small = true, onSelect = { group ->
+                        if (!busy) {
+                            selectedGroup = group
+                            val first = categories.firstOrNull { it.group == group && !it.isControl && it.url.isNotBlank() }
+                            if (first != null) search(true, first) else { hits = emptyList(); category = null; more = false }
+                        }
+                    })
                 }
-            })
-            NovelExploreControls(categories.filter{it.group==selectedGroup&&it.isControl},!busy,::filterAction)
-            Row(Modifier.weight(1f)) {
-                if(categories.isNotEmpty()) LazyColumn(state=categoryList, modifier=Modifier.width(86.dp).fillMaxHeight().background(c.rail),contentPadding=PaddingValues(vertical=8.dp)) {
-                    items(categories.filter{it.group==selectedGroup&&!it.isControl},key={it.id}){cat->
-                        val on=cat==category
-                        Text(cat.title,color=if(on)c.accent else c.secondary,fontSize=13.sp,fontWeight=if(on)FontWeight.SemiBold else FontWeight.Normal,
-                            modifier=Modifier.fillMaxWidth().padding(horizontal=6.dp,vertical=3.dp).clip(RoundedCornerShape(12.dp)).background(if(on)c.accentSoft else androidx.compose.ui.graphics.Color.Transparent)
-                            .pressClick(enabled=!busy){search(true,cat)}
-                            .padding(horizontal=10.dp,vertical=14.dp))
+                if (groupCats.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        groupCats.forEach { cat ->
+                            ToneChip(cat.title, cat == category, small = true, enabled = !busy) { search(true, cat) }
+                        }
                     }
                 }
-                LazyColumn(state=rankList, modifier=Modifier.weight(1f).fillMaxHeight(),contentPadding=PaddingValues(bottom=32.dp)) {
-                    if(error!=null&&category!=null&&hits.isEmpty())item{TextButton(onClick={search(true,category)},enabled=!busy){Text("重试加载榜单")}}
-                    if(hits.isEmpty())item{EmptyNovel(if(searching)"搜索你的下一本书" else "书源推荐与榜单",if(source==null)"添加书源后，即可搜索和浏览实时榜单。" else if(searching)"输入书名或作者，搜索当前书源。" else "选择左侧栏目，查看书源实时榜单。")}
-                    items(hits,key={it.url}){book->
-                        NovelResult(book,hits.indexOf(book)+1,source?.name.orEmpty()) { source?.let { openResult(it.id, book) } };Hairline(Modifier.padding(start=16.dp))
+            } else if (groupCats.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(top = 6.dp, bottom = 8.dp)) {
+                    UnderlineTabs(groupCats, category ?: groupCats.first(), { it.title }, small = true, onSelect = { cat ->
+                        if (!busy) search(true, cat)
+                    })
+                }
+            }
+
+            NovelExploreControls(groupControls, !busy, ::filterAction)
+
+            // 0-card full-width rankings: Top 3 visual podium + #4+ open hairline list
+            LazyColumn(state = rankList, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 36.dp)) {
+                if (error != null && category != null && hits.isEmpty()) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                            MiniButton("重试加载榜单") { if (!busy) search(true, category) }
+                        }
                     }
-                    if (more) item {
-                        if (error != null) TextButton(onClick = { search(false) }, enabled = !busy) { Text("重试加载榜单") }
-                        else LaunchedEffect(page, category?.id, busy) { if (!busy) search(false) }
+                }
+                if (hits.isEmpty() && !busy) {
+                    item {
+                        EmptyNovel(
+                            "书源推荐与榜单",
+                            if (source == null) "添加书源后，即可搜索和浏览实时榜单。" else "选择上方榜单分类，查看书源实时推荐。",
+                        )
+                    }
+                } else if (hits.isEmpty() && busy) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = c.accent)
+                        }
+                    }
+                } else if (hits.size >= 3) {
+                    item(key = "podium") {
+                        NovelRankPodium(hits.take(3)) { book -> source?.let { openResult(it.id, book) } }
+                        Hairline(Modifier.padding(horizontal = 16.dp))
+                    }
+                    itemsIndexed(hits.drop(3), key = { _, b -> b.url }) { idx, book ->
+                        if (idx > 0) Hairline(Modifier.padding(start = 52.dp, end = 16.dp))
+                        NovelRankRow(book, idx + 4) { source?.let { openResult(it.id, book) } }
+                    }
+                } else {
+                    itemsIndexed(hits, key = { _, b -> b.url }) { idx, book ->
+                        if (idx > 0) Hairline(Modifier.padding(start = 52.dp, end = 16.dp))
+                        NovelRankRow(book, idx + 1) { source?.let { openResult(it.id, book) } }
+                    }
+                }
+                if (more) {
+                    item(key = "more") {
+                        if (error != null) {
+                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                MiniButton("重试加载榜单") { if (!busy) search(false) }
+                            }
+                        } else {
+                            LaunchedEffect(page, category?.id, busy) { if (!busy) search(false) }
+                        }
                     }
                 }
             }

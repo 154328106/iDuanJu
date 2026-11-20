@@ -159,40 +159,35 @@ struct NovelSearchView: View {
     @State private var submitted = ""
     @FocusState private var focused: Bool
 
-    /// ui-redesign 05: custom nav, 46 pt capsule field, a progress bar instead of the list header, `.srow` results.
+    /// Unified STVTheme 0-card search: integrated single-row top bar, live progress line, open hairline results.
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                DSNavBar(title: "搜书") {
-                    DSBackButton { task?.cancel(); dismiss() }
-                } trailing: {
-                    Button { manage = true } label: { CapsuleLabel(title: "书源") }
-                        .buttonStyle(PressScale()).accessibilityIdentifier("search.sources")
-                }
-                .dsPinned(scrolled)
-                field.padding(.top, 10)
+                topBar.dsPinned(scrolled)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if sources.enabled.isEmpty {
                             empty("还没有可用的书源", "先在「书源」里导入「阅读」(Legado) 书源", action: ("管理书源", { manage = true }))
                         } else if total > 0 {
-                            progress.padding(.horizontal, 20).padding(.top, 14)
+                            progress.padding(.horizontal, 18).padding(.top, 10)
                             LazyVStack(spacing: 0) {
                                 ForEach(Array(groups.enumerated()), id: \.element.id) { i, g in
-                                    NavigationLink(value: g) { resultRow(g) }
-                                        .buttonStyle(PressScale(scale: 0.98))
-                                        .overlay(alignment: .top) { if i > 0 { Hairline() } }
+                                    NavigationLink(value: g) { resultRow(g, lead: i == 0) }
+                                        .buttonStyle(PressScale(scale: 0.985))
+                                        .overlay(alignment: .top) {
+                                            if i > 0 { Hairline().padding(.leading, i == 1 ? 0 : 71) }
+                                        }
                                         .accessibilityIdentifier("search.result.\(g.name)")
                                         .transition(.opacity)
                                 }
                             }
-                            .padding(.horizontal, 16).padding(.top, 6)
+                            .padding(.horizontal, 18).padding(.top, 4)
                             .animation(DS.panel, value: groups.map(\.id))
                             if done >= total && groups.isEmpty {
                                 empty("没有找到书籍", "换个关键词，或在书源配置中启用其他来源。")
                             }
                         } else {
-                            empty("搜索你的下一本书", "输入书名或作者，同时搜索已启用的书源。相同书籍会合并显示。")
+                            empty("搜索你的下一本书", "输入书名或作者，同时搜索已启用的书源，相同书籍会自动合并。")
                         }
                     }
                     .padding(.bottom, 40)
@@ -215,45 +210,64 @@ struct NovelSearchView: View {
         }
     }
 
-    private var field: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium)).foregroundStyle(STVTheme.secondary)
-            TextField("", text: $query, prompt: Text("书名或作者").foregroundStyle(STVTheme.secondary))
-                .focused($focused).submitLabel(.search).onSubmit(run)
-                .font(.system(size: 16)).foregroundStyle(STVTheme.text).tint(STVTheme.accent)
-                .autocorrectionDisabled().textInputAutocapitalization(.never)
-                .accessibilityIdentifier("search.field")
-            if !query.isEmpty {
-                Button { query = ""; focused = true } label: {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(STVTheme.bg)
-                        .frame(width: 20, height: 20).background(Circle().fill(STVTheme.tertiary))
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            DSBackButton { task?.cancel(); dismiss() }
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(STVTheme.secondary)
+                TextField("", text: $query, prompt: Text("书名或作者").foregroundStyle(STVTheme.tertiary))
+                    .focused($focused).submitLabel(.search).onSubmit(run)
+                    .font(.system(size: 15, weight: .medium)).foregroundStyle(STVTheme.text).tint(STVTheme.accent)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .accessibilityIdentifier("search.field")
+                if !query.isEmpty {
+                    Button { query = ""; focused = true } label: {
+                        Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold)).foregroundStyle(STVTheme.bg)
+                            .frame(width: 18, height: 18).background(Circle().fill(STVTheme.tertiary))
+                    }
+                    .buttonStyle(PressScale()).accessibilityLabel("清除").transition(.scale.combined(with: .opacity))
+                    Button("搜索", action: run).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(STVTheme.accent)
                 }
-                .buttonStyle(PressScale()).accessibilityLabel("清除").transition(.scale.combined(with: .opacity))
-                Button("搜索", action: run).font(.subheadline.weight(.semibold)).foregroundStyle(STVTheme.accent)
             }
+            .padding(.leading, 13).padding(.trailing, 10).frame(height: 40)
+            .background(Capsule().fill(STVTheme.glass))
+            .overlay(Capsule().strokeBorder(STVTheme.glassBorder, lineWidth: 1))
+            .animation(DS.press, value: query.isEmpty)
+
+            Button { manage = true } label: {
+                HStack(spacing: 4) {
+                    Text("书源").font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.text)
+                    if !sources.enabled.isEmpty {
+                        Text("\(sources.enabled.count)").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                    }
+                }
+                .padding(.horizontal, 11).frame(height: 36)
+                .background(Capsule().fill(STVTheme.glass))
+                .overlay(Capsule().strokeBorder(STVTheme.hairline, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressScale()).accessibilityIdentifier("search.sources")
         }
-        .padding(.horizontal, 16).frame(height: 46)
-        .background(Capsule().fill(STVTheme.glass))
-        .overlay(Capsule().strokeBorder(STVTheme.glassBorder, lineWidth: 1))
-        .padding(.horizontal, 16)
-        .animation(DS.press, value: query.isEmpty)
+        .padding(.horizontal, 16).padding(.vertical, 8)
     }
 
     private var progress: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 0) {
+        VStack(spacing: 7) {
+            HStack(spacing: 6) {
                 if done < total {
-                    Text("正在搜索 ") + Text("\(done)").foregroundStyle(STVTheme.text).bold() + Text(" / \(total) 个书源")
+                    Circle().fill(STVTheme.accent).frame(width: 6, height: 6)
+                    (Text("正在搜索 ") + Text("\(done)").foregroundStyle(STVTheme.text).bold() + Text(" / \(total) 个书源 · \(groups.count) 本"))
                 } else {
                     Text("共 \(groups.count) 本 · \(total) 个书源")
                 }
                 Spacer(minLength: 8)
-                if failures > 0 { Text("\(failures) 个失败").foregroundStyle(STVTheme.accentWarm) }
+                if failures > 0 { Text("\(failures) 个失败").font(.system(size: 11.5, weight: .medium)).foregroundStyle(STVTheme.accentWarm) }
             }
-            .font(.system(size: 13)).foregroundStyle(STVTheme.secondary)
+            .font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
             .accessibilityElement(children: .combine).accessibilityIdentifier("search.progress")
-            DSProgressBar(value: total > 0 ? Double(done) / Double(total) : 0)
-                .opacity(done < total ? 1 : 0).animation(.easeOut(duration: 0.3), value: done < total)
+            if done < total {
+                DSProgressBar(value: total > 0 ? Double(done) / Double(total) : 0)
+            }
         }
     }
 
@@ -276,26 +290,49 @@ struct NovelSearchView: View {
         return a
     }
 
-    private func resultRow(_ g: Group) -> some View {
+    private func resultRow(_ g: Group, lead: Bool) -> some View {
         let first = g.items[0]
         let meta = [g.author.isEmpty ? nil : g.author, first.kind.isEmpty ? nil : first.kind].compactMap { $0 }.joined(separator: " · ")
-        return HStack(spacing: 12) {
-            WebCover(url: g.items.first { !$0.cover.isEmpty }?.cover, title: g.name, corner: 6)
-                .frame(width: 58, height: 80.5)
-                .shadow(color: .black.opacity(0.22), radius: 5, y: 4)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(highlighted(g.name)).font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                if !meta.isEmpty { Text(meta).font(.system(size: 12)).foregroundStyle(STVTheme.secondary).lineLimit(1) }
-                if !first.latest.isEmpty { Text("最新：" + first.latest).font(.system(size: 12)).foregroundStyle(STVTheme.tertiary).lineLimit(1) }
-                HStack(spacing: 5) {
-                    DSStatus(text: "\(g.items.count) 个书源", tone: .accent)
-                    DSTag(text: (g.items.count > 1 ? "首选 " : "") + first.sourceName)
+        let intro = g.items.first { !$0.intro.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?.intro
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ") ?? ""
+        let exact = !submitted.isEmpty && g.name == submitted
+        return HStack(alignment: lead ? .top : .center, spacing: 13) {
+            WebCover(url: g.items.first { !$0.cover.isEmpty }?.cover, title: g.name, author: g.author, corner: lead ? 8 : 7)
+                .frame(width: lead ? 64 : 58, height: lead ? 90 : 82)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(highlighted(g.name))
+                        .font(.system(size: lead ? 17 : 16, weight: .bold))
+                        .foregroundStyle(STVTheme.text)
+                        .lineLimit(1)
+                    if exact { DSStatus(text: "最佳匹配", tone: .accent) }
+                    Spacer(minLength: 4)
+                    DSStatus(text: "\(g.items.count) 个书源", tone: g.items.count > 1 ? .accent : .muted)
                 }
-                .padding(.top, 3)
+                if !meta.isEmpty {
+                    Text(meta).font(.system(size: 12)).foregroundStyle(STVTheme.secondary).lineLimit(1).padding(.top, 3)
+                }
+                if !intro.isEmpty {
+                    Text(intro)
+                        .font(.system(size: 12))
+                        .foregroundStyle(lead ? STVTheme.secondary : STVTheme.tertiary)
+                        .lineSpacing(2)
+                        .lineLimit(lead ? 2 : 1)
+                        .padding(.top, 4)
+                }
+                HStack(spacing: 8) {
+                    Text(first.latest.isEmpty ? "" : "最新：" + first.latest)
+                        .font(.system(size: 11.5)).foregroundStyle(STVTheme.tertiary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text((g.items.count > 1 ? "首选 " : "") + first.sourceName)
+                        .font(.system(size: 11)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                }
+                .padding(.top, 6)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 13)
+        .padding(.vertical, lead ? 15 : 13)
         .contentShape(Rectangle())
     }
 
@@ -339,7 +376,6 @@ struct NovelSearchView: View {
                 groups.append(Group(name: it.name, author: author, items: [it]))
             }
         }
-        // Exact title first, then titles containing the query, then by number of sources.
         groups.sort { a, b in
             func rank(_ g: Group) -> Int { g.name == q ? 0 : g.name.contains(q) || g.author == q ? 1 : 2 }
             return (rank(a), -a.items.count) < (rank(b), -b.items.count)
@@ -347,22 +383,32 @@ struct NovelSearchView: View {
     }
 }
 
-/// Cover from a URL with a generated fallback.
+/// Cover from a URL with a clothbound fallback, physical book spine crease, and optional top-left rank numeral.
 struct WebCover: View {
     var url: String?
     var title: String
-    var corner: CGFloat = 5
+    var author: String? = nil
+    var corner: CGFloat = 8
+    var rank: Int? = nil
+
     var body: some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
-            if let img = phase.image { img.resizable().scaledToFill() }
-            else { GeneratedBookCover(title: title) }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        Color.clear
+            .overlay {
+                AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
+                    if let img = phase.image { img.resizable().scaledToFill() }
+                    else { GeneratedBookCover(title: title, author: author) }
+                }
+            }
+            .overlay { BookSpineOverlay(corner: corner) }
+            .overlay(alignment: .topLeading) { if let rank { PosterRankNumeral(rank: rank) } }
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .shadow(color: .black.opacity(0.24), radius: 7, y: 4)
     }
 }
 
 // MARK: - 详情
 
+/// Aligned with DramaDetailView: blurred cover hero, single 3-column metrics strip, ink CTA + round buttons, open hairline sections.
 struct NovelWebDetailView: View {
     let items: [LegadoSearchItem]
     var onRead: ((NovelBook) -> Void)? = nil
@@ -376,10 +422,14 @@ struct NovelWebDetailView: View {
     @State private var alternatives: [LegadoSearchItem] = []
     @State private var findingSources = false
     @State private var downloadBook: NovelBook?
-    @State private var showingMedia=false
-    @State private var mediaChapter=0
+    @State private var showingMedia = false
+    @State private var mediaChapter = 0
     @State private var sourceTask: Task<Void, Never>?
     @State private var loadGeneration = UUID()
+    @State private var scrollY: CGFloat = 0
+    @State private var actionsOut = false
+    @State private var introOpen = false
+
     private var allItems: [LegadoSearchItem] { items + alternatives.filter { candidate in !items.contains { $0.id == candidate.id } } }
     private let store = NovelStore.shared
 
@@ -388,84 +438,391 @@ struct NovelWebDetailView: View {
     private var onShelf: NovelBook? { store.webBook(source: item.sourceURL, url: item.bookURL) }
 
     @Environment(\.dismiss) private var dismiss
-    @State private var scrolled = false
+    private var pinned: Bool { scrollY > 210 }
     private var title: String { info?.name.novelNonEmpty ?? item.name }
     private var author: String { info?.author.novelNonEmpty ?? item.author }
     private var intro: String { (info?.intro.novelNonEmpty ?? item.intro).trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var kind: String { info?.kind.novelNonEmpty ?? item.kind }
+    private var coverURL: String? { info?.cover.novelNonEmpty ?? item.cover.novelNonEmpty }
     private var latest: String { info?.latest.novelNonEmpty ?? item.latest }
     private var chapterCount: Int { toc?.count ?? onShelf?.chapters.count ?? 0 }
+    private var cachedChapters: Int { onShelf.map { store.cachedCount($0) } ?? 0 }
     private var canOpen: Bool { chapterCount > 0 }
+    private var isMedia: Bool { source?.isMedia == true }
+    private var readLabel: String {
+        switch source?.bookSourceType {
+        case 1: "开始收听"
+        case 4: "开始观看"
+        default: "开始阅读"
+        }
+    }
+    private var tags: [String] {
+        var result: [String] = []
+        for raw in kind.components(separatedBy: CharacterSet(charactersIn: "·/,，|")) {
+            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty && !result.contains(t) { result.append(t) }
+        }
+        return Array(result.prefix(5))
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .center, spacing: 20) {
-                    WebCover(url: info?.cover.novelNonEmpty ?? item.cover, title: title, corner: 8)
-                        .frame(width: 100, height: 142).shadow(color: .black.opacity(0.18), radius: 8, y: 5)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(title).font(.system(size: 26, weight: .bold, design: .serif)).fixedSize(horizontal: false, vertical: true)
-                        if !author.isEmpty { Text(author).font(.subheadline).foregroundStyle(STVTheme.secondary) }
-                        let kind = info?.kind.novelNonEmpty ?? item.kind
-                        if !kind.isEmpty { Text(kind).font(.caption).foregroundStyle(STVTheme.secondary).lineLimit(2) }
-                        if chapterCount > 0 { Text("共 \(chapterCount) 章").font(.caption.weight(.semibold)).foregroundStyle(STVTheme.accent) }
+            VStack(alignment: .leading, spacing: 0) {
+                hero
+                metricsStrip.padding(.top, 4)
+                actionRow
+                    .padding(.horizontal, 16)
+                    .padding(.top, 15)
+                    .onGeometryChange(for: Bool.self) { $0.frame(in: .named("novelDetail")).maxY < 60 } action: { out in
+                        withAnimation(DS.panel) { actionsOut = out }
                     }
-                }.padding(.vertical, 12)
-                VStack(alignment: .leading, spacing: 14) {
-                    if !latest.isEmpty { Label("最新：" + latest, systemImage: "clock").font(.subheadline).foregroundStyle(STVTheme.secondary); Hairline() }
-                    Menu {
-                        ForEach(allItems.indices, id: \.self) { i in
-                            Button { pick = i } label: { Label(allItems[i].sourceName, systemImage: i == pick ? "checkmark" : "book") }
+
+                if !tags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(tags, id: \.self) { t in
+                                Text(t).font(.system(size: 12)).foregroundStyle(STVTheme.secondary)
+                                    .padding(.horizontal, 10).frame(height: 24)
+                                    .background(Capsule().fill(STVTheme.glass))
+                            }
                         }
-                        Button("搜索其他书源") { sourceTask?.cancel(); sourceTask = Task { await findSources() } }
-                    } label: {
-                        HStack { Text("书源：" + item.sourceName); Spacer(); Text("换源").foregroundStyle(STVTheme.accent); Image(systemName: "chevron.down").font(.caption) }
-                            .font(.subheadline).contentShape(Rectangle())
-                    }.accessibilityIdentifier("detail.source")
-                }.novelPanel()
+                        .padding(.horizontal, 16)
+                    }
+                    .padding(.top, 15)
+                }
+
                 if !intro.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("内容简介").font(.headline)
-                        Text(intro).font(.body).lineSpacing(5).foregroundStyle(STVTheme.secondary).textSelection(.enabled)
-                    }
-                }
-                if source?.isMedia != true, chapterCount > 0 {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("试读章节").font(.headline).padding(.bottom, 8)
-                        ForEach(0..<min(3, chapterCount), id: \.self) { index in
-                            Button { read(open: true, chapter: index) } label: {
-                                HStack { Text(toc?[index].title ?? onShelf?.chapters[index].title ?? ""); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(STVTheme.secondary) }
-                                    .font(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                            Hairline()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(intro)
+                            .font(.system(size: 13.5))
+                            .lineSpacing(5)
+                            .foregroundStyle(STVTheme.secondary)
+                            .lineLimit(introOpen ? nil : 4)
+                            .textSelection(.enabled)
+                        if intro.count > 72 {
+                            Button(introOpen ? "收起" : "展开") { withAnimation(DS.panel) { introOpen.toggle() } }
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(STVTheme.accent)
+                                .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
                 }
-                if findingSources { HStack { ProgressView("正在查找其他书源…"); Button("停止") { sourceTask?.cancel() } } }
-                if loading { ProgressView("正在读取目录…") }
-                if let error { VStack(alignment: .leading, spacing: 8) { Text(error).font(.callout); Button("重试") { Task { await load() } } } }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+
+                // Open hairline Directory & Source rows (0 cards)
+                VStack(spacing: 0) {
+                    Hairline()
+                    Button { read(open: true, chapter: chapterCount > 0 ? chapterCount - 1 : nil) } label: {
+                        HStack(spacing: 10) {
+                            Text("目录").font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text)
+                            Text(!latest.isEmpty ? "最新：" + latest : (toc?.last?.title ?? onShelf?.chapters.last?.title ?? "暂无章节信息"))
+                                .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if chapterCount > 0 {
+                                Text("共 \(chapterCount) 章").font(.system(size: 13, weight: .medium)).foregroundStyle(STVTheme.secondary)
+                            }
+                            Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(STVTheme.tertiary)
+                        }
+                        .frame(minHeight: 46)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canOpen)
+
+                    Hairline()
+
+                    Menu { sourceMenuContent } label: {
+                        HStack(spacing: 10) {
+                            Text("书源").font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text)
+                            HStack(spacing: 6) {
+                                Circle().fill(STVTheme.ok).frame(width: 6, height: 6)
+                                Text(item.sourceName).font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(allItems.count > 1 ? "换源 (\(allItems.count))" : "换源")
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                            Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                        }
+                        .frame(minHeight: 46)
+                        .contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("detail.source")
+
+                    Hairline()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                // Open hairline Preview Chapters (0 cards)
+                if !isMedia, chapterCount > 0 {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("试读章节").font(.system(size: 16.5, weight: .bold)).foregroundStyle(STVTheme.text)
+                            Spacer()
+                            Text("点击直接阅读").font(.system(size: 12)).foregroundStyle(STVTheme.tertiary)
+                        }
+                        .padding(.top, 18).padding(.bottom, 6)
+
+                        ForEach(0..<min(3, chapterCount), id: \.self) { index in
+                            if index > 0 { Hairline() }
+                            Button { read(open: true, chapter: index) } label: {
+                                HStack(spacing: 10) {
+                                    Text(String(format: "%02d", index + 1))
+                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(STVTheme.tertiary)
+                                        .frame(width: 20, alignment: .leading)
+                                    Text(toc?[index].title ?? onShelf?.chapters[index].title ?? "")
+                                        .font(.system(size: 14)).foregroundStyle(STVTheme.text).lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if index == 0 { DSStatus(text: "试读", tone: .accent) }
+                                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(STVTheme.tertiary)
+                                }
+                                .frame(minHeight: 43)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+
+                if findingSources {
+                    HStack(spacing: 8) {
+                        ProgressView("正在查找其他书源…").font(.system(size: 13))
+                        Button("停止") { sourceTask?.cancel() }.font(.system(size: 13, weight: .semibold)).foregroundStyle(STVTheme.accent)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 14)
+                }
+                if loading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在读取目录…").font(.system(size: 13)).foregroundStyle(STVTheme.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 14)
+                }
+                if let error {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(error).font(.system(size: 13)).foregroundStyle(STVTheme.accentWarm)
+                        Button { Task { await load() } } label: { MiniButtonLabel(title: "重试") }.buttonStyle(PressScale())
+                    }
+                    .padding(.horizontal, 16).padding(.top, 12)
+                }
+            }
+            .padding(.bottom, 108)
         }
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 16 } action: { _, value in scrolled = value }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            DSNavBar(title: scrolled ? title : "书籍详情") { DSBackButton { dismiss() } }.dsPinned(scrolled)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 14) {
-                Button { read(open: false) } label: { VStack(spacing: 3) { Image(systemName: onShelf == nil ? "books.vertical" : "checkmark"); Text(onShelf == nil ? "加入书架" : "已在书架").font(.caption) }.frame(minWidth: 52, minHeight: 48) }
-                    .disabled(!canOpen || onShelf != nil || source?.isMedia == true).accessibilityIdentifier("detail.add")
-                Button { downloadBook = onShelf ?? store.addWeb(item, info: info, toc: toc ?? []) } label: { VStack(spacing: 3) { Image(systemName: "arrow.down.circle"); Text("下载").font(.caption) }.frame(minWidth: 44, minHeight: 48) }
-                    .disabled(!canOpen || source?.isMedia == true).accessibilityIdentifier("detail.download")
-                Button { read(open: true) } label: { Text(source?.bookSourceType == 1 ? "开始收听" : source?.bookSourceType == 4 ? "开始观看" : "开始阅读").font(.headline).foregroundStyle(STVTheme.onAccent).frame(maxWidth: .infinity, minHeight: 48).background(STVTheme.accent, in: Capsule()) }
-                    .disabled(!canOpen).opacity(canOpen ? 1 : 0.45).accessibilityIdentifier("detail.read")
-            }.buttonStyle(.plain).padding(.horizontal, 20).padding(.vertical, 8).background(.regularMaterial)
-        }
-        .foregroundStyle(STVTheme.text).dsAmbient(cool: true)
+        .coordinateSpace(.named("novelDetail"))
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, y in scrollY = y }
+        .scrollIndicators(.hidden)
+        .ignoresSafeArea(edges: .top)
+        .background(STVTheme.bg.ignoresSafeArea())
+        .overlay(alignment: .top) { navBar }
+        .overlay(alignment: .bottom) { floatingBar }
+        .foregroundStyle(STVTheme.text)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: pick) { await load() }
         .onDisappear { sourceTask?.cancel() }
         .fullScreenCover(item: $reading) { NovelReaderView(book: $0) }
         .sheet(item: $downloadBook) { book in NovelDownloadView(book: book) }
-        .fullScreenCover(isPresented:$showingMedia){if let source{NovelMediaPlayer(source:source,chapters:toc ?? [],startIndex:mediaChapter,book:["cover":info?.cover.novelNonEmpty ?? item.cover,"name":info?.name.isEmpty == false ? info!.name : item.name,"author":info?.author.isEmpty == false ? info!.author : item.author,"bookUrl":item.bookURL])}}
+        .fullScreenCover(isPresented: $showingMedia) {
+            if let source {
+                NovelMediaPlayer(
+                    source: source,
+                    chapters: toc ?? [],
+                    startIndex: mediaChapter,
+                    book: [
+                        "cover": info?.cover.novelNonEmpty ?? item.cover,
+                        "name": info?.name.isEmpty == false ? info!.name : item.name,
+                        "author": info?.author.isEmpty == false ? info!.author : item.author,
+                        "bookUrl": item.bookURL,
+                    ]
+                )
+            }
+        }
+    }
+
+    @ViewBuilder private var sourceMenuContent: some View {
+        ForEach(allItems.indices, id: \.self) { i in
+            Button { pick = i } label: { Label(allItems[i].sourceName, systemImage: i == pick ? "checkmark" : "book") }
+        }
+        Button("搜索其他书源") { sourceTask?.cancel(); sourceTask = Task { await findSources() } }
+    }
+
+    private var navBar: some View {
+        HStack(spacing: 0) {
+            DSBackButton(tone: pinned ? .glass : .overlay) { dismiss() }.frame(width: 96, alignment: .leading)
+            Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .opacity(pinned ? 1 : 0).offset(y: pinned ? 0 : 6)
+            Color.clear.frame(width: 96, height: 1)
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 16).padding(.bottom, 6)
+        .dsPinned(pinned)
+        .animation(.easeOut(duration: 0.2), value: pinned)
+    }
+
+    @ViewBuilder private var floatingBar: some View {
+        if canOpen, actionsOut {
+            HStack(spacing: 10) {
+                Button { read(open: true) } label: {
+                    PillButtonLabel(title: readLabel, icon: "play.fill", tone: .ink, height: 46, expand: true)
+                }
+                .buttonStyle(PressScale(scale: 0.98))
+                roundAction(icon: onShelf == nil ? "bookmark" : "checkmark", active: onShelf != nil, enabled: canOpen && onShelf == nil && !isMedia, size: 46) {
+                    read(open: false)
+                }
+                roundAction(icon: "arrow.down.to.line", active: false, enabled: canOpen && !isMedia, size: 46) {
+                    downloadBook = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
+                }
+            }
+            .padding(8)
+            .dsBar(32)
+            .padding(.horizontal, 16).padding(.bottom, -4)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private var hero: some View {
+        let cloth = GeneratedBookCover.clothColors(title)
+        return ZStack(alignment: .bottomLeading) {
+            Color.clear
+                .frame(height: 286)
+                .overlay {
+                    if let u = coverURL, let url = URL(string: u) {
+                        AsyncImage(url: url) { phase in
+                            if let img = phase.image {
+                                img.resizable().scaledToFill()
+                                    .frame(maxWidth: .infinity).frame(height: 380)
+                                    .blur(radius: 30, opaque: true).saturation(1.15)
+                            } else {
+                                LinearGradient(colors: [cloth.0, cloth.1], startPoint: .top, endPoint: .bottom)
+                            }
+                        }
+                    } else {
+                        LinearGradient(colors: [cloth.0, cloth.1], startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .clipped()
+                .overlay(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.32), location: 0),
+                        .init(color: .black.opacity(0.10), location: 0.36),
+                        .init(color: STVTheme.bg.opacity(0.84), location: 0.78),
+                        .init(color: STVTheme.bg, location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .allowsHitTesting(false)
+
+            HStack(alignment: .bottom, spacing: 16) {
+                WebCover(url: coverURL, title: title, author: author, corner: 11)
+                    .frame(width: 106, height: 150)
+                    .shadow(color: .black.opacity(0.36), radius: 14, y: 12)
+                VStack(alignment: .leading, spacing: 0) {
+                    Menu { sourceMenuContent } label: {
+                        HStack(spacing: 4) {
+                            Text(allItems.count > 1 ? "\(item.sourceName) · \(allItems.count) 源" : item.sourceName)
+                                .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(STVTheme.accent).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.system(size: 9.5, weight: .bold)).foregroundStyle(STVTheme.accent)
+                        }
+                        .padding(.horizontal, 9).frame(height: 23)
+                        .background(STVTheme.accentSoft, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    Text(title)
+                        .font(.system(size: 23, weight: .heavy))
+                        .foregroundStyle(STVTheme.text)
+                        .lineLimit(2)
+                        .padding(.top, 8)
+                    if !author.isEmpty || !tags.isEmpty {
+                        HStack(spacing: 0) {
+                            if !author.isEmpty {
+                                Text(author).font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                            }
+                            let kindText = tags.prefix(2).joined(separator: " · ")
+                            if !kindText.isEmpty {
+                                Text(author.isEmpty ? kindText : " · " + kindText)
+                                    .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).lineLimit(1)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                }
+                .padding(.bottom, 2)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18).padding(.bottom, 12)
+        }
+        .frame(height: 286)
+    }
+
+    private var metricsStrip: some View {
+        HStack(spacing: 0) {
+            metricCell(value: chapterCount > 0 ? "\(chapterCount)" : (loading ? "…" : "—"), unit: chapterCount > 0 ? "章" : "", label: "目录总章")
+            STVTheme.hairline.frame(width: 1, height: 26)
+            metricCell(value: "\(max(allItems.count, 1))", unit: "个", label: "可用书源")
+            STVTheme.hairline.frame(width: 1, height: 26)
+            metricCell(
+                value: source?.bookSourceType == 1 ? "有声" : source?.bookSourceType == 4 ? "视频" : "\(cachedChapters)",
+                unit: isMedia ? "" : "章",
+                label: isMedia ? "源类型" : "离线已缓"
+            )
+        }
+        .padding(.vertical, 13)
+        .dsCard(18)
+        .padding(.horizontal, 16)
+    }
+
+    private func metricCell(value: String, unit: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                Text(value).font(.system(size: 17, weight: .bold)).foregroundStyle(STVTheme.text).lineLimit(1)
+                if !unit.isEmpty { Text(unit).font(.system(size: 11.5, weight: .medium)).foregroundStyle(STVTheme.secondary) }
+            }
+            Text(label).font(.system(size: 11)).foregroundStyle(STVTheme.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: 10) {
+            Button { read(open: true) } label: {
+                PillButtonLabel(title: readLabel, icon: "play.fill", tone: .ink, height: 48, expand: true)
+            }
+            .buttonStyle(PressScale(scale: 0.98))
+            .disabled(!canOpen)
+            .opacity(canOpen ? 1 : 0.45)
+            .accessibilityIdentifier("detail.read")
+
+            roundAction(icon: onShelf == nil ? "bookmark" : "checkmark", active: onShelf != nil, enabled: canOpen && onShelf == nil && !isMedia, size: 48) {
+                read(open: false)
+            }
+            .accessibilityLabel(onShelf == nil ? "加入书架" : "已在书架")
+            .accessibilityIdentifier("detail.add")
+
+            roundAction(icon: "arrow.down.to.line", active: false, enabled: canOpen && !isMedia, size: 48) {
+                downloadBook = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
+            }
+            .accessibilityLabel("下载")
+            .accessibilityIdentifier("detail.download")
+        }
+    }
+
+    private func roundAction(icon: String, active: Bool, enabled: Bool, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(active ? STVTheme.accent : STVTheme.text)
+                .frame(width: size, height: size)
+                .background(Circle().fill(active ? STVTheme.accentSoft : STVTheme.glass))
+                .overlay(Circle().strokeBorder(active ? STVTheme.accentLine : STVTheme.hairline, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .disabled(!enabled)
+        .opacity(enabled || active ? 1 : 0.42)
     }
 
     private func findSources() async {
@@ -511,7 +868,7 @@ struct NovelWebDetailView: View {
     }
 
     private func read(open: Bool, chapter: Int? = nil) {
-        if source?.isMedia == true {if open{mediaChapter=chapter ?? 0;showingMedia=true};return}
+        if source?.isMedia == true { if open { mediaChapter = chapter ?? 0; showingMedia = true }; return }
         if let saved = onShelf, let toc, !toc.isEmpty, saved.chapterURLs != toc.map(\.url) { store.updateToc(saved, toc) }
         let b = onShelf ?? store.addWeb(item, info: info, toc: toc ?? [])
         if open {

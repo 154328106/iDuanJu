@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Source-defined sections, sidebar categories, and ranked cover rows.
+/// Unified STVTheme novel rankings: compact source header, 2-tier horizontal board/category tabs (no cramped rail),
+/// 0-card Top 3 visual podium + full-width open hairline list.
 struct NovelExploreView: View {
     @Environment(\.dismiss) private var dismiss
-    // Keep the user's choice instead of resetting to the first (possibly unavailable) source every visit.
     @AppStorage("novel.rank.source") private var sourceID = ""
     @State private var categories: [LegadoClient.ExploreCategory] = []
     @State private var group = ""
@@ -20,21 +20,18 @@ struct NovelExploreView: View {
     private let accent = STVTheme.accent
     private var sources: [LegadoSource] { LegadoSourceStore.shared.sources.filter { $0.isOn && $0.supported && ($0.isRSS || !($0.exploreUrl ?? "").isEmpty) } }
     private var groups: [String] { categories.reduce(into: [String]()) { if !$0.contains($1.group) { $0.append($1.group) } } }
+    private var groupCategories: [LegadoClient.ExploreCategory] { categories.filter { $0.group == group && !$0.isControl } }
+    private var currentSourceName: String { sources.first(where: { $0.id == sourceID })?.bookSourceName ?? "选择书源" }
 
     @State private var scrolled = false
     @State private var searching = false
-    @Namespace private var railNS
+    @Namespace private var catUnderlineNS
+    private let podiumCols = Array(repeating: GridItem(.flexible(), spacing: 11, alignment: .top), count: 3)
 
-    /// ui-redesign 06: custom nav with 搜索, `.srcbar` capsule, small underline tabs, 86 pt tinted rail and `.brow` rows.
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                DSNavBar(title: "小说榜单") {
-                    DSBackButton { dismiss() }
-                } trailing: {
-                    RoundIconButton(systemName: "magnifyingglass") { searching = true }.accessibilityIdentifier("novel.rank.search")
-                }
-                .dsPinned(scrolled)
+                topBar.dsPinned(scrolled)
                 if sources.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(STVTheme.tertiary)
@@ -44,12 +41,14 @@ struct NovelExploreView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    sourceBar.padding(.top, 10)
-                    if groups.count > 1 { groupBar.padding(.top, 16) } else { Color.clear.frame(height: 12) }
-                    if categories.contains(where: { $0.group == group && $0.isControl }) { sourceControls }
-                    HStack(spacing: 0) { categoryRail; results.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                        .overlay(alignment: .top) { Hairline() }
-                        .padding(.top, groups.count > 1 ? 4 : 0)
+                    if groups.count > 1 {
+                        groupBar.padding(.top, 6)
+                        if !groupCategories.isEmpty { categoryChipsBar.padding(.top, 8).padding(.bottom, 6) }
+                    } else if !groupCategories.isEmpty {
+                        singleGroupCategoryTabs.padding(.top, 6).padding(.bottom, 6)
+                    }
+                    if categories.contains(where: { $0.group == group && $0.isControl }) { sourceControls.padding(.bottom, 6) }
+                    results.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .dsAmbient(cool: true)
@@ -63,67 +62,117 @@ struct NovelExploreView: View {
             .tint(accent)
         }
     }
-    private var sourceBar: some View {
+
+    private var topBar: some View {
         HStack(spacing: 10) {
-            Button { choosingSource = true } label: {
-                CapsuleLabel(title: sources.first(where: { $0.id == sourceID })?.bookSourceName ?? "选择书源", icon: "books.vertical", trailingIcon: "chevron.down")
+            DSBackButton { dismiss() }
+            Text("小说榜单").font(.system(size: 21, weight: .heavy)).foregroundStyle(STVTheme.text).lineLimit(1)
+            Spacer(minLength: 4)
+            if !sources.isEmpty {
+                Button { choosingSource = true } label: {
+                    CapsuleLabel(title: currentSourceName, trailingIcon: "chevron.down")
+                }
+                .buttonStyle(PressScale())
+                .accessibilityIdentifier("novel.rank.source")
             }
-            .buttonStyle(PressScale()).accessibilityIdentifier("novel.rank.source")
-            Spacer(minLength: 0)
-            Text("实时书源榜单").font(.system(size: 12)).foregroundStyle(STVTheme.tertiary)
+            RoundIconButton(systemName: "magnifyingglass") { searching = true }
+                .accessibilityIdentifier("novel.rank.search")
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
+
     private var groupBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             UnderlineTabs(items: groups, selection: Binding(get: { group }, set: { title in
-                guard title != group else { return }
+                guard title != group, !busy else { return }
                 group = title
-                categoryID = categories.first { $0.group == title && !$0.url.isEmpty }?.id ?? ""
+                categoryID = categories.first { $0.group == title && !$0.isControl && !$0.url.isEmpty }?.id ?? ""
                 Task { await resetAndLoad() }
             }), label: { $0 }, small: true, idPrefix: "novel.rank.group")
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18)
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .mask(FadeMask())
     }
-    private var categoryRail: some View {
-        ScrollView {
-            LazyVStack(spacing: 4) {
-                ForEach(categories.filter { $0.group == group && !$0.isControl }) { category in
-                    let on = category.id == categoryID
-                    Button { withAnimation(DS.select) { select(category) } } label: {
-                        Text(category.title).font(.system(size: 14, weight: on ? .semibold : .regular))
-                            .foregroundStyle(on ? accent : STVTheme.secondary)
-                            .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.85)
-                            .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 4)
-                            .background {
-                                if on { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(STVTheme.accentSoft).matchedGeometryEffect(id: "rail", in: railNS) }
-                            }
-                            .contentShape(Rectangle())
+
+    private var categoryChipsBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(groupCategories) { cat in
+                        let on = cat.id == categoryID
+                        Button { withAnimation(DS.select) { select(cat) } } label: { Text(cat.title) }
+                            .buttonStyle(ToneChipStyle(on: on, small: true))
+                            .disabled(busy)
+                            .id(cat.id)
+                            .accessibilityIdentifier("novel.rank.category.\(cat.title)")
+                            .accessibilityAddTraits(on ? .isSelected : [])
                     }
-                    .buttonStyle(PressScale(scale: 0.97))
-                    .padding(.horizontal, 8)
-                    .accessibilityIdentifier("novel.rank.category.\(category.title)")
-                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
+                .padding(.leading, 16).padding(.trailing, 24)
+                .padding(.vertical, 4)
             }
-            .padding(.top, 8).padding(.bottom, 40)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .mask(FadeMask())
+            .onChange(of: categoryID) { _, id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
         }
-        .scrollIndicators(.hidden)
-        .frame(width: 86).background(STVTheme.rail)
     }
+
+    private var singleGroupCategoryTabs: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .lastTextBaseline, spacing: 22) {
+                    ForEach(groupCategories) { cat in
+                        let on = cat.id == categoryID
+                        Button { withAnimation(DS.select) { select(cat) } } label: {
+                            UnderlineTabLabel(title: cat.title, on: on, small: true, ns: catUnderlineNS)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
+                        .id(cat.id)
+                        .accessibilityIdentifier("novel.rank.category.\(cat.title)")
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                }
+                .frame(height: 34)
+                .padding(.horizontal, 18)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .mask(FadeMask())
+            .onChange(of: categoryID) { _, id in withAnimation(DS.select) { proxy.scrollTo(id, anchor: .center) } }
+        }
+    }
+
     private var results: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink(value: item) { bookRow(item, rank: index + 1) }
-                        .buttonStyle(PressScale(scale: 0.98))
-                        .overlay(alignment: .top) { if index > 0 { Hairline() } }
-                        .accessibilityIdentifier("novel.rank.book.\(index)")
-                        .onAppear { if index == items.count - 1, hasMore, !busy, error == nil { Task { await load(generation) } } }
+                if items.count >= 3 {
+                    podiumView(Array(items.prefix(3)))
+                    Hairline().padding(.horizontal, 16)
+                    ForEach(Array(items.dropFirst(3).enumerated()), id: \.element.id) { offset, item in
+                        let index = offset + 3
+                        NavigationLink(value: item) { bookRow(item, rank: index + 1) }
+                            .buttonStyle(PressScale(scale: 0.985))
+                            .overlay(alignment: .top) {
+                                if offset > 0 { Hairline().padding(.leading, 52).padding(.trailing, 16) }
+                            }
+                            .accessibilityIdentifier("novel.rank.book.\(index)")
+                            .onAppear { if index == items.count - 1, hasMore, !busy, error == nil { Task { await load(generation) } } }
+                    }
+                } else {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        NavigationLink(value: item) { bookRow(item, rank: index + 1) }
+                            .buttonStyle(PressScale(scale: 0.985))
+                            .overlay(alignment: .top) {
+                                if index > 0 { Hairline().padding(.leading, 52).padding(.trailing, 16) }
+                            }
+                            .accessibilityIdentifier("novel.rank.book.\(index)")
+                            .onAppear { if index == items.count - 1, hasMore, !busy, error == nil { Task { await load(generation) } } }
+                    }
                 }
-                if busy { ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(26) }
+
+                if busy { ProgressView().tint(STVTheme.secondary).frame(maxWidth: .infinity).padding(28) }
                 else if let error {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("这个栏目暂时不可用", systemImage: "wifi.exclamationmark").font(.system(size: 14, weight: .semibold)).foregroundStyle(STVTheme.text)
@@ -135,36 +184,108 @@ struct NovelExploreView: View {
                         .buttonStyle(PressScale())
                     }.padding(16)
                 } else if items.isEmpty {
-                    Text(categoryID.isEmpty ? "选择左侧栏目，或切换其他书源" : "书源没有返回书籍，请尝试其他栏目")
-                        .font(.system(size: 13)).foregroundStyle(STVTheme.secondary).padding(20)
+                    Text(categoryID.isEmpty ? "选择上方分类，或切换其他书源" : "书源没有返回书籍，请尝试其他分类")
+                        .font(.system(size: 13)).foregroundStyle(STVTheme.secondary)
+                        .frame(maxWidth: .infinity).padding(32)
                 } else if !hasMore {
                     Text("已显示全部").font(.system(size: 12)).foregroundStyle(STVTheme.tertiary).frame(maxWidth: .infinity).padding(20)
                 }
             }
-            .padding(.bottom, 30)
+            .padding(.bottom, 32)
         }
         .id(categoryID)
         .transition(.opacity)
         .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 4 } action: { _, value in scrolled = value }
     }
-    private func bookRow(_ item: LegadoSearchItem, rank: Int) -> some View {
-        let tags = item.kind.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.prefix(2)
-        let meta = [item.author, item.latest].filter { !$0.isEmpty }.joined(separator: " · ")
-        return HStack(spacing: 11) {
-            Text("\(rank)").font(.system(size: 20, weight: .heavy).italic()).foregroundStyle(STVTheme.rankColor(rank))
-                .minimumScaleFactor(0.6).lineLimit(1).frame(width: 24)
-            WebCover(url: item.cover, title: item.name, corner: 6).frame(width: 54, height: 75)
-                .shadow(color: .black.opacity(0.22), radius: 5, y: 4)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(item.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                if !tags.isEmpty { HStack(spacing: 5) { ForEach(Array(tags), id: \.self) { DSTag(text: $0) } }.padding(.top, 6) }
-                if !meta.isEmpty { Text(meta).font(.system(size: 12)).foregroundStyle(STVTheme.tertiary).lineLimit(1).padding(.top, 6) }
+
+    private func podiumView(_ topThree: [LegadoSearchItem]) -> some View {
+        LazyVGrid(columns: podiumCols, spacing: 12) {
+            ForEach(Array(topThree.enumerated()), id: \.element.id) { index, item in
+                let firstTag = item.kind.components(separatedBy: CharacterSet(charactersIn: "·/,，|"))
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .first { !$0.isEmpty } ?? ""
+                let sub = [item.author, firstTag].filter { !$0.isEmpty }.joined(separator: " · ")
+                NavigationLink(value: item) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        WebCover(url: item.cover, title: item.name, author: item.author, corner: 9, rank: index + 1)
+                            .aspectRatio(0.71, contentMode: .fit)
+                        Text(item.name)
+                            .font(.system(size: 13.5, weight: .bold))
+                            .foregroundStyle(STVTheme.text)
+                            .lineLimit(1)
+                            .padding(.top, 7)
+                        if !sub.isEmpty {
+                            Text(sub)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(STVTheme.secondary)
+                                .lineLimit(1)
+                                .padding(.top, 2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressScale(scale: 0.97))
+                .accessibilityIdentifier("novel.rank.book.\(index)")
+                .onAppear { if index == items.count - 1, hasMore, !busy, error == nil { Task { await load(generation) } } }
             }
-            Spacer(minLength: 0)
         }
-        .padding(.leading, 10).padding(.trailing, 14).padding(.vertical, 11)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 14)
+    }
+
+    private func bookRow(_ item: LegadoSearchItem, rank: Int) -> some View {
+        let tags = Array(
+            item.kind.components(separatedBy: CharacterSet(charactersIn: "·/,，|"))
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .prefix(2)
+        )
+        let intro = item.intro.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+        let meta = [item.author, item.latest].filter { !$0.isEmpty }.joined(separator: " · ")
+        return HStack(spacing: 12) {
+            Text("\(rank)")
+                .font(.system(size: 19, weight: .heavy).italic())
+                .foregroundStyle(STVTheme.rankColor(rank))
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .frame(width: 24)
+            WebCover(url: item.cover, title: item.name, author: item.author, corner: 7)
+                .frame(width: 56, height: 79)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(item.name)
+                        .font(.system(size: 15.5, weight: .bold))
+                        .foregroundStyle(STVTheme.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if !tags.isEmpty {
+                        HStack(spacing: 4) { ForEach(tags, id: \.self) { DSTag(text: $0) } }
+                    }
+                }
+                if !intro.isEmpty {
+                    Text(intro)
+                        .font(.system(size: 12))
+                        .foregroundStyle(STVTheme.secondary)
+                        .lineLimit(1)
+                        .padding(.top, 4)
+                }
+                if !meta.isEmpty {
+                    Text(meta)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(STVTheme.tertiary)
+                        .lineLimit(1)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
+
     private var sourceSheet: some View {
         NavigationStack {
             List(sources) { source in
@@ -180,6 +301,7 @@ struct NovelExploreView: View {
             }.novelScreen().presentationCornerRadius(28).navigationTitle("切换榜单来源").toolbar { ToolbarItem(placement: .topBarLeading) { NovelBackButton { choosingSource = false } } }
         }
     }
+
     private var sourceControls: some View {
         ScrollView(.vertical) {
             ExploreControlsLayout(spacing: 6) {

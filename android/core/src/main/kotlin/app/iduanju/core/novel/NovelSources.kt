@@ -22,7 +22,7 @@ data class NovelSource(val json: JSONObject) {
     fun rules(name: String): JSONObject = json.optJSONObject(name)
         ?: runCatching { JSONObject(json.optString(name)) }.getOrDefault(JSONObject())
 }
-data class NovelHit(val name: String, val author: String, val url: String, val cover: String = "", val kind: String = "", val latest: String = "")
+data class NovelHit(val name: String, val author: String, val url: String, val cover: String = "", val kind: String = "", val latest: String = "", val intro: String = "")
 data class NovelFlexStyle(val basis:Double=-1.0,val grow:Double=0.0,val wrapBefore:Boolean=false)
 data class NovelCategory(val title: String, val url: String, val group: String = "推荐", val action: String? = null,
     val type:String="url",val chars:List<String> = emptyList(),val defaultValue:String="",val viewName:String="",
@@ -582,7 +582,8 @@ object NovelSources {
             fun optional(k:String)=runCatching{v(k)}.getOrDefault("")
             // Legado reads URL rules with getString0: several matches give the first one, not a newline-joined list.
             val name = stripInvisible(v("name")).trim(); val url = firstRequestURL(v("bookUrl"))
-            if (name.isBlank() || url.isBlank()) null else NovelHit(name, optional("author"), absolute(url, base), runCatching{absolute(firstLine(optional("coverUrl")),base)}.getOrDefault(""),optional("kind"),optional("lastChapter"))
+            val intro = optional("intro").let { if (it.isBlank()) "" else cleanText(it).replace('\n', ' ').trim() }
+            if (name.isBlank() || url.isBlank()) null else NovelHit(name, optional("author"), absolute(url, base), runCatching{absolute(firstLine(optional("coverUrl")),base)}.getOrDefault(""),optional("kind"),optional("lastChapter"),intro)
         }.distinctBy { it.url }
     }
 
