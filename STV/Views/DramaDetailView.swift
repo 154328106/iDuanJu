@@ -50,14 +50,14 @@ struct DramaDetailView: View {
     @ObservedObject private var library = LibraryStore.shared
 
 
-    @State private var scrollY: CGFloat = 0
+    @State private var detailPinned = false
     @State private var actionsOut = false
     @State private var introOpen = false
     @State private var introClamped = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.layoutMetrics) private var layout
 
-    private var pinned: Bool { scrollY > 236 }
+    private var pinned: Bool { detailPinned }
     private var title: String { detail?.title ?? series.title }
 
     private var useTwoPane: Bool { layout.tier == .expanded && detail != nil }
@@ -129,7 +129,9 @@ struct DramaDetailView: View {
                     .padding(.bottom, 110)
                 }
                 .coordinateSpace(name: "detail")
-                .compatOnScrollY { scrollY = $0 }
+                .compatOnScrolled(threshold: 236) { value in
+                    if detailPinned != value { detailPinned = value }
+                }
                 .scrollIndicators(.hidden)
                 .compatDefaultScrollAnchor(DebugScroll.anchor)
             }
@@ -221,6 +223,7 @@ struct DramaDetailView: View {
             CoverView(url: cover, corner: 0, fallback: series.cover)
                 .frame(maxWidth: .infinity).frame(height: 400)
                 .blur(radius: 30, opaque: true).saturation(1.15)
+                .drawingGroup(opaque: true)
                 .frame(height: 300).clipped()
                 .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.30), location: 0), .init(color: .black.opacity(0.08), location: 0.34),
                                                .init(color: STVTheme.bg.opacity(0.74), location: 0.76), .init(color: STVTheme.bg, location: 1)],
@@ -272,7 +275,7 @@ struct DramaDetailView: View {
         }
         .padding(.horizontal, 20).padding(.top, 16)
         .compatOnFrame(in: .named("detail")) { f in let out = f.maxY < 60
-            withAnimation(DS.panel) { actionsOut = out }
+            if actionsOut != out { withAnimation(DS.panel) { actionsOut = out } }
         }
 
         if !d.tags.isEmpty {

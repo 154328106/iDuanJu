@@ -257,7 +257,6 @@ struct PlayerScreen: View {
         .alert("画中画暂不可用", isPresented: Binding(get: { co.pipError != nil }, set: { if !$0 { co.pipError = nil } })) {
             Button("好") { co.pipError = nil }
         } message: { Text(co.pipError ?? "") }
-        .onAppear { OrientationGate.unlock() }
         .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
         .compatOnChange(of: co.current) { new in
             scrubbing = false
