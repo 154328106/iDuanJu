@@ -220,9 +220,9 @@ struct DramaDetailView: View {
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
             // `.bd`: the poster itself, blurred 30 pt and saturated, bleeding past the hero edges.
-            CoverView(url: cover, corner: 0, fallback: series.cover)
+            CoverView(url: cover, corner: 0, maxPixelSize: 640, fallback: series.cover)
                 .frame(maxWidth: .infinity).frame(height: 400)
-                .blur(radius: 30, opaque: true).saturation(1.15)
+                .blur(radius: 22, opaque: true).saturation(1.15)
                 .drawingGroup(opaque: true)
                 .frame(height: 300).clipped()
                 .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.30), location: 0), .init(color: .black.opacity(0.08), location: 0.34),

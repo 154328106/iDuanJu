@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 import CommonCrypto
 import SwiftUI
@@ -72,7 +73,7 @@ actor CoverStore {
         return d
     }
 
-    func image(url raw: String, headers: [String: String] = [:]) async throws -> UIImage {
+    func image(url raw: String, headers: [String: String] = [:], maxPixelSize: Int? = nil) async throws -> UIImage {
         let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         #if DEBUG
         if url.hasPrefix("fixture://"), let v = UInt32(url.dropFirst("fixture://".count).prefix(6), radix: 16) {
@@ -117,14 +118,15 @@ actor CoverStore {
         // ATS: hongguo CDNs (fqnovelpic / douyinpic …) serve the same object over https.
         if u.scheme == "http", let h = u.host, h.hasSuffix("fqnovelpic.com") || h.hasSuffix("douyinpic.com") || h.hasSuffix("byteimg.com"),
            let up = URL(string: "https" + url.dropFirst(4)) { u = up }
-        if let img = memory.object(forKey: url as NSString) { return img }
-        let key = Bytes.hex(Bytes.md5(url))
+        let cacheKey = maxPixelSize.map { "\(url)|px\($0)" } ?? url
+        if let img = memory.object(forKey: cacheKey as NSString) { return img }
+        let key = Bytes.hex(Bytes.md5(cacheKey))
         let disk = diskDir.appendingPathComponent(key + ".img")
-        if let d = try? Data(contentsOf: disk), let img = UIImage(data: d) {
-            cache(img, url: url)
+        if let d = try? Data(contentsOf: disk), let img = decode(d, maxPixelSize: maxPixelSize) {
+            cache(img, url: cacheKey)
             return img
         }
-        if let t = inflight[url] { return try await t.value }
+        if let t = inflight[cacheKey] { return try await t.value }
         let task = Task<UIImage, Error> {
             var req = URLRequest(url: u)
             req.setValue(HuangguoClient.userAgent, forHTTPHeaderField: "User-Agent")
@@ -138,15 +140,32 @@ actor CoverStore {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard (200..<300).contains(code), !data.isEmpty else { throw ProviderError.upstream(data.isEmpty && code == 200 ? "cover empty body" : "cover HTTP \(code)") }
             let plain = try CoverCrypto.decrypt(data, kind: CoverCrypto.kind(for: url))
-            guard let img = UIImage(data: plain) else { throw ProviderError.invalid("cover not an image") }
+            guard let img = decode(plain, maxPixelSize: maxPixelSize) else { throw ProviderError.invalid("cover not an image") }
             try? plain.write(to: disk, options: .atomic)
             return img
         }
-        inflight[url] = task
-        defer { inflight[url] = nil }
+        inflight[cacheKey] = task
+        defer { inflight[cacheKey] = nil }
         let img = try await task.value
-        cache(img, url: url)
+        cache(img, url: cacheKey)
         return img
+    }
+
+    private func decode(_ data: Data, maxPixelSize: Int?) -> UIImage? {
+        guard let maxPixelSize, maxPixelSize > 0,
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: image, scale: UIScreen.main.scale, orientation: .up)
     }
 
     private func cache(_ image: UIImage, url: String) {
@@ -166,6 +185,7 @@ struct CoverView: View {
     let url: String
     var headers: [String: String] = [:]
     var corner: CGFloat = 14
+    var maxPixelSize: Int? = nil
     /// Tried when `url` is empty or fails (e.g. detail-page cover dead → list-card cover).
     var fallback: String? = nil
     /// When set, the cover is one accessibility element with this id and value loaded / failed / loading.
@@ -202,7 +222,7 @@ struct CoverView: View {
             var tried = Set<String>()
             for u in [url, fallback ?? ""] where !u.isEmpty && tried.insert(u).inserted {
                 do {
-                    let loaded = try await CoverStore.shared.image(url: u, headers: headers)
+                    let loaded = try await CoverStore.shared.image(url: u, headers: headers, maxPixelSize: maxPixelSize)
                     try Task.checkCancellation()
                     image = loaded
                     #if DEBUG
