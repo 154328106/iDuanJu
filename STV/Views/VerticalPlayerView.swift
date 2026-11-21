@@ -1241,7 +1241,10 @@ final class PlayerRenderHost: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard let surface = renderSurface else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         UIView.performWithoutAnimation { surface.frame = bounds; surface.layoutIfNeeded() }
+        CATransaction.commit()
     }
     #if DEBUG
     override var accessibilityValue: String? {

@@ -59,6 +59,7 @@ actor CoverStore {
         return cache
     }()
     private var inflight: [String: Task<UIImage, Error>] = [:]
+    private var inflightData: [String: Task<Data, Error>] = [:]
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
         c.timeoutIntervalForRequest = 20
@@ -120,33 +121,38 @@ actor CoverStore {
            let up = URL(string: "https" + url.dropFirst(4)) { u = up }
         let cacheKey = maxPixelSize.map { "\(url)|px\($0)" } ?? url
         if let img = memory.object(forKey: cacheKey as NSString) { return img }
-        let key = Bytes.hex(Bytes.md5(cacheKey))
-        let disk = diskDir.appendingPathComponent(key + ".img")
+        // Store one raw file on disk per URL so requesting a downsampled hero reuses disk without re-downloading.
+        let diskKey = Bytes.hex(Bytes.md5(url))
+        let disk = diskDir.appendingPathComponent(diskKey + ".img")
         if let d = try? Data(contentsOf: disk), let img = decode(d, maxPixelSize: maxPixelSize) {
             cache(img, url: cacheKey)
             return img
         }
-        if let t = inflight[cacheKey] { return try await t.value }
-        let task = Task<UIImage, Error> {
-            var req = URLRequest(url: u)
-            req.setValue(HuangguoClient.userAgent, forHTTPHeaderField: "User-Agent")
-            var hdrs = CoverHeaders.for(url: url).merging(headers) { _, given in given }
-            if CoverCrypto.kind(for: url) == .legacyXOR {
-                hdrs["Referer"] = hdrs["Referer"] ?? HuangguoClient.frontendURL + "/"
-                hdrs["Origin"] = hdrs["Origin"] ?? HuangguoClient.frontendURL
+        let plain: Data
+        if let existing = inflightData[url] {
+            plain = try await existing.value
+        } else {
+            let task = Task<Data, Error> {
+                var req = URLRequest(url: u)
+                req.setValue(HuangguoClient.userAgent, forHTTPHeaderField: "User-Agent")
+                var hdrs = CoverHeaders.for(url: url).merging(headers) { _, given in given }
+                if CoverCrypto.kind(for: url) == .legacyXOR {
+                    hdrs["Referer"] = hdrs["Referer"] ?? HuangguoClient.frontendURL + "/"
+                    hdrs["Origin"] = hdrs["Origin"] ?? HuangguoClient.frontendURL
+                }
+                for (k, v) in hdrs { req.setValue(v, forHTTPHeaderField: k) }
+                let (data, resp) = try await session.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200..<300).contains(code), !data.isEmpty else { throw ProviderError.upstream(data.isEmpty && code == 200 ? "cover empty body" : "cover HTTP \(code)") }
+                let decoded = try CoverCrypto.decrypt(data, kind: CoverCrypto.kind(for: url))
+                try? decoded.write(to: disk, options: .atomic)
+                return decoded
             }
-            for (k, v) in hdrs { req.setValue(v, forHTTPHeaderField: k) }
-            let (data, resp) = try await session.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(code), !data.isEmpty else { throw ProviderError.upstream(data.isEmpty && code == 200 ? "cover empty body" : "cover HTTP \(code)") }
-            let plain = try CoverCrypto.decrypt(data, kind: CoverCrypto.kind(for: url))
-            guard let img = decode(plain, maxPixelSize: maxPixelSize) else { throw ProviderError.invalid("cover not an image") }
-            try? plain.write(to: disk, options: .atomic)
-            return img
+            inflightData[url] = task
+            defer { inflightData[url] = nil }
+            plain = try await task.value
         }
-        inflight[cacheKey] = task
-        defer { inflight[cacheKey] = nil }
-        let img = try await task.value
+        guard let img = decode(plain, maxPixelSize: maxPixelSize) else { throw ProviderError.invalid("cover not an image") }
         cache(img, url: cacheKey)
         return img
     }
@@ -165,7 +171,7 @@ actor CoverStore {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return UIImage(data: data)
         }
-        return UIImage(cgImage: image, scale: UIScreen.main.scale, orientation: .up)
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
     }
 
     private func cache(_ image: UIImage, url: String) {
@@ -277,6 +283,9 @@ enum CoverHeaders {
         ("fourhoi.com", "https://missav.ws/"),
         ("supjav.com", "https://supjav.com/"),
         ("eporner.com", "https://www.eporner.com/"),
+        ("ypncdn.com", "https://www.youporn.com/"),
+        ("rdtcdn.com", "https://www.redtube.com/"),
+        ("hqporner.com", "https://hqporner.com/"),
     ]
     static func `for`(url: String) -> [String: String] {
         guard let h = URL(string: url)?.host?.lowercased() else { return [:] }
