@@ -27,10 +27,10 @@ struct TVBoxConfigView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                // 单行 HTTPS 导入栏
+                // 单行 HTTP(S) 导入栏
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(STVTheme.secondary).font(.subheadline)
-                    TextField("输入 HTTPS 配置地址（JSON / M3U）", text: $urlText)
+                    TextField("输入 HTTP(S) 配置地址（JSON / M3U）", text: $urlText)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         .font(.subheadline)
@@ -196,7 +196,7 @@ struct TVBoxConfigView: View {
 
                 // 直播列表细线列表
                 if !lives.isEmpty, let activeRepo {
-                    Text("直播列表（HTTPS M3U / TXT · \(lives.count)）")
+                    Text("直播列表（HTTP(S) M3U / TXT · \(lives.count)）")
                         .font(.caption.weight(.semibold)).foregroundStyle(STVTheme.secondary)
                         .padding(.horizontal, 16).padding(.top, 10)
 
@@ -206,7 +206,7 @@ struct TVBoxConfigView: View {
                                 Circle().fill(Color(red: 1.0, green: 0.42, blue: 0.42)).frame(width: 7, height: 7)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(live.name).font(.subheadline.weight(.semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
-                                    Text(live.channels.isEmpty ? "进入观看时自动拉取频道列表" : "\(live.channels.count) 个频道 · HTTPS 直播源")
+                                    Text(live.channels.isEmpty ? "进入观看时自动拉取频道列表" : "\(live.channels.count) 个频道 · HTTP(S) 直播源")
                                         .font(.caption2).foregroundStyle(STVTheme.secondary).lineLimit(1)
                                 }
                                 Spacer()
@@ -229,7 +229,7 @@ struct TVBoxConfigView: View {
                     }.padding(.horizontal, 16)
                 }
 
-                Text("仅解析 HTTPS 苹果 CMS 接口（type 0 / 1 / 4）与 M3U/TXT 直播源；JAR、CatVod 与 Python spider 不会在本地执行。")
+                Text("仅解析 HTTP(S) 苹果 CMS 接口（type 0 / 1 / 4）与 M3U/TXT 直播源；JAR、CatVod 与 Python spider 不会在本地执行。")
                     .font(.caption2).foregroundStyle(STVTheme.secondary.opacity(0.75))
                     .padding(.horizontal, 16).padding(.top, 8)
             }
@@ -295,7 +295,7 @@ struct TVBoxConfigView: View {
             NavigationStack {
                 Form {
                     TextField("站点名称（可选）", text: $manualName)
-                    TextField("https://…/api.php/provide/vod/", text: $manualAPI)
+                    TextField("http(s)://…/api.php/provide/vod/", text: $manualAPI)
                         .textInputAutocapitalization(.never).keyboardType(.URL)
                     Toggle("成人内容（需在片源管理解锁）", isOn: $manualAdult)
                 }
@@ -310,7 +310,7 @@ struct TVBoxConfigView: View {
                                 let s = try await store.addManualSite(name: n, apiRaw: a, adult: ad)
                                 return "已添加「\(s.name)」· \(s.categories.count) 分类 · \(s.latencyMs)ms"
                             }
-                        }.disabled(!manualAPI.trimmingCharacters(in: .whitespaces).hasPrefix("https://"))
+                        }.disabled(!manualAPI.trimmingCharacters(in: .whitespaces).hasPrefix("http://") && !manualAPI.trimmingCharacters(in: .whitespaces).hasPrefix("https://"))
                     }
                 }
             }

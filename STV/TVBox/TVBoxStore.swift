@@ -164,7 +164,7 @@ final class TVBoxStore: ObservableObject {
     }
 
     func addManualSite(name: String, apiRaw: String, adult: Bool) async throws -> TVBoxRepoSite {
-        let api = try CMSStore.normalize(apiRaw)
+        let api = try CMSStore.normalize(apiRaw, allowHTTP: true)
         let t0 = Date()
         let cats = try await MacCMSProvider.fetchCategories(api: api)
         let ms = max(1, Int(Date().timeIntervalSince(t0) * 1000))
@@ -185,14 +185,14 @@ final class TVBoxStore: ObservableObject {
 
     func importFromURL(_ rawURL: String, onProgress: @MainActor (String) -> Void = { _ in }) async throws -> TVBoxRepo {
         let url = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard url.hasPrefix("https://") else { throw PluginError.install("仅支持 HTTPS 配置地址") }
+        guard url.hasPrefix("https://") || url.hasPrefix("http://") else { throw PluginError.install("配置地址必须是 HTTP(S) 链接") }
         onProgress("正在拉取配置…")
         let data = try await Self.downloadData(url)
         let text = String(decoding: data, as: UTF8.self)
         let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF} \t\r\n"))
         if !trimmed.hasPrefix("{") {
             let channels = Self.parseLiveText(text)
-            guard !channels.isEmpty else { throw PluginError.install("该链接既不是 TVBox JSON，也不是有效的 HTTPS 直播列表") }
+            guard !channels.isEmpty else { throw PluginError.install("该链接既不是 TVBox JSON，也不是有效的 HTTP(S) 直播列表") }
             let host = URL(string: url)?.host ?? "直播源"
             let title = URL(string: url)?.deletingPathExtension().lastPathComponent.nilIfEmpty ?? host
             let live = TVBoxRepoLive(id: Self.hashId(url), name: title, url: url, enabled: true, channels: channels)
@@ -207,7 +207,7 @@ final class TVBoxStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF} \t\r\n"))
         if !trimmed.hasPrefix("{") {
             let channels = Self.parseLiveText(text)
-            guard !channels.isEmpty else { throw PluginError.install("未识别到 TVBox JSON 或有效 HTTPS 直播源") }
+            guard !channels.isEmpty else { throw PluginError.install("未识别到 TVBox JSON 或有效 HTTP(S) 直播源") }
             let title = fallbackName?.nilIfEmpty ?? "本地直播源"
             let id = Self.hashId(title + "\(channels.count)" + (channels.first?.urls.first ?? ""))
             let live = TVBoxRepoLive(id: id, name: title, url: "", enabled: true, channels: channels)
@@ -278,9 +278,10 @@ final class TVBoxStore: ObservableObject {
     private func importParsedJSON(_ data: Data, sourceURL: String?, fallbackName: String?, onProgress: @MainActor (String) -> Void) async throws -> TVBoxRepo {
         let parsed = try TVBoxImport.parse(data)
         var validSites: [TVBoxRepoSite] = []
+        let validationSites = parsed.sites.count > 200 ? Array(parsed.sites.prefix(8)) : parsed.sites
         var checked = 0
-        for offset in stride(from: 0, to: parsed.sites.count, by: 8) {
-            let slice = Array(parsed.sites[offset..<min(offset + 8, parsed.sites.count)])
+        for offset in stride(from: 0, to: validationSites.count, by: 8) {
+            let slice = Array(validationSites[offset..<min(offset + 8, validationSites.count)])
             let res: [TVBoxRepoSite?] = await withTaskGroup(of: TVBoxRepoSite?.self) { group in
                 for site in slice {
                     group.addTask {
@@ -298,11 +299,24 @@ final class TVBoxStore: ObservableObject {
                 checked += 1
                 if let item { validSites.append(item) }
             }
-            onProgress("正在验证点播站 \(checked)/\(parsed.sites.count)（可用 \(validSites.count)）")
+            onProgress("正在验证点播站 \(checked)/\(validationSites.count)（可用 \(validSites.count)）")
+        }
+        if validationSites.count < parsed.sites.count {
+            guard !validSites.isEmpty || !parsed.lives.isEmpty else {
+                throw PluginError.install("大配置没有验证出可用的苹果 CMS 站点（已跳过 \(parsed.skipped) 个不兼容项）")
+            }
+            let verified = Dictionary(uniqueKeysWithValues: validSites.map { ($0.key, $0) })
+            validSites = parsed.sites.map { site in
+                verified[CMSSite.key(for: site.api)] ?? TVBoxRepoSite(
+                    key: CMSSite.key(for: site.api), name: site.name, api: site.api,
+                    adult: site.adult, enabled: true, categories: [], latencyMs: -1
+                )
+            }
+            onProgress("大配置已导入 \(validSites.count) 个点播站，其余进入后按需验证")
         }
         let lives = parsed.lives.map { TVBoxRepoLive(id: Self.hashId($0.url), name: $0.name, url: $0.url, enabled: true, channels: []) }
         guard !validSites.isEmpty || !lives.isEmpty else {
-            throw PluginError.install("配置里没有可用的苹果 CMS 点播站或 HTTPS 直播源（已跳过 \(parsed.skipped) 个不兼容项）")
+            throw PluginError.install("配置里没有可用的苹果 CMS 点播站或 HTTP(S) 直播源（已跳过 \(parsed.skipped) 个不兼容项）")
         }
         let name: String = {
             if parsed.name != "TVBox 配置" { return parsed.name }
@@ -366,8 +380,10 @@ final class TVBoxStore: ObservableObject {
     }
 
     nonisolated static func downloadData(_ rawURL: String) async throws -> Data {
-        guard let u = URL(string: rawURL), u.scheme == "https", let host = u.host, !host.isEmpty else {
-            throw PluginError.install("仅支持 HTTPS 公开地址")
+        guard let u = URL(string: rawURL),
+              u.scheme == "https" || u.scheme == "http",
+              let host = u.host, !host.isEmpty else {
+            throw PluginError.install("仅支持 HTTP(S) 公开地址")
         }
         let blocked = await Task.detached { NetGuard.isIPLiteral(host) || NetGuard.resolvesToBlocked(host) }.value
         if blocked { throw PluginError.install("不支持 IP 或内网地址") }
@@ -445,9 +461,9 @@ final class TVBoxStore: ObservableObject {
     }
 
     nonisolated private static func safeStreamURL(_ raw: String) -> String? {
-        var u = raw
-        if u.hasPrefix("http://") { u = "https://" + u.dropFirst(7) }
-        guard u.hasPrefix("https://"), let url = URL(string: u), let host = url.host, !host.isEmpty, !NetGuard.isIPLiteral(host) else {
+        let u = raw
+        guard (u.hasPrefix("https://") || u.hasPrefix("http://")),
+              let url = URL(string: u), let host = url.host, !host.isEmpty, !NetGuard.isIPLiteral(host) else {
             return nil
         }
         return u

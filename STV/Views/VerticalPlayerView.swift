@@ -215,6 +215,9 @@ struct PlayerScreen: View {
                 }
                 .frame(width: full.width, height: full.height)
             }
+            // GeometryReader can receive an unspecified width from the iPad drawer HStack.
+            // Keep the player viewport at the available width when the drawer is absent.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
         }
         if canShowPadSplit && padDrawerOpen {

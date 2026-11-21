@@ -594,7 +594,7 @@ final class PluginTests: XCTestCase {
         XCTAssertEqual(d.episodes.count, 2, "longest direct line wins")
         XCTAssertEqual(d.episodes.first?.page, "m3u8a")
         let st = MacCMSProvider.streams(for: d.episodes[0])
-        XCTAssertEqual(st.map(\.url), ["https://cdn.example.com/1/index.m3u8", "https://v.example.com/1.mp4"], "alt lines + https upgrade")
+        XCTAssertEqual(st.map(\.url), ["https://cdn.example.com/1/index.m3u8", "http://v.example.com/1.mp4"], "alt lines keep the source scheme")
         XCTAssertEqual(st.first?.kind, .hls)
         let lines = MacCMSProvider.lines(from: "a$$$b", urls: "x$u1#y$u2$$$z$u3")
         XCTAssertEqual(lines.map(\.name), ["a", "b"])

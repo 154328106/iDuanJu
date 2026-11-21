@@ -6,10 +6,24 @@ import UIKit
 
 /// Metal-backed video host for libmpv (`vo=gpu-next` + `gpu-api=vulkan` via MoltenVK).
 /// Enables EDR/HDR output so libplacebo + libdovi can drive Dolby Vision and HDR10 natively on iOS 16+.
-final class MPVMetalView: UIView {
-    override class var layerClass: AnyClass { CAMetalLayer.self }
+final class MPVMetalLayer: CAMetalLayer {
+    // MoltenVK briefly writes 1×1 while completing an old presentation. Do not let that
+    // transient size become the drawable used by MPV.
+    override var drawableSize: CGSize {
+        get { super.drawableSize }
+        set {
+            guard newValue.width > 1, newValue.height > 1 else { return }
+            super.drawableSize = newValue
+        }
+    }
+}
 
-    var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+final class MPVMetalView: UIView {
+    override class var layerClass: AnyClass { MPVMetalLayer.self }
+
+    var metalLayer: MPVMetalLayer { layer as! MPVMetalLayer }
+    var onResize: (() -> Void)?
+    private var reportedDrawableSize = CGSize.zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -25,7 +39,12 @@ final class MPVMetalView: UIView {
         super.layoutSubviews()
         let scale = window?.screen.scale ?? UIScreen.main.scale
         metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        guard size.width > 1, size.height > 1 else { return }
+        metalLayer.drawableSize = size
+        guard size != reportedDrawableSize else { return }
+        reportedDrawableSize = size
+        onResize?()
     }
 }
 
@@ -50,6 +69,8 @@ final class MPVMetalView: UIView {
     private var generation = 0
     private var loadContinuation: CheckedContinuation<Void, Error>?
     private var lastURL: URL?
+    private var refitTask: Task<Void, Never>?
+    private let videoQueue = DispatchQueue(label: "stv.mpv.video", qos: .userInitiated)
 
     // Cached playback state updated from libmpv property observations / queries.
     private var cachedTime: Double = 0
@@ -87,11 +108,15 @@ final class MPVMetalView: UIView {
             throw Failure.engine("mpv_initialize 失败 (\(status))")
         }
         observeCoreProperties(handle)
+        hostView.onResize = { [weak self] in
+            Task { @MainActor [weak self] in self?.scheduleVideoRefit() }
+        }
         startEventLoop()
     }
 
     deinit {
         shuttingDown = true
+        refitTask?.cancel()
         if let handle = mpv {
             mpv_wakeup(handle)
             mpv_terminate_destroy(handle)
@@ -375,12 +400,30 @@ final class MPVMetalView: UIView {
 
     func stop() {
         generation += 1
+        refitTask?.cancel()
         mounted = false
         if let cont = loadContinuation {
             loadContinuation = nil
             cont.resume(throwing: CancellationError())
         }
         command(["stop"])
+    }
+
+    /// MPVKit's MoltenVK context reads the Metal drawable size when the video output is built.
+    /// A rotation changes the layer but does not send MPV a resize event, leaving the old portrait
+    /// viewport in the corner of the landscape drawable. Rebuilding the video output is the same
+    /// path MPVKit uses when the app returns from background and preserves the current pause state.
+    private func scheduleVideoRefit() {
+        refitTask?.cancel()
+        refitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self, self.mounted else { return }
+            guard let handle = self.mpv else { return }
+            self.videoQueue.async {
+                _ = mpv_set_property_string(handle, "vid", "no")
+                _ = mpv_set_property_string(handle, "vid", "auto")
+            }
+        }
     }
 
     var currentTime: Double { cachedTime }

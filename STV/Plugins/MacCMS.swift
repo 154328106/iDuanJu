@@ -53,11 +53,13 @@ final class CMSStore: ObservableObject {
         publish()
     }
 
-    nonisolated static func normalize(_ api: String) throws -> String {
+    nonisolated static func normalize(_ api: String, allowHTTP: Bool = false) throws -> String {
         var s = api.trimmingCharacters(in: .whitespacesAndNewlines)
-        if s.hasPrefix("http://") { s = "https://" + s.dropFirst(7) }  // ATS: https only
-        guard var c = URLComponents(string: s), c.scheme == "https", let h = c.host, !h.isEmpty, !NetGuard.isIPLiteral(h) else {
-            throw ProviderError.invalid("需要 https 的采集接口地址（不支持 IP / 内网地址）")
+        if !allowHTTP, s.hasPrefix("http://") { s = "https://" + s.dropFirst(7) }
+        guard var c = URLComponents(string: s),
+              c.scheme == "https" || (allowHTTP && c.scheme == "http"),
+              let h = c.host, !h.isEmpty, !NetGuard.isIPLiteral(h) else {
+            throw ProviderError.invalid(allowHTTP ? "需要 http(s) 的采集接口地址（不支持 IP / 内网地址）" : "需要 https 的采集接口地址（不支持 IP / 内网地址）")
         }
         c.queryItems = c.queryItems?.filter { !["ac", "t", "pg", "wd", "ids", "h"].contains($0.name) }
         if c.queryItems?.isEmpty == true { c.queryItems = nil }
@@ -110,7 +112,8 @@ struct MacCMSProvider: SiteProvider {
     }
 
     static func fetch(_ api: String, _ q: [String: String]) async throws -> [String: Any] {
-        guard let u = url(api, q), let host = u.host, u.scheme == "https" else { throw ProviderError.invalid("采集接口地址无效") }
+        guard let u = url(api, q), let host = u.host,
+              u.scheme == "https" || u.scheme == "http" else { throw ProviderError.invalid("采集接口地址无效") }
         let blocked = await Task.detached { NetGuard.resolvesToBlocked(host) }.value
         if blocked { throw ProviderError.invalid("采集接口解析到内网地址") }
         var data: Data
@@ -186,17 +189,24 @@ struct MacCMSProvider: SiteProvider {
         return (l.hasPrefix("https://") || l.hasPrefix("http://")) && (l.contains(".m3u8") || l.contains(".mp4"))
     }
 
+    static func isHTTPURL(_ u: String) -> Bool {
+        let l = u.lowercased()
+        return l.hasPrefix("https://") || l.hasPrefix("http://")
+    }
+
     static func parseDetail(_ o: [String: Any], series s: HGSeries, source: DramaSource) throws -> HGSeriesDetail {
         guard let v = (o["list"] as? [[String: Any]])?.first else { throw ProviderError.upstream("采集站没有返回详情") }
         let title = PluginOut.s(v["vod_name"], max: 200).nonEmptyOr(s.title)
         let tags = [PluginOut.s(v["type_name"], max: 30)] + PluginOut.s(v["vod_class"], max: 80).split(separator: ",").map(String.init)
         guard !ContentFilter.isBlocked([title] + tags) else { throw ProviderError.unsupported("该内容已被过滤") }
         let all = lines(from: PluginOut.s(v["vod_play_from"], max: 2000), urls: (v["vod_play_url"] as? String) ?? "")
-        // Prefer lines with direct m3u8/mp4 (no parser needed); keep them all as alternative 播放源.
+        // Prefer lines with an explicit m3u8/mp4 suffix. Extensionless HTTP(S) endpoints are
+        // retained when no explicit line exists and MPV can determine their container.
         let direct = all.filter { $0.eps.contains { isDirect($0.1) } }
-        guard let main = direct.max(by: { $0.eps.count < $1.eps.count }) else { throw ProviderError.unsupported("该资源没有可直接播放的线路（需要解析器的线路暂不支持）") }
+        let playable = direct.isEmpty ? all.filter { $0.eps.contains { isHTTPURL($0.1) } } : direct
+        guard let main = playable.max(by: { $0.eps.count < $1.eps.count }) else { throw ProviderError.unsupported("该资源没有可直接播放的线路（需要解析器的线路暂不支持）") }
         let eps = main.eps.enumerated().map { i, e -> HGEpisode in
-            let alts: [[String: String]] = direct.compactMap { l in i < l.eps.count && isDirect(l.eps[i].1) ? ["n": l.name, "u": l.eps[i].1] : nil }
+            let alts: [[String: String]] = playable.compactMap { l in i < l.eps.count && isHTTPURL(l.eps[i].1) ? ["n": l.name, "u": l.eps[i].1] : nil }
             let media = (try? JSONSerialization.data(withJSONObject: alts)).map { String(decoding: $0, as: UTF8.self) }
             return HGEpisode(ep: i + 1, vid: "\(s.seriesId)#\(i)", duration: 0, title: e.0.isEmpty ? "第\(i + 1)集" : e.0, page: main.name, media: media)
         }
@@ -216,9 +226,10 @@ struct MacCMSProvider: SiteProvider {
     static func streams(for ep: HGEpisode) -> [HGStream] {
         let alts = ep.media.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [[String: String]] } ?? []
         return alts.enumerated().compactMap { i, a in
-            guard var u = a["u"] else { return nil }
-            if u.hasPrefix("http://") { u = "https://" + u.dropFirst(7) }   // ATS; many CDNs serve both
-            guard let url = URL(string: u), let h = url.host, !NetGuard.isIPLiteral(h) else { return nil }
+            guard let u = a["u"] else { return nil }
+            guard let url = URL(string: u),
+                  url.scheme == "https" || url.scheme == "http",
+                  let h = url.host, !NetGuard.isIPLiteral(h) else { return nil }
             return HGStream(streamId: "cms\(i)", quality: (a["n"] ?? "线路\(i + 1)") + (u.contains(".m3u8") ? " · HLS" : " · MP4"), url: u, key: "",
                             kind: u.contains(".m3u8") ? .hls : .mp4Clear, headers: ["User-Agent": PluginHostContext.defaultUA])
         }

@@ -146,7 +146,7 @@ struct TVBoxHubView: View {
         VStack(spacing: 12) {
             Spacer()
             Text("TVBox 点播与直播").font(.title3.weight(.heavy)).foregroundStyle(STVTheme.text)
-            Text("导入你的 HTTPS TVBox 配置或 M3U/TXT 直播源，支持多配置仓一键切换、多线路直链解析与横屏秒切台。")
+            Text("导入你的 HTTP(S) TVBox 配置或 M3U/TXT 直播源，支持多配置仓一键切换、多线路直链解析与横屏秒切台。")
                 .font(.subheadline).foregroundStyle(STVTheme.secondary).multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button { Router.push(.tvboxConfig) } label: {
@@ -197,7 +197,14 @@ private struct TVBoxVodCatalogPane: View {
     }
 
     @Environment(\.layoutMetrics) private var layout
-    private var cols: [GridItem] { layout.posterGridItems(spacing: 10) }
+    private var cardWidth: CGFloat {
+        let count = CGFloat(layout.posterCols)
+        return max(1, (layout.width - 32 - (count - 1) * 10) / count)
+    }
+    private var cardHeight: CGFloat { cardWidth * 2.86 / 2 }
+    private var cols: [GridItem] {
+        Array(repeating: GridItem(.fixed(cardWidth), spacing: 10, alignment: .top), count: layout.posterCols)
+    }
 
     var body: some View {
         let taskKey = "\(site.key)|\(selCat)|\(submittedQuery)|\(searchAllSites)"
@@ -286,8 +293,8 @@ private struct TVBoxVodCatalogPane: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 ZStack(alignment: .topTrailing) {
                                     AsyncImage(url: URL(string: pair.series.cover)) { img in img.resizable().scaledToFill() } placeholder: { STVTheme.elevated }
-                                        .aspectRatio(2 / 2.86, contentMode: .fill)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        .frame(width: cardWidth, height: cardHeight)
+                                        .clipped()
                                     if let sub = pair.series.subtitle, !sub.isEmpty {
                                         Text(sub)
                                             .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
@@ -296,10 +303,12 @@ private struct TVBoxVodCatalogPane: View {
                                             .padding(6)
                                     }
                                 }
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                                 Text(pair.series.title).font(.caption.weight(.semibold)).foregroundStyle(STVTheme.text).lineLimit(1)
                                 Text(pair.series.tags.prefix(2).joined(separator: " · ").nilIfEmpty ?? pair.site.name)
                                     .font(.caption2).foregroundStyle(STVTheme.secondary).lineLimit(1)
                             }
+                            .frame(width: cardWidth, alignment: .leading)
                         }.buttonStyle(.plain)
                         .onAppear {
                             if idx >= items.count - 4, hasMore, !loading {
