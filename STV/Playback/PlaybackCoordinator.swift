@@ -71,10 +71,28 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     private var wantsPlayback = true
     private var transportPaused = false
     var paused: Bool { !wantsPlayback || interrupted || transportPaused || current.flatMap { errors[$0] } != nil }
-    /// Active playback rate (1.0 default). Locked rate persists after speed-gesture ends.
-    @Published private(set) var playbackRate: Double = 1.0
-    /// Non-nil when user locked a non-1x rate via speed gesture.
-    @Published private(set) var lockedRate: Double? = nil
+    /// Active playback rate (persisted across sessions; 1.0 default). Locked rate persists after speed-gesture ends.
+    @Published private(set) var playbackRate: Double = {
+        let saved = UserDefaults.standard.double(forKey: "stv.player.rate")
+        return saved > 0 ? PlaybackCoordinator.nearestStep(saved) : 1.0
+    }()
+    /// Non-nil when user locked a non-1x rate via speed gesture or speed panel.
+    @Published private(set) var lockedRate: Double? = {
+        let saved = UserDefaults.standard.double(forKey: "stv.player.rate")
+        let r = saved > 0 ? PlaybackCoordinator.nearestStep(saved) : 1.0
+        return r == 1.0 ? nil : r
+    }()
+    /// 0 = off, -1 = pause after current episode, >0 = countdown minutes.
+    @Published private(set) var sleepMode: Int = 0
+    private var sleepTimerTask: Task<Void, Never>?
+    private var onSleepTriggered: ((String) -> Void)?
+    /// GPU sharpening level (0 = off, 1 = standard, 2 = strong), persisted across sessions.
+    @Published var enhanceLevel: Int = UserDefaults.standard.integer(forKey: "stv.player.enhance") {
+        didSet {
+            UserDefaults.standard.set(enhanceLevel, forKey: "stv.player.enhance")
+            engine.setSharpen(enhanceLevel)
+        }
+    }
     @Published private(set) var pipPossible = false
     /// Design v3 chrome: rendered video size, tech strip, audio / subtitle options, auto-advance.
     @Published private(set) var videoSize: CGSize = .zero
@@ -458,12 +476,30 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     func lockRate(_ rate: Double) {
         let r = Self.nearestStep(rate)
         lockedRate = r == 1.0 ? nil : r
+        UserDefaults.standard.set(r, forKey: "stv.player.rate")
         applyRate(r)
     }
 
     func unlockRate() {
         lockedRate = nil
+        UserDefaults.standard.set(1.0, forKey: "stv.player.rate")
         applyRate(1.0)
+    }
+
+    func setSleepTimer(_ mode: Int, onTriggered: ((String) -> Void)? = nil) {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepMode = mode
+        onSleepTriggered = onTriggered
+        guard mode > 0 else { return }
+        sleepTimerTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(mode * 60)) } catch { return }
+            guard let self, self.sleepMode == mode else { return }
+            self.sleepMode = 0
+            self.sleepTimerTask = nil
+            self.setPaused(true)
+            self.onSleepTriggered?("定时关闭已暂停")
+        }
     }
 
     func restoreLockedOrNormal() {
@@ -558,6 +594,12 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 }
                 next.onEnded = { [weak self, weak next] in
                     guard let self, let next, self.activation == token, self.engine === next, self.current == i else { return }
+                    if self.sleepMode == -1 {
+                        self.sleepMode = 0
+                        self.setPaused(true)
+                        self.onSleepTriggered?("本集已播完，定时暂停")
+                        return
+                    }
                     if self.wantsPlayback, i + 1 < self.episodes.count, self.autoNext { self.select(i + 1) } else { self.setPaused(true) }
                 }
                 do {
@@ -617,6 +659,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             engine = next
         }
         engine.fill = fill
+        engine.setSharpen(enhanceLevel)
         bindTransportRequests(engine)
         if engineKind != next.kind { engineKind = next.kind }
     }

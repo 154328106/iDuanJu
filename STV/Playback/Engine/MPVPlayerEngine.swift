@@ -224,6 +224,10 @@ final class MPVMetalView: UIView {
         // Enable native HDR / Dolby Vision colorspace hint (libdovi parses Profile 5/7/8 RPU).
         setOpt("target-colorspace-hint", "yes")
         setOpt("tone-mapping", "auto")
+        let savedEnhance = UserDefaults.standard.integer(forKey: "stv.player.enhance")
+        if savedEnhance > 0 {
+            setOpt("sharpen", savedEnhance >= 2 ? "1.0" : "0.55")
+        }
         // Audio: AudioUnit output with FFmpeg decoding DTS / DTS-HD / TrueHD / AC3 / E-AC3.
         setOpt("ao", "audiounit")
         setOpt("audio-channels", "auto-safe")
@@ -557,6 +561,12 @@ final class MPVMetalView: UIView {
             var panscan: Double = fill ? 1.0 : 0.0
             _ = mpv_set_property(handle, "panscan", MPV_FORMAT_DOUBLE, &panscan)
         }
+    }
+
+    func setSharpen(_ level: Int) {
+        guard let handle = mpv else { return }
+        var amount: Double = level >= 2 ? 1.0 : (level == 1 ? 0.55 : 0.0)
+        _ = mpv_set_property(handle, "sharpen", MPV_FORMAT_DOUBLE, &amount)
     }
 
     // MARK: Tracks
