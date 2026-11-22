@@ -433,21 +433,22 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val tStyle = androidx.compose.ui.text.TextStyle(color = Color.White.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    fontFeatureSettings = "tnum", shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.6f), blurRadius = 4f))
-                Text(fmt(pos), style = tStyle)
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered) { if(!locked){player.seekTo(it); showChrome = true} } }
-                Spacer(Modifier.width(10.dp))
-                Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
+                PlayerTimeBar(
+                    posProvider = { pos },
+                    durProvider = { dur },
+                    bufferedProvider = { buffered },
+                    onSeek = { if (!locked) { player.seekTo(it); showChrome = true } },
+                    modifier = Modifier.weight(1f),
+                )
                 if (!landscape) {
                     Spacer(Modifier.width(10.dp))
                     Icon(Icons.Filled.Fullscreen, "横屏全屏", tint = Color.White,
                         modifier = Modifier.size(24.dp).pressClick(0.9f) { setLandscape(true) })
                 }
             }
+            val introSkippable by remember { derivedStateOf { pos < 15000 && dur > 45000 } }
             if(landscape) Row(Modifier.fillMaxWidth().padding(top=6.dp).graphicsLayer{alpha=if(locked)0f else chromeA},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                if(pos<15000&&dur>45000) LandChip(Icons.Filled.PlayArrow,"跳过片头",null,false,showChrome&&!locked){player.seekTo(15000)}
+                if(introSkippable) LandChip(Icons.Filled.PlayArrow,"跳过片头",null,false,showChrome&&!locked){player.seekTo(15000)}
                 Spacer(Modifier.weight(1f))
                 LandChip(Icons.Filled.GridView,"选集",null,panel=="episodes",showChrome&&!locked){panel=if(panel=="episodes")null else "episodes"}
                 LandChip(Icons.Filled.Speed,"倍速",if(speed==1f)"1.0×" else "${speed}×",panel=="speed",showChrome&&!locked){panel=if(panel=="speed")null else "speed"}
@@ -471,9 +472,11 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 fontWeight = FontWeight.Medium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.7f), blurRadius = 4f)),
                 modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(horizontal = if (landscape) 28.dp else 16.dp, vertical = 10.dp))
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(Color.White.copy(0.18f))) {
-                Box(Modifier.fillMaxWidth(if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f).fillMaxHeight().background(Color.White.copy(0.6f)))
-            }
+            EdgeProgressBar(
+                posProvider = { pos },
+                durProvider = { dur },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
         // panels: one style for 选集 / 倍速 / 画质 / 音轨字幕, sitting just above the action row
         if (panel != null) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { panel = null } })
@@ -703,6 +706,48 @@ private fun EpisodesPanel(d: HGSeriesDetail, epIndex: Int, pc: IdjColors, onPick
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PlayerTimeBar(
+    posProvider: () -> Long,
+    durProvider: () -> Long,
+    bufferedProvider: () -> Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pos = posProvider()
+    val dur = durProvider()
+    val buffered = bufferedProvider()
+    val tStyle = remember {
+        androidx.compose.ui.text.TextStyle(
+            color = Color.White.copy(0.8f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            fontFeatureSettings = "tnum",
+            shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(0.6f), blurRadius = 4f),
+        )
+    }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(fmt(pos), style = tStyle)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) { ProgressBar(pos, dur, buffered, onSeek) }
+        Spacer(Modifier.width(10.dp))
+        Text(if (dur > 0) "−" + fmt(dur - pos) else "−0:00", style = tStyle)
+    }
+}
+
+@Composable
+private fun EdgeProgressBar(
+    posProvider: () -> Long,
+    durProvider: () -> Long,
+    modifier: Modifier = Modifier,
+) {
+    val pos = posProvider()
+    val dur = durProvider()
+    Box(modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(0.18f))) {
+        Box(Modifier.fillMaxWidth(if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f).fillMaxHeight().background(Color.White.copy(0.6f)))
     }
 }
 

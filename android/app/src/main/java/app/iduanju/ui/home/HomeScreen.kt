@@ -156,7 +156,8 @@ fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay
     LaunchedEffect(immersive) { onImmersiveChanged(immersive) }
     DisposableEffect(Unit) { onDispose { onImmersiveChanged(false) } }
     LaunchedEffect(pager.currentPage) { feedScroll = 0f }
-    val pinned = with(androidx.compose.ui.platform.LocalDensity.current) { feedScroll > 8.dp.toPx() }
+    val pinThresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { 8.dp.toPx() }
+    val pinned by remember(pinThresholdPx) { derivedStateOf { feedScroll > pinThresholdPx } }
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
         AmbientGlow(visible = !pinned)

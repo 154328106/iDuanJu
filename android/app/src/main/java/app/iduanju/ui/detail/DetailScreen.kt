@@ -104,7 +104,8 @@ fun DetailScreen(seriesId: String, onBack: () -> Unit, onPlay: (String, Int) -> 
     val density = LocalDensity.current
     val pinned by remember { derivedStateOf { scroll.value > with(density) { 236.dp.toPx() } } }
     var actionsBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
-    val actionsOut = actionsBottom < with(density) { 100.dp.toPx() }
+    val actionsThresholdPx = with(density) { 100.dp.toPx() }
+    val actionsOut by remember(actionsThresholdPx) { derivedStateOf { actionsBottom < actionsThresholdPx } }
     val startEp = resume?.episodeNumber ?: d?.episodes?.firstOrNull()?.ep ?: 1
     val playTitle = if (resume != null) "继续第 ${resume.episodeNumber} 集" else "开始播放"
 
