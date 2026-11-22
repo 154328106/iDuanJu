@@ -270,6 +270,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     func teardown() {
         activation = UUID()
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepMode = 0
+        onSleepTriggered = nil
         save(force: true)
         pip?.delegate = nil
         pipObservation = nil

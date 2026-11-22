@@ -157,6 +157,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
     LaunchedEffect(player, enhanceLevel) {
         applyVideoEnhance(player, enhanceLevel)
     }
+    LaunchedEffect(player) {
+        if (speed != 1f) player.setPlaybackSpeed(speed)
+    }
 
     val activeQueue by rememberUpdatedState(queue)
     fun selectEpisode(index: Int) {
