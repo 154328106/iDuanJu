@@ -528,8 +528,12 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
 
     // MARK: Activation
 
-    func select(_ index: Int?) {
+    /// True when the latest episode change came from automatic next-episode advance (keeps playback chrome hidden).
+    private(set) var lastAdvanceWasAuto = false
+
+    func select(_ index: Int?, autoAdvance: Bool = false) {
         guard let index, index != current, episodes.indices.contains(index) else { return }
+        lastAdvanceWasAuto = autoAdvance
         current = index
         wantsPlayback = true
         transportPaused = false
@@ -604,7 +608,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                         self.onSleepTriggered?("本集已播完，定时暂停")
                         return
                     }
-                    if self.wantsPlayback, i + 1 < self.episodes.count, self.autoNext { self.select(i + 1) } else { self.setPaused(true) }
+                    if self.wantsPlayback, i + 1 < self.episodes.count, self.autoNext { self.select(i + 1, autoAdvance: true) } else { self.setPaused(true) }
                 }
                 do {
                     try await next.load(src, stream: chosen[i], start: start, title: title)

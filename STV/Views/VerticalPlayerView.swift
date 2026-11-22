@@ -260,10 +260,20 @@ struct PlayerScreen: View {
         .onDisappear { co.teardown(); adjuster.restoreBrightness(); OrientationGate.lockPortrait() }
         .compatOnChange(of: co.current) { new in
             scrubbing = false
-            if new != nil { flashChrome(); centerSuppressed = true } else { flashChrome() }
+            if new != nil {
+                centerSuppressed = true
+                if co.lastAdvanceWasAuto {
+                    withAnimation(.easeOut(duration: 0.2)) { showChrome = false }
+                } else {
+                    flashChrome()
+                }
+            } else {
+                flashChrome()
+            }
         }
         .compatOnChange(of: co.readyIndex) { index in
             guard index != nil else { return }
+            if co.lastAdvanceWasAuto { return }
             if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
         }
         
