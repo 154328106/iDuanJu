@@ -255,10 +255,11 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
     }
     LaunchedEffect(showChrome, playing, panel) { if (showChrome && playing && panel == null && !(app.iduanju.BuildConfig.DEBUG && app.iduanju.ui.UiEvidence.keepChrome)) { delay(4000); showChrome = false } }
     LaunchedEffect(seekHint) { if (seekHint != null) { delay(700); seekHint = null } }
+    val currentLandscape by rememberUpdatedState(landscape)
     DisposableEffect(Unit) {
         onDispose {
             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            if (landscape) {
+            if (currentLandscape) {
                 activity?.window?.let { w -> androidx.core.view.WindowCompat.getInsetsController(w, w.decorView).show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
             }
             if (queue == null) detail?.let { d -> d.episodes.getOrNull(epIndex)?.let { ep ->
