@@ -53,6 +53,7 @@ struct PlayerScreen: View {
     @State private var speedBaseIndex = 0
     @State private var lastStepOffset = 0
     @State private var padDrawerOpen = true
+    @State private var nextDramaPick: NextDramaPick?
     /// Feed content offset (pt): the shared video layer rides along with the page in either orientation.
     @State private var feedScrollY: CGFloat = 0
     /// Running double-tap seek (+10/+20/… s) and which side it is on; drives the side bubble.
@@ -150,6 +151,29 @@ struct PlayerScreen: View {
                             .contentShape(Rectangle()).onTapGesture { closePanel() }
                             .accessibilityIdentifier("player.scrim")
                     }
+                    if co.finaleEnded, let pick = nextDramaPick, !co.pipActive {
+                        NextDramaOverlayCard(
+                            pick: pick,
+                            paused: panel != nil,
+                            onPlayNow: {
+                                co.clearFinale()
+                                onSwitchSeries(pick.series)
+                            },
+                            onShuffle: {
+                                Task {
+                                    await NextDramaRecommender.shared.skip(pick.series.seriesId)
+                                    let watched = Set(library.continueWatching.map(\.series.seriesId))
+                                    if let d = co.detail {
+                                        nextDramaPick = await NextDramaRecommender.shared.pickNextDrama(current: d, seasons: seasons, watched: watched)
+                                    }
+                                    if nextDramaPick == nil { co.clearFinale() }
+                                }
+                            },
+                            onCancel: { co.clearFinale() }
+                        )
+                        .position(x: full.width / 2, y: full.height / 2)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
                     if co.pipActive {
                         Button { co.togglePiP() } label: {
                             Label("返回播放器", systemImage: "pip.exit")
@@ -234,6 +258,13 @@ struct PlayerScreen: View {
         .preferredColorScheme(.dark)
         .persistentSystemOverlays(.hidden)
         .animation(.easeOut(duration: 0.18), value: panel)
+        .task(id: co.current) {
+            guard !series.source.isLongVideo, suppliedDetail == nil, co.autoNextDrama,
+                  let cur = co.current, let d = co.detail, !co.episodes.isEmpty,
+                  cur >= co.episodes.count - 2, nextDramaPick == nil else { return }
+            let watched = Set(library.continueWatching.map(\.series.seriesId))
+            nextDramaPick = await NextDramaRecommender.shared.pickNextDrama(current: d, seasons: seasons, watched: watched)
+        }
         .task {
             // Portrait by default for everything (landscape videos play centred). Rotating the phone (when
             // the system rotation lock is off) or the 横屏 button switches to landscape.
@@ -733,6 +764,12 @@ struct PlayerScreen: View {
         Menu {
             Toggle(isOn: $showTech) { Label("技术信息", systemImage: "info.circle") }
             Toggle(isOn: Binding(get: { co.autoNext }, set: { co.autoNext = $0 })) { Label("自动连播", systemImage: "repeat") }
+            if !series.source.isLongVideo && suppliedDetail == nil {
+                Toggle(isOn: Binding(get: { co.autoNextDrama }, set: {
+                    co.autoNextDrama = $0
+                    showOSD($0 ? "播完连刷推荐：已开启" : "播完连刷推荐：已关闭")
+                })) { Label("播完连刷推荐", systemImage: "sparkles.tv") }
+            }
             Menu {
                 ForEach([(0, "关闭"), (1, "标准"), (2, "强效")], id: \.0) { lvl, label in
                     Button {
