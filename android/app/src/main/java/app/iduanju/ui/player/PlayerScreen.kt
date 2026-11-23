@@ -1,4 +1,4 @@
-package app.iduanju.ui.player
+﻿package app.iduanju.ui.player
 
 import app.iduanju.ui.components.glassSurface
 import app.iduanju.ui.components.glassPill
@@ -106,14 +106,9 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
     var danmaku by remember { mutableStateOf(true) }
     var quality by remember { mutableStateOf<String?>(null) }
     var fillMode by remember { mutableStateOf(PlayerPrefs.getFillMode(ctx)) }
-    /** 氛围模式 level: 0 关闭 · 1 柔和 · 2 平衡 · 3 鲜艳 · 4 极致. */
-    var ambientLevel by remember { mutableIntStateOf(PlayerPrefs.getAmbientLevel(ctx).coerceIn(0, 4)) }
     var enhanceLevel by remember { mutableIntStateOf(PlayerPrefs.getEnhanceLevel(ctx)) }
     var sdrToHdr by remember { mutableStateOf(PlayerPrefs.getSdrToHdr(ctx)) }
     var textureView by remember { mutableStateOf<android.view.TextureView?>(null) }
-    /** 氛围模式 temporal EMA engine: one persistent 16x16 glow + smoothed edge colours / letterbox insets. */
-    val ambientGlow = remember { AmbientGlowEngine() }
-    var ambientSampleTick by remember { mutableIntStateOf(0) }
     var videoAspectRatio by remember { mutableFloatStateOf(0f) }
     /** 0 = off, -1 = after current episode, >0 = minutes countdown. */
     var sleepMode by remember { mutableIntStateOf(0) }
@@ -187,6 +182,37 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             androidx.media3.exoplayer.source.DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(ctx, httpFactory))
         ).build().also { it.playWhenReady = true }
     }
+    // Douyin-style standby player: pre-decodes the next episode's first frame onto a dedicated TextureView
+    // so swiping up reveals the actual next video frame (never a poster cover) and hands off with zero flash.
+    val standbyHttpFactory = remember { androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(EpisodeCache.http).setUserAgent(app.iduanju.core.cms.MacCMS.UA) }
+    val standbyPlayer = remember(queue, fixture) {
+        if (queue == null && !fixture) {
+            ExoPlayer.Builder(ctx, DecoderCaps.renderers(ctx)).setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(ctx, standbyHttpFactory))
+            ).build().apply { playWhenReady = false; volume = 0f }
+        } else null
+    }
+    var standbyLoadedVid by remember { mutableStateOf<String?>(null) }
+    var standbyReadyVid by remember { mutableStateOf<String?>(null) }
+    var handoffVid by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(standbyPlayer) {
+        val sp = standbyPlayer ?: return@DisposableEffect onDispose {}
+        val sl = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                standbyReadyVid = standbyLoadedVid
+            }
+        }
+        sp.addListener(sl)
+        onDispose { sp.removeListener(sl); sp.release() }
+    }
+    LaunchedEffect(handoffVid, error) {
+        if (error != null) {
+            handoffVid = null
+        } else if (handoffVid != null) {
+            delay(2_500)
+            handoffVid = null
+        }
+    }
     // One persistent GlEffect; level / sdrToHdr are @Volatile and picked up on the next frame.
     val enhanceEffect = remember(player) { VideoEnhanceEffect(enhanceLevel, sdrToHdr && !isNativeHdr) }
     var enhanceFailed by remember(player) { mutableStateOf(false) }
@@ -237,7 +263,11 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 }
                 if (queue == null && state == Player.STATE_ENDED && autoNext) {
                     val n = detail?.episodes?.size ?: 0
-                    if (epIndex + 1 < n) epIndex += 1
+                    if (epIndex + 1 < n) {
+                        val nextVid = detail?.episodes?.getOrNull(epIndex + 1)?.vid
+                        if (nextVid != null && standbyReadyVid == nextVid) handoffVid = nextVid
+                        epIndex += 1
+                    }
                 }
             }
             override fun onPlayerError(e: PlaybackException) {
@@ -272,15 +302,14 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             }
             // videoFormat/audioFormat are populated once the renderers start, after onTracksChanged
             override fun onRenderedFirstFrame() {
+                handoffVid = null
                 tags = TechTags.from(player, quality)
-                ambientSampleTick++
             }
             override fun onPositionDiscontinuity(
                 oldPosition: Player.PositionInfo,
                 newPosition: Player.PositionInfo,
                 reason: Int,
             ) {
-                ambientSampleTick++
                 if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                     reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
                 ) {
@@ -294,57 +323,10 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 } else {
                     0f
                 }
-                ambientSampleTick++
             }
         }
         player.addListener(l)
         onDispose { keepScreenOn(activity, false); player.removeListener(l); if (queue == null) player.release() }
-    }
-
-    LaunchedEffect(seriesId, epIndex) { ambientGlow.reset() }
-    val hdrAmbientLocked = isNativeHdr || (sdrToHdr && !enhanceFailed)
-    LaunchedEffect(ambientLevel, fillMode, inPip, hdrAmbientLocked, playing, textureView, ambientSampleTick) {
-        // Locked off whenever native HDR/DV or SDR->HDR is active.
-        if (ambientLevel <= 0 || fillMode || inPip || hdrAmbientLocked) return@LaunchedEffect
-        val tv = textureView ?: return@LaunchedEffect
-        val level = ambientLevel
-        val interval = ambientSpec(level).sampleIntervalMs
-        while (isActive) {
-            val bmp = if (tv.isAvailable) runCatching { tv.getBitmap(24, 24) }.getOrNull() else null
-            if (bmp != null) {
-                // Pure analysis off the main thread; only the target is updated here, the EMA loop below does the rest.
-                val gen = ambientGlow.generation
-                val edges = ambientGlow.edgesSnapshot()
-                val frame = withContext(Dispatchers.Default) {
-                    try {
-                        analyzeAmbientFrame(bmp, level, edges)
-                    } finally {
-                        bmp.recycle()
-                    }
-                }
-                if (frame != null) ambientGlow.commitTarget(frame, gen)
-            }
-            if (!playing) break
-            delay(interval)
-        }
-    }
-    // 氛围模式 temporal low-pass: blends the persistent glow toward the latest target every ~33 ms (dt-normalised to
-    // the per-level 60 ms step), so the picture glow flows instead of snapping. Idles once converged (e.g. paused).
-    LaunchedEffect(ambientLevel, fillMode, inPip, hdrAmbientLocked) {
-        if (ambientLevel <= 0 || fillMode || inPip || hdrAmbientLocked) return@LaunchedEffect
-        val stepAlpha = ambientSpec(ambientLevel).stepAlpha
-        var last = System.nanoTime()
-        while (isActive) {
-            val idle = ambientGlow.settled
-            // Converged: poll cheaply without requesting frames. Moving: step on vsync at ~30 Hz.
-            if (idle) delay(120) else withFrameNanos { }
-            val now = System.nanoTime()
-            val dtMs = (now - last) / 1_000_000f
-            if (!idle && dtMs < 28f) continue
-            last = now
-            // Waking from idle never takes one big catch-up step.
-            ambientGlow.step(if (idle) 33f else dtMs.coerceAtMost(100f), stepAlpha)
-        }
     }
 
     val activeQueue by rememberUpdatedState(queue)
@@ -476,14 +458,36 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             val resume = lib.progress(seriesId)
             if (resume != null && resume.episodeIndex == epIndex && resume.seconds > 3 && resume.fraction < 0.95f) player.seekTo((resume.seconds * 1000).toLong())
             player.prepare(); player.play()
-            // Precache next 2 episodes onto disk shortly after playback starts for zero-flash seamless switching.
+            // Precache next 2 episodes onto disk shortly after playback starts AND pre-decode next episode's
+            // first frame on the standby player for Douyin-style zero-cover, zero-flash switching.
             if (IdjApp.instance.settings.prefetchEnabled) {
                 d.episodes.getOrNull(epIndex + 1)?.let { next1 ->
-                    delay(1_200)
-                    EpisodeCache.preload(next1)
+                    delay(350)
+                    runCatching {
+                        val nextPlayable = EpisodeCache.peek(next1.vid) ?: EpisodeCache.get(next1).await()
+                        val sp = standbyPlayer
+                        if (sp != null && standbyLoadedVid != next1.vid) {
+                            // Wait briefly if standbyPlayer is still finishing a handoff for the current episode.
+                            var waited = 0
+                            while (handoffVid != null && waited < 40) { delay(50); waited++ }
+                            standbyHttpFactory.setUserAgent(nextPlayable.headers.entries.firstOrNull { it.key.equals("user-agent", true) }?.value ?: app.iduanju.core.cms.MacCMS.UA)
+                            standbyHttpFactory.setDefaultRequestProperties(nextPlayable.headers.filterKeys { !it.equals("user-agent", true) })
+                            standbyReadyVid = null
+                            standbyLoadedVid = next1.vid
+                            sp.setMediaItem(
+                                MediaItem.Builder()
+                                    .setUri(if (nextPlayable.uri.startsWith("/")) android.net.Uri.fromFile(java.io.File(nextPlayable.uri)) else android.net.Uri.parse(nextPlayable.uri))
+                                    .apply { if (nextPlayable.hls) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8) }
+                                    .build()
+                            )
+                            sp.playWhenReady = false
+                            sp.volume = 0f
+                            sp.prepare()
+                        }
+                    }
                 }
                 d.episodes.getOrNull(epIndex + 2)?.let { next2 ->
-                    delay(1_500)
+                    delay(800)
                     EpisodeCache.preload(next2)
                 }
             }
@@ -674,7 +678,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
 
     val showPadSplit = !inPip && metrics.isTablet && landscape && metrics.widthDp >= 840 && isPortraitMedia && detail != null && padDrawerOpen
     Row(Modifier.fillMaxSize().background(Color.Black)) {
-    BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().background(Color.Black)) {
+    BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().background(Color.Black).clipToBounds()) {
         // 画面比例 铺满: a Compose-side zoom of the FIT-sized video. PlayerView.resizeMode = ZOOM only re-lays out the
         // inner AspectRatioFrameLayout, which the AndroidView holder often skips (outer size unchanged), and does
         // nothing visible for 9:16 sources that already match the screen or carry baked-in letterbox bars.
@@ -694,19 +698,10 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             animationSpec = androidx.compose.animation.core.tween(220),
             label = "videoZoom",
         )
-        // Last non-zero level, so switching 氛围模式 off fades out with the strength it had instead of jumping.
-        val ambientRender = remember { intArrayOf(2) }
-        if (ambientLevel > 0) ambientRender[0] = ambientLevel
-        val ambientVisible = ambientLevel > 0 && !fillMode && !inPip && !hdrAmbientLocked
         val containerH = constraints.maxHeight.toFloat()
-        // Follow-finger episode swipe: the whole picture (glow + video + edge bleed) rides the centre-zone drag; the offset is
+        // Follow-finger episode swipe: the video rides the centre-zone drag; the offset is
         // read in the layer block only, so dragging redraws without recomposing the player.
         Box(Modifier.fillMaxSize().graphicsLayer { translationY = episodeDragY }) {
-        AmbientGlowLayer(
-            glow = ambientGlow,
-            level = ambientRender[0],
-            visible = ambientVisible,
-        )
         AndroidView(
             factory = {
                 (android.view.LayoutInflater.from(it).inflate(app.iduanju.R.layout.player_texture_view, null) as PlayerView).apply {
@@ -748,28 +743,54 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             // the layer block only, so the zoom animation redraws without recomposing.
             modifier = Modifier.fillMaxSize().clipToBounds().graphicsLayer { scaleX = videoScale; scaleY = videoScale },
         )
-        // 氛围模式 edge bleed: draws over the TextureView's own opaque pixels (baked-in bars / full-height 9:16), below
-        // danmaku, gestures and the HUD. Draw-only, so every touch passes straight through to the gesture layer.
-        AmbientEdgeBleedOverlay(
-            glow = ambientGlow,
-            videoAspectRatio = videoAspectRatio,
-            portrait = !landscape,
-            level = ambientRender[0],
-            visible = ambientVisible,
-        )
         }
-        // Adjacent-episode preview panel: below the video while dragging up (下一集), above it while dragging down.
-        val density = androidx.compose.ui.platform.LocalDensity.current
-        val epSwitchThresholdPx = remember(containerH, density) {
-            minOf(containerH * EPISODE_SWITCH_THRESHOLD, with(density) { EPISODE_SWITCH_MAX_DP.toPx() })
-        }
+        // Douyin-style adjacent-episode stage:
+        // 1) Standby PlayerView stays mounted off-screen so ExoPlayer pre-decodes next episode's frame 0 on GPU.
+        //    While dragging up, it slides in directly from the bottom (real video frame, never a poster cover),
+        //    and during commit handoff it stays pinned at y = 0 until the main player renders frame 0.
+        val nextEp = detail?.episodes?.getOrNull(epIndex + 1)
         val epDragDir by remember { derivedStateOf { if (episodeDragY < -0.5f) 1 else if (episodeDragY > 0.5f) -1 else 0 } }
-        val epArmed by remember(epSwitchThresholdPx) { derivedStateOf { kotlin.math.abs(episodeDragY) > epSwitchThresholdPx } }
         val previewEp = if (epDragDir != 0) detail?.episodes?.getOrNull(epIndex + epDragDir) else null
-        if (previewEp != null) EpisodeSwitchPreview(
-            cover = detail?.cover.orEmpty(), ep = previewEp, next = epDragDir > 0, armed = epArmed,
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = episodeDragY + if (epDragDir > 0) containerH else -containerH },
-        )
+        val showStandbyOnScreen = handoffVid != null || (epDragDir > 0 && nextEp != null && standbyReadyVid == nextEp.vid)
+        if (standbyPlayer != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .graphicsLayer {
+                        translationY = when {
+                            handoffVid != null -> 0f
+                            epDragDir > 0 && nextEp != null && standbyReadyVid == nextEp.vid -> episodeDragY + containerH
+                            else -> containerH
+                        }
+                        alpha = if (showStandbyOnScreen) 1f else 0.001f
+                    },
+            ) {
+                AndroidView(
+                    factory = {
+                        (android.view.LayoutInflater.from(it).inflate(app.iduanju.R.layout.player_texture_view, null) as PlayerView).apply {
+                            useController = false
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            setShutterBackgroundColor(android.graphics.Color.BLACK)
+                            setKeepContentOnPlayerReset(true)
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                            this.player = standbyPlayer
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize().clipToBounds().graphicsLayer { scaleX = videoScale; scaleY = videoScale },
+                )
+            }
+        }
+        // Fallback adjacent-episode frame (previous episode or when next episode hasn't finished pre-decoding yet):
+        // shows cached first video frame if available, otherwise clean black + subtle episode number (never a poster cover).
+        if (previewEp != null && !(epDragDir > 0 && standbyReadyVid == previewEp.vid)) {
+            EpisodeFramePreview(
+                ep = previewEp,
+                fillMode = fillMode,
+                modifier = Modifier.fillMaxSize().graphicsLayer { translationY = episodeDragY + if (epDragDir > 0) containerH else -containerH },
+            )
+        }
         // official danmaku (红果 only), lanes under the top bar + tech strip, never into the bottom controls
         val epNow = detail?.episodes?.getOrNull(epIndex)
         if (!inPip && danmaku && epNow != null && seriesId.all { it.isDigit() }) {
@@ -833,6 +854,10 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                                     try {
                                         androidx.compose.animation.core.animate(off, if (off < 0f) -h else h,
                                             animationSpec = androidx.compose.animation.core.tween(200)) { v, _ -> episodeDragY = v }
+                                        val targetVid = detail?.episodes?.getOrNull(target)?.vid
+                                        if (off < 0f && targetVid != null && standbyReadyVid == targetVid) {
+                                            handoffVid = targetVid
+                                        }
                                         selectEpisode(target)
                                     } finally { episodeDragY = 0f; committing = false }
                                 } else androidx.compose.animation.core.animate(off, 0f,
@@ -1173,7 +1198,6 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                     "more" -> {
                         MoreSettingsPanel(
                             fillMode = fillMode,
-                            ambientLevel = ambientLevel,
                             enhanceLevel = enhanceLevel,
                             sdrToHdr = sdrToHdr,
                             nativeHdrRange = nativeRange,
@@ -1186,18 +1210,6 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                                 fillMode = fill
                                 PlayerPrefs.setFillMode(ctx, fill)
                                 seekHint = if (fill) "画面：铺满裁剪" else "画面：完整适应"
-                            },
-                            onAmbientLevel = { lvl ->
-                                when {
-                                    isNativeHdr -> seekHint = "原生 ${tags.range} 模式下不可开启氛围模式"
-                                    sdrToHdr -> seekHint = "HDR 模式下不可开启氛围模式，请先关闭 SDR 转 HDR"
-                                    else -> {
-                                        val l = lvl.coerceIn(0, 4)
-                                        ambientLevel = l
-                                        PlayerPrefs.setAmbientLevel(ctx, l)
-                                        seekHint = "氛围模式：" + ambientLevelLabel(l)
-                                    }
-                                }
                             },
                             onEnhance = { lvl -> applyEnhance(lvl) },
                             onSdrToHdr = { on -> applySdrToHdr(on) },
@@ -1595,28 +1607,20 @@ private fun GestureHudPill(kind: GestureHudKind, value: Float) {
 }
 
 /** Adjacent-episode card that slides in with the centre-zone drag: blurred cover backdrop, poster, prompt. */
+/** Adjacent-episode fallback surface: renders the cached first video frame (or clean black) instead of a poster cover. */
 @Composable
-private fun EpisodeSwitchPreview(cover: String, ep: app.iduanju.core.hongguo.HGEpisode, next: Boolean, armed: Boolean, modifier: Modifier) {
-    Box(modifier.background(Color.Black)) {
-        if (cover.isNotEmpty()) coil.compose.AsyncImage(cover, null, Modifier.fillMaxSize().blur(36.dp),
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop, alpha = 0.55f)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(0.35f), Color.Black.copy(0.72f)))))
-        Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (cover.isNotEmpty()) coil.compose.AsyncImage(cover, null,
-                Modifier.width(132.dp).aspectRatio(0.72f).shadow(18.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp)),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-            Spacer(Modifier.height(18.dp))
-            Text(if (next) "下一集 · 第 ${ep.ep} 集" else "上一集 · 第 ${ep.ep} 集", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            if (ep.title.isNotBlank()) Text(ep.title, color = Color.White.copy(0.7f), fontSize = 13.sp, maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(if (armed) 0.24f else 0.12f)).padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (next) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(if (armed) "松手立即播放" else if (next) "上滑切换下一集" else "下滑切换上一集",
-                    color = Color.White, fontSize = 13.sp, fontWeight = if (armed) FontWeight.SemiBold else FontWeight.Normal)
-            }
+private fun EpisodeFramePreview(ep: app.iduanju.core.hongguo.HGEpisode, fillMode: Boolean, modifier: Modifier) {
+    val bmp = remember(ep.vid) { EpisodeCache.peekFirstFrame(ep.vid) }
+    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+        if (bmp != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = if (fillMode) androidx.compose.ui.layout.ContentScale.Crop else androidx.compose.ui.layout.ContentScale.Fit,
+            )
+        } else {
+            Text("第 ${ep.ep} 集", color = Color.White.copy(0.45f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -1627,8 +1631,6 @@ private const val ACTION_PIP_NEXT = "app.iduanju.action.PIP_NEXT"
 @Composable
 private fun MoreSettingsPanel(
     fillMode: Boolean,
-    /** 0 关闭 · 1 柔和 · 2 平衡 · 3 鲜艳 · 4 极致. */
-    ambientLevel: Int,
     enhanceLevel: Int,
     sdrToHdr: Boolean,
     /** Non-null ("HDR10" / "HLG" / "Dolby Vision") when the stream is already native HDR. */
@@ -1639,7 +1641,6 @@ private fun MoreSettingsPanel(
     showAutoNext: Boolean,
     pc: IdjColors,
     onFillMode: (Boolean) -> Unit,
-    onAmbientLevel: (Int) -> Unit,
     onEnhance: (Int) -> Unit,
     onSdrToHdr: (Boolean) -> Unit,
     onSleep: (Int) -> Unit,
@@ -1662,21 +1663,6 @@ private fun MoreSettingsPanel(
         selected = fillMode,
         pc = pc,
         onSelect = onFillMode,
-    )
-    Spacer(Modifier.height(10.dp))
-
-    val hdrLocked = nativeHdrRange != null || sdrToHdr
-    MoreOptionRow(
-        label = when {
-            nativeHdrRange != null -> "氛围模式 (原生 $nativeHdrRange 已锁定关闭)"
-            sdrToHdr -> "氛围模式 (SDR 转 HDR 开启时已锁定关闭)"
-            else -> "氛围模式"
-        },
-        options = listOf("关闭" to 0, "柔和" to 1, "平衡" to 2, "鲜艳" to 3, "极致" to 4),
-        selected = if (hdrLocked) 0 else ambientLevel,
-        enabled = !hdrLocked,
-        pc = pc,
-        onSelect = onAmbientLevel,
     )
     Spacer(Modifier.height(10.dp))
 
@@ -1768,430 +1754,6 @@ private fun <T> MoreOptionRow(
                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }
-        }
-    }
-}
-
-/** Per-level 氛围模式 tuning (柔和 / 平衡 / 鲜艳 / 极致). */
-private class AmbientSpec(
-    val alpha: Float,
-    val blur: androidx.compose.ui.unit.Dp,
-    val sampleIntervalMs: Long,
-    /** EMA blend per 60 ms reference step toward the latest sampled target (lower = calmer). */
-    val stepAlpha: Float,
-    val edgeOverlayAlpha: Float,
-    val satMult: Float,
-    val valMult: Float,
-    val maxVal: Float,
-)
-
-private val AmbientSpecs = arrayOf(
-    AmbientSpec(0.50f, 68.dp, 320L, 0.08f, 0.32f, 1.15f, 1.08f, 0.78f), // 1 柔和
-    AmbientSpec(0.75f, 54.dp, 260L, 0.13f, 0.48f, 1.30f, 1.18f, 0.86f), // 2 平衡
-    AmbientSpec(0.90f, 44.dp, 220L, 0.20f, 0.62f, 1.48f, 1.28f, 0.94f), // 3 鲜艳
-    AmbientSpec(1.00f, 36.dp, 180L, 0.30f, 0.76f, 1.65f, 1.38f, 1.00f), // 4 极致
-)
-
-private fun ambientSpec(level: Int): AmbientSpec = AmbientSpecs[(level.coerceIn(1, 4)) - 1]
-
-private fun ambientLevelLabel(level: Int): String = when (level) {
-    1 -> "柔和"; 2 -> "平衡"; 3 -> "鲜艳"; 4 -> "极致"; else -> "关闭"
-}
-
-private const val AMBIENT_CELLS = 16
-
-/** One analysed 24x24 sample: boosted 16x16 target colours (0..1 RGB), letterbox edges and raw inset fractions. */
-private class AmbientFrame(
-    val rgb: FloatArray,
-    /** Dark rows / columns trimmed from top, bottom, left, right (in sample pixels), after hysteresis. */
-    val edges: IntArray,
-    val topInsetFrac: Float,
-    val bottomInsetFrac: Float,
-)
-
-/**
- * Analyses one tiny TextureView readback. Pure (safe off the main thread): the previous letterbox edges come in as
- * [prevEdges] and the new ones go out in the result.
- *
- * Letterbox detection uses hysteresis plus a 1-row-per-sample clamp: a bar only grows when the stricter (< 16) scan
- * says so and only shrinks when the looser (< 22) scan says so, and each edge moves at most one sample row per call.
- * Pixels hovering around luma 17–19 therefore never make the trimmed region (and every colour) jump.
- */
-private fun analyzeAmbientFrame(bmp: android.graphics.Bitmap, level: Int, prevEdges: IntArray?): AmbientFrame? {
-    val spec = ambientSpec(level)
-    val w = bmp.width
-    val h = bmp.height
-    if (w <= 0 || h <= 0) return null
-    val pixels = IntArray(w * h)
-    bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-
-    fun maxCh(px: Int) = maxOf((px shr 16) and 0xFF, (px shr 8) and 0xFF, px and 0xFF)
-    fun rowMax(y: Int): Int { var m = 0; val o = y * w; for (x in 0 until w) m = maxOf(m, maxCh(pixels[o + x])); return m }
-    fun colMax(x: Int): Int { var m = 0; for (y in 0 until h) m = maxOf(m, maxCh(pixels[y * w + x])); return m }
-
-    // dark run length from each side for a threshold
-    fun runTop(th: Int): Int { var t = 0; while (t < h / 3 && rowMax(t) < th) t++; return t }
-    fun runBottom(th: Int): Int { var t = 0; while (t < h / 3 && rowMax(h - 1 - t) < th) t++; return t }
-    fun runLeft(th: Int): Int { var t = 0; while (t < w / 3 && colMax(t) < th) t++; return t }
-    fun runRight(th: Int): Int { var t = 0; while (t < w / 3 && colMax(w - 1 - t) < th) t++; return t }
-
-    fun settle(prev: Int, strict: Int, loose: Int): Int = when {
-        prev < 0 -> strict // first sample of a video: take the conservative value directly
-        strict > prev -> prev + 1
-        loose < prev -> prev - 1
-        else -> prev
-    }
-    val p = prevEdges
-    var eTop = settle(p?.get(0) ?: -1, runTop(16), runTop(22))
-    var eBottom = settle(p?.get(1) ?: -1, runBottom(16), runBottom(22))
-    var eLeft = settle(p?.get(2) ?: -1, runLeft(16), runLeft(22))
-    var eRight = settle(p?.get(3) ?: -1, runRight(16), runRight(22))
-    if (h - eTop - eBottom < 4) { eTop = 0; eBottom = 0 }
-    if (w - eLeft - eRight < 4) { eLeft = 0; eRight = 0 }
-
-    val x0 = eLeft
-    val x1 = w - eRight // exclusive
-    val y0 = eTop
-    val y1 = h - eBottom
-    val aw = (x1 - x0).toFloat()
-    val ah = (y1 - y0).toFloat()
-
-    /**
-     * Gentle vibrancy that preserves darkness: near-black stays black (a black suit must not glow), everything else
-     * gets a mild brightness curve and saturation lift. Never lifts dark pixels to a fixed minimum brightness.
-     */
-    val hsv = FloatArray(3)
-    fun boost(r: Int, g: Int, b: Int): Int {
-        android.graphics.Color.RGBToHSV(r, g, b, hsv)
-        val s = hsv[1]
-        val v = hsv[2]
-        if (v < 0.05f) return 0xFF000000.toInt()
-        if (s > 0.05f) hsv[1] = (s * spec.satMult).coerceIn(0f, 0.95f)
-        hsv[2] = (v * spec.valMult).coerceIn(0f, spec.maxVal)
-        return android.graphics.Color.HSVToColor(hsv)
-    }
-
-    // Bilinear sample at each cell centre of the trimmed active picture: far less temporal aliasing than nearest.
-    val n = AMBIENT_CELLS
-    val out = FloatArray(n * n * 3)
-    for (gy in 0 until n) {
-        val fy = (y0 + (gy + 0.5f) * ah / n - 0.5f).coerceIn(y0.toFloat(), (y1 - 1).toFloat())
-        val iy = fy.toInt()
-        val iy2 = (iy + 1).coerceAtMost(y1 - 1)
-        val ty = fy - iy
-        for (gx in 0 until n) {
-            val fx = (x0 + (gx + 0.5f) * aw / n - 0.5f).coerceIn(x0.toFloat(), (x1 - 1).toFloat())
-            val ix = fx.toInt()
-            val ix2 = (ix + 1).coerceAtMost(x1 - 1)
-            val tx = fx - ix
-            val c00 = pixels[iy * w + ix]; val c10 = pixels[iy * w + ix2]
-            val c01 = pixels[iy2 * w + ix]; val c11 = pixels[iy2 * w + ix2]
-            fun ch(shift: Int): Int {
-                val a = ((c00 shr shift) and 0xFF) * (1 - tx) + ((c10 shr shift) and 0xFF) * tx
-                val b = ((c01 shr shift) and 0xFF) * (1 - tx) + ((c11 shr shift) and 0xFF) * tx
-                return (a * (1 - ty) + b * ty).roundToInt().coerceIn(0, 255)
-            }
-            val c = boost(ch(16), ch(8), ch(0))
-            val k = (gy * n + gx) * 3
-            out[k] = ((c shr 16) and 0xFF) / 255f
-            out[k + 1] = ((c shr 8) and 0xFF) / 255f
-            out[k + 2] = (c and 0xFF) / 255f
-        }
-    }
-    return AmbientFrame(
-        rgb = out,
-        edges = intArrayOf(eTop, eBottom, eLeft, eRight),
-        topInsetFrac = eTop.toFloat() / h,
-        bottomInsetFrac = eBottom.toFloat() / h,
-    )
-}
-
-/**
- * 氛围模式 temporal engine. The sampler only moves [targetRgb]; [step] low-passes [emaRgb] toward it (EMA) and
- * renders the result into ONE persistent 16x16 glow (a 2-slot ring, so the slot being rewritten is never the one the
- * RenderThread is still uploading). Edge colours and letterbox insets are derived from the same smoothed state, so
- * the background glow and the over-video edge bleed flow together. No Crossfade, no alpha dips.
- *
- * [frame] is the only Compose state: it is read in draw scopes, so a glow update redraws two canvases and never
- * recomposes the player.
- */
-@Stable
-private class AmbientGlowEngine {
-    private val size = AMBIENT_CELLS * AMBIENT_CELLS * 3
-    private val targetRgb = FloatArray(size)
-    private val emaRgb = FloatArray(size)
-    private var targetTopInset = 0f
-    private var targetBottomInset = 0f
-    private var edges: IntArray? = null
-    private val argb = IntArray(AMBIENT_CELLS * AMBIENT_CELLS)
-    private val bitmaps = Array(2) {
-        android.graphics.Bitmap.createBitmap(AMBIENT_CELLS, AMBIENT_CELLS, android.graphics.Bitmap.Config.ARGB_8888)
-            .apply { eraseColor(android.graphics.Color.BLACK) }
-    }
-    private val images = bitmaps.map { it.asImageBitmap() }
-    private var slot = 0
-
-    /** Bumped by [reset]; a sample analysed before a reset is dropped. */
-    var generation = 0
-        private set
-    var settled = true
-        private set
-    var frame by mutableIntStateOf(0)
-        private set
-
-    val image: androidx.compose.ui.graphics.ImageBitmap get() = images[slot]
-    var top = Color.Black; private set
-    var bottom = Color.Black; private set
-    var left = Color.Black; private set
-    var right = Color.Black; private set
-    var topInsetFrac = 0f; private set
-    var bottomInsetFrac = 0f; private set
-
-    fun edgesSnapshot(): IntArray? = edges?.copyOf()
-
-    /** New episode: glow eases in from black, letterbox detection starts over. */
-    fun reset() {
-        generation++
-        targetRgb.fill(0f)
-        edges = null
-        targetTopInset = 0f
-        targetBottomInset = 0f
-        settled = false
-    }
-
-    fun commitTarget(f: AmbientFrame, gen: Int) {
-        if (gen != generation) return
-        f.rgb.copyInto(targetRgb)
-        edges = f.edges
-        targetTopInset = f.topInsetFrac
-        targetBottomInset = f.bottomInsetFrac
-        settled = false
-    }
-
-    /** One EMA step; [stepAlpha] is defined per 60 ms and rescaled to the real [dtMs] (frame-rate independent). */
-    fun step(dtMs: Float, stepAlpha: Float) {
-        val a = 1f - Math.pow((1f - stepAlpha).toDouble(), (dtMs / 60f).toDouble()).toFloat()
-        val ai = 1f - Math.pow(0.88, (dtMs / 60f).toDouble()).toFloat()
-        var maxDiff = 0f
-        for (k in 0 until size) {
-            val d = targetRgb[k] - emaRgb[k]
-            val ad = kotlin.math.abs(d)
-            if (ad > maxDiff) maxDiff = ad
-            emaRgb[k] = if (ad < 0.0015f) targetRgb[k] else emaRgb[k] + d * a
-        }
-        val dTop = targetTopInset - topInsetFrac
-        val dBottom = targetBottomInset - bottomInsetFrac
-        topInsetFrac = if (kotlin.math.abs(dTop) < 0.0005f) targetTopInset else topInsetFrac + dTop * ai
-        bottomInsetFrac = if (kotlin.math.abs(dBottom) < 0.0005f) targetBottomInset else bottomInsetFrac + dBottom * ai
-        val moving = maxDiff >= 0.0015f || kotlin.math.abs(dTop) >= 0.0005f || kotlin.math.abs(dBottom) >= 0.0005f
-        if (!moving && settled) return
-        render()
-        settled = !moving
-    }
-
-    private fun render() {
-        val n = AMBIENT_CELLS
-        for (i in 0 until n * n) {
-            val k = i * 3
-            val r = (emaRgb[k] * 255f).roundToInt().coerceIn(0, 255)
-            val g = (emaRgb[k + 1] * 255f).roundToInt().coerceIn(0, 255)
-            val b = (emaRgb[k + 2] * 255f).roundToInt().coerceIn(0, 255)
-            argb[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        val next = 1 - slot
-        bitmaps[next].setPixels(argb, 0, n, 0, 0, n, n)
-        slot = next
-        val strip = n / 3 // ~5 of 16 cells, same third-strip as before
-        top = regionColor(0, n, 0, strip)
-        bottom = regionColor(0, n, n - strip, n)
-        left = regionColor(0, strip, 0, n)
-        right = regionColor(n - strip, n, 0, n)
-        frame++
-    }
-
-    /**
-     * Edge colour from its own smoothed cells: brightness + saturation weighted, near-black cells skipped (so a dark
-     * edge with one bright cell is not dragged to grey), plain mean when the whole edge is dark — dark stays dark.
-     */
-    private fun regionColor(x0: Int, x1: Int, y0: Int, y1: Int): Color {
-        var rs = 0f; var gs = 0f; var bs = 0f; var ws = 0f
-        var fr = 0f; var fg = 0f; var fb = 0f; var fc = 0
-        for (y in y0 until y1) for (x in x0 until x1) {
-            val k = (y * AMBIENT_CELLS + x) * 3
-            val r = emaRgb[k]; val g = emaRgb[k + 1]; val b = emaRgb[k + 2]
-            fr += r; fg += g; fb += b; fc++
-            val mx = maxOf(r, g, b)
-            if (mx < 14f / 255f) continue
-            val wt = 1f / 255f + mx + (mx - minOf(r, g, b)) * 2f
-            rs += r * wt; gs += g * wt; bs += b * wt; ws += wt
-        }
-        return when {
-            ws > 0f -> Color((rs / ws).coerceIn(0f, 1f), (gs / ws).coerceIn(0f, 1f), (bs / ws).coerceIn(0f, 1f))
-            fc > 0 -> Color((fr / fc).coerceIn(0f, 1f), (fg / fc).coerceIn(0f, 1f), (fb / fc).coerceIn(0f, 1f))
-            else -> Color.Black
-        }
-    }
-}
-
-/**
- * 氛围模式 background glow, drawn BEHIND the PlayerView (whose letterbox is transparent).
- *
- * API 31+: the smoothed 16x16 map of the active (black-bar-trimmed) picture is stretched over the WHOLE container
- * and hardware-blurred with Rectangle edges (clamped, so the screen edges never bleed transparent black inward), in
- * ONE canvas that is simply redrawn as the EMA moves — no Crossfade, so there are no overlapping fading copies and
- * no brightness pulsing. Edge-bleed gradients from the screen edges inward add the strong rim glow.
- * API < 31: the edge-bleed gradients alone, each tinted only by its own darkness-preserving edge colour.
- */
-@Composable
-private fun AmbientGlowLayer(
-    glow: AmbientGlowEngine,
-    level: Int = 2,
-    visible: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    val spec = ambientSpec(level)
-    val layerAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(450),
-        label = "ambientVisible",
-    )
-    if (layerAlpha <= 0.005f) return
-    val useBitmapGlow = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
-    Box(modifier.fillMaxSize()) {
-        if (useBitmapGlow) {
-            androidx.compose.foundation.Canvas(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = spec.alpha * layerAlpha }
-                    .blur(radius = spec.blur, edgeTreatment = BlurredEdgeTreatment.Rectangle),
-            ) {
-                // reading the frame counter subscribes this draw (only) to EMA updates
-                if (glow.frame < 0 || size.width <= 0f || size.height <= 0f) return@Canvas
-                // full-screen container projection: (0, 0) → (w, h)
-                drawImage(
-                    image = glow.image,
-                    dstOffset = androidx.compose.ui.unit.IntOffset(0, 0),
-                    dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1)),
-                    filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
-                )
-            }
-        }
-        // Edge bleed from the screen edges inward toward the video.
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            if (glow.frame < 0 || w <= 0f || h <= 0f) return@Canvas
-            val top = glow.top
-            val bottom = glow.bottom
-            val left = glow.left
-            val right = glow.right
-            val baseAlpha = (if (useBitmapGlow) 0.62f else 0.82f) * spec.alpha * layerAlpha
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to top.copy(alpha = baseAlpha),
-                    0.16f to top.copy(alpha = baseAlpha * 0.62f),
-                    0.34f to Color.Transparent,
-                    startY = 0f,
-                    endY = h,
-                ),
-            )
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0.66f to Color.Transparent,
-                    0.84f to bottom.copy(alpha = baseAlpha * 0.62f),
-                    1f to bottom.copy(alpha = baseAlpha),
-                    startY = 0f,
-                    endY = h,
-                ),
-            )
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0f to left.copy(alpha = baseAlpha * 0.85f),
-                    0.12f to left.copy(alpha = baseAlpha * 0.50f),
-                    0.28f to Color.Transparent,
-                    startX = 0f,
-                    endX = w,
-                ),
-            )
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    0.72f to Color.Transparent,
-                    0.88f to right.copy(alpha = baseAlpha * 0.50f),
-                    1f to right.copy(alpha = baseAlpha * 0.85f),
-                    startX = 0f,
-                    endX = w,
-                ),
-            )
-        }
-    }
-}
-
-/**
- * 氛围模式 edge-bleed overlay, drawn OVER the PlayerView but below danmaku / gestures / HUD (draw-only, so touches
- * pass straight through). The TextureView paints opaque pixels over its own area, which hides the background glow
- * whenever a portrait video fills the height or carries black bars baked into the frame. This feathers the glow
- * into the top and bottom bands: container letterbox gap + baked-in bar, at least 88 dp (top) / 96 dp (bottom) in
- * portrait, so every portrait case (16:9, 4:3, 9:16 with baked-in bars, full 9:16 on a tall phone) shows a
- * spatially matched glow. Near-black edge colours (and the pre-sample black) draw nothing, so dark edges stay dark.
- * Colours and insets come straight from the engine's smoothed state, in lockstep with [AmbientGlowLayer].
- */
-@Composable
-private fun AmbientEdgeBleedOverlay(
-    glow: AmbientGlowEngine,
-    videoAspectRatio: Float,
-    portrait: Boolean,
-    level: Int,
-    visible: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val spec = ambientSpec(level)
-    val overlayAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(450),
-        label = "ambientEdgeVisible",
-    )
-    if (overlayAlpha <= 0.005f) return
-    androidx.compose.foundation.Canvas(modifier.fillMaxSize()) {
-        val w = size.width
-        val h = size.height
-        if (glow.frame < 0 || w <= 0f || h <= 0f) return@Canvas
-        val topC = glow.top
-        val bottomC = glow.bottom
-        val topInset = glow.topInsetFrac.coerceIn(0f, 0.34f)
-        val bottomInset = glow.bottomInsetFrac.coerceIn(0f, 0.34f)
-        // Where the picture sits inside the FIT-sized TextureView (unknown aspect = fills the height).
-        val ar = videoAspectRatio
-        val vidH = if (ar > 0.05f) (if (ar > w / h) w / ar else h) else h
-        val gap = ((h - vidH) * 0.5f).coerceAtLeast(0f)
-        val topZone = maxOf(gap + vidH * topInset, if (portrait) 88.dp.toPx() else 0f).coerceAtMost(h * 0.45f)
-        val bottomZone = maxOf(gap + vidH * bottomInset, if (portrait) 96.dp.toPx() else 0f).coerceAtMost(h * 0.45f)
-        fun weight(c: Color) = (maxOf(c.red, c.green, c.blue) / 0.12f).coerceIn(0f, 1f)
-        val topA = spec.edgeOverlayAlpha * overlayAlpha * weight(topC)
-        val bottomA = spec.edgeOverlayAlpha * overlayAlpha * weight(bottomC)
-        if (topZone > 1f && topA > 0.005f) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to topC.copy(alpha = topA),
-                    0.5f to topC.copy(alpha = topA * 0.42f),
-                    1f to Color.Transparent,
-                    startY = 0f,
-                    endY = topZone,
-                ),
-                size = androidx.compose.ui.geometry.Size(w, topZone),
-            )
-        }
-        if (bottomZone > 1f && bottomA > 0.005f) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.5f to bottomC.copy(alpha = bottomA * 0.42f),
-                    1f to bottomC.copy(alpha = bottomA),
-                    startY = h - bottomZone,
-                    endY = h,
-                ),
-                topLeft = androidx.compose.ui.geometry.Offset(0f, h - bottomZone),
-                size = androidx.compose.ui.geometry.Size(w, bottomZone),
-            )
         }
     }
 }

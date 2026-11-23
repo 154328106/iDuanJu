@@ -572,7 +572,10 @@ private fun SearchSuggestions(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable { onOpenDetail(s.seriesId) }
+                    .clickable {
+                        app.iduanju.data.Catalog.rememberPreview(s.seriesId, s.title, s.cover)
+                        onOpenDetail(s.seriesId)
+                    }
                     .padding(vertical = 8.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
