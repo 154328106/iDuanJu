@@ -616,7 +616,17 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 guard activation == token else { return }
                 let next = chooseEngine(i, src)
                 switchEngine(to: next)
-                tech = nil; videoSize = .zero; audioOptions = []; subtitleOptions = []; audioSelected = nil; subtitleSelected = nil; subtitleText = nil
+                audioOptions = []; subtitleOptions = []; audioSelected = nil; subtitleSelected = nil; subtitleText = nil
+                if case .file(let localURL) = src, firstFrames[i] == nil {
+                    Task { [weak self] in
+                        if let frame = await Self.extractFirstFrame(from: localURL) {
+                            await MainActor.run {
+                                guard let self, self.activation == token else { return }
+                                self.firstFrames[i] = frame
+                            }
+                        }
+                    }
+                }
                 thumbnails.attach(Self.thumbnailAsset(src, stream: chosen[i]))
                 var start: Double?
                 if let p = LibraryStore.shared.progress(for: series), p.episodeIndex == i, p.seconds > 3,

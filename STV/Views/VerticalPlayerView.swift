@@ -295,18 +295,25 @@ struct PlayerScreen: View {
                 centerSuppressed = true
                 if co.lastAdvanceWasAuto {
                     withAnimation(.easeOut(duration: 0.2)) { showChrome = false }
-                } else {
-                    flashChrome()
+                } else if showChrome {
+                    rearmAutoHide()
                 }
-            } else {
-                flashChrome()
             }
         }
         .compatOnChange(of: co.readyIndex) { index in
             guard index != nil else { return }
             showLoadingSpinner = false
-            if co.lastAdvanceWasAuto { return }
-            if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
+            if showChrome && !co.lastAdvanceWasAuto { rearmAutoHide() }
+        }
+        .task(id: co.readyIndex) {
+            guard let idx = co.readyIndex else {
+                revealedIndex = nil
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled, co.readyIndex == idx else { return }
+            revealedIndex = idx
+            releaseHeldIfSettled()
         }
         .task(id: "\(co.current ?? -1)|\(co.readyIndex ?? -1)|\(co.current.flatMap { co.errors[$0] } != nil)") {
             guard let cur = co.current, co.readyIndex != cur, co.errors[cur] == nil else {
@@ -386,9 +393,6 @@ struct PlayerScreen: View {
             .onScrollPhaseChange { _, phase in feedSettled = phase == .idle; releaseHeldIfSettled() }
             .accessibilityIdentifier("player.feed")
             .accessibilityValue(feedSettled ? "idle" : "scrolling")
-            .compatOnChange(of: co.current) { new in
-                if let new, co.episodes.indices.contains(new) { showOSD("第\(co.episodes[new].ep)集") }
-            }
             .scrollDisabled(isScrollDisabled)
         } else {
             GeometryReader { geo in
@@ -485,13 +489,16 @@ struct PlayerScreen: View {
         .overlay(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1) }
     }
 
-    /// Drop the previous episode's still once the new one is playing and the page has stopped moving.
+    /// Drop the previous episode's still once the new one has rendered frame 0 and the page has stopped moving.
     private func releaseHeldIfSettled() {
-        guard co.heldFrame != nil, let r = co.readyIndex, r == co.current, feedSettled else { return }
+        guard co.heldFrame != nil, let r = revealedIndex, r == co.current, feedSettled else { return }
         co.releaseHeldFrame()
     }
     @State private var feedSettled = true
     @State private var showLoadingSpinner = false
+    /// Trails `co.readyIndex` by ~90 ms so MPVMetalLayer / AVPlayerLayer presents frame 0 before
+    /// the pre-decoded `firstFrames[i]` cover lifts, preventing any 1-frame black flash.
+    @State private var revealedIndex: Int?
 
     /// Offset of page `index` from rest, capped at one page either way.
     private func pageDrift(_ index: Int, page: CGFloat) -> CGFloat {
@@ -501,10 +508,10 @@ struct PlayerScreen: View {
 
     private func stage(_ i: Int) -> some View {
         ZStack {
-            if co.readyIndex != i {
+            if revealedIndex != i {
                 if let frame = co.firstFrames[i], co.errors[i] == nil {
                     // Douyin-style: show the pre-decoded first video frame of episode `i` while swiping in
-                    // and during the ~30 ms engine handoff, so switching never flashes a poster cover or black.
+                    // and during the ~90 ms render handoff, so switching never flashes a poster cover or black.
                     Color.black
                     Image(uiImage: frame)
                         .resizable()
