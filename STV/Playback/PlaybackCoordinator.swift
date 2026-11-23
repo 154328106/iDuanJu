@@ -1059,7 +1059,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 guard let self, self.engine === eng else { return }
                 if t != self.tech {
                     self.tech = t
-                    self.engine.setSdrToHdr(self.sdrToHdr && t?.hdr != true)
+                    self.engine.setSdrToHdr(self.sdrToHdr && !t.hdr)
                 }
                 self.refreshMediaOptions()
                 self.refreshPiP()
