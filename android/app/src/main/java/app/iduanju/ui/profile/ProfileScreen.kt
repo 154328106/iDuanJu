@@ -114,8 +114,9 @@ fun ProfileScreen(onOpenDetail: (String) -> Unit = {}) {
                 RowDivider()
                 LinkRow("我的收藏", ProfileIcons.heart, trailing = "${lib.favorites.size}") { go("library/favorites") }
             }
+            val adult = ia.cms.adultUnlocked
             Group {
-                LinkRow("Telegram 频道", ProfileIcons.telegram, trailing = "${ia.tg.visible(false).size} 个") { go("home/channels") }
+                LinkRow("Telegram 频道", ProfileIcons.telegram, trailing = "${ia.tg.visible(adult).size} 个") { go("home/channels") }
                 RowDivider()
                 LinkRow("漫画", ProfileIcons.manga, trailing = ia.manga.favorites.size.takeIf { it > 0 }?.let { "收藏 $it" }) { go("home/manga") }
                 RowDivider()
@@ -149,9 +150,9 @@ fun ProfileScreen(onOpenDetail: (String) -> Unit = {}) {
                 }
             }
             Group {
-                LinkRow("片源管理", ProfileIcons.sources, trailing = "红果") { go("sources") }
+                LinkRow("片源管理", ProfileIcons.sources, trailing = if (adult) "红果 · 黄果" else "红果") { go("sources") }
                 RowDivider()
-                val n = ia.plugins.plugins.count { !it.adult } + ia.cms.sites.count { !it.adult }
+                val n = ia.plugins.plugins.count { !it.adult || adult } + ia.cms.sites.count { !it.adult || adult }
                 LinkRow("插件", ProfileIcons.plugin, trailing = n.takeIf { it > 0 }?.let { "$it 个" }) { go("plugins") }
                 RowDivider()
                 LinkRow("开源许可", ProfileIcons.license) { go("licenses") }

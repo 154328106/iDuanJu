@@ -251,9 +251,26 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
     }
 
     var mediaSeekTick by remember { mutableIntStateOf(0) }
+    var buffering by remember { mutableStateOf(false) }
+    var firstFrameRendered by remember { mutableStateOf(false) }
+    var showBufferingSpinner by remember { mutableStateOf(false) }
+    LaunchedEffect(epIndex, seriesId) {
+        if (handoffVid == null) firstFrameRendered = false
+    }
+    LaunchedEffect(buffering, firstFrameRendered, status, error, handoffVid) {
+        val waiting = error == null && status.isEmpty() && handoffVid == null && (buffering || !firstFrameRendered)
+        if (!waiting) {
+            showBufferingSpinner = false
+        } else {
+            // Short grace period so locally pre-cached instant switches never flash a spinner.
+            delay(280)
+            showBufferingSpinner = true
+        }
+    }
     DisposableEffect(player) {
         val l = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_ENDED && sleepMode == -1) {
                     sleepMode = 0
                     sleepEndMs = 0L
@@ -303,6 +320,8 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             // videoFormat/audioFormat are populated once the renderers start, after onTracksChanged
             override fun onRenderedFirstFrame() {
                 handoffVid = null
+                firstFrameRendered = true
+                buffering = false
                 tags = TechTags.from(player, quality)
             }
             override fun onPositionDiscontinuity(
@@ -930,11 +949,22 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 },
         )
 
-        if (status.isNotEmpty() && error == null) {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+        val loadingText = when {
+            status.isNotEmpty() -> status
+            showBufferingSpinner -> if (!firstFrameRendered) "正在加载视频…" else "正在缓冲…"
+            else -> ""
+        }
+        if (loadingText.isNotEmpty() && error == null) {
+            Column(
+                Modifier.align(Alignment.Center)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black.copy(0.55f))
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
-                Spacer(Modifier.height(12.dp))
-                Text(status, color = Color.White.copy(0.8f), fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(loadingText, color = Color.White.copy(0.88f), fontSize = 13.sp)
             }
         }
         error?.let {

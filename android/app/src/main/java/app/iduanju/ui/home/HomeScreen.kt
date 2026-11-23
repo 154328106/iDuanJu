@@ -133,9 +133,11 @@ fun formatCount(n: Long) = HomeFmt.count(n)
 fun HomeScreen(onOpenDetail: (String) -> Unit, onSearch: () -> Unit = {}, onPlay: (String) -> Unit = {}, onOpenManga: (String) -> Unit = {}, onImmersiveChanged: (Boolean) -> Unit = {}) {
     val c = IdjThemeColors
     // iOS HomeSource.all: [红果, 黄果, AI剧] + visible sites (采集站 / plugins) + [频道, 漫画]
+    val adult = IdjApp.instance.cms.adultUnlocked
     val sites = IdjApp.instance.cms.visibleSites.filterNot { it.origin.equals("TVBox", ignoreCase = true) || it.origin.startsWith("TVBox") }
-    val plugins = IdjApp.instance.plugins.visible(false).filter { it.type == "video" || it.type == "shortdrama" }
-    val pages: List<Any> = listOf<Any>(HomeSource.hongguo, HomeSource.ai) + sites + plugins + listOf(HomeSource.channels, HomeSource.manga, HomeSource.novel)
+    val plugins = IdjApp.instance.plugins.visible(adult).filter { it.type == "video" || it.type == "shortdrama" }
+    val baseSources: List<Any> = if (adult) listOf(HomeSource.hongguo, HomeSource.huangguo, HomeSource.ai) else listOf(HomeSource.hongguo, HomeSource.ai)
+    val pages: List<Any> = baseSources + sites + plugins + listOf(HomeSource.channels, HomeSource.manga, HomeSource.novel)
     val labels = pages.map { when (it) { is HomeSource -> it.label; is app.iduanju.core.cms.CMSSite -> it.name; else -> (it as app.iduanju.plugin.PluginStore.Installed).name } }
     val pager = rememberPagerState { pages.size }
     LaunchedEffect(HomeJump.label, pages.size) {

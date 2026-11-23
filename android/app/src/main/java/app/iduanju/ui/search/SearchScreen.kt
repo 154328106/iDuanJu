@@ -96,7 +96,7 @@ fun SearchScreen(
     val sources: List<Pair<String, String>> = remember {
         listOf("hongguo" to "红果") +
             ia.cms.visibleSites.map { "cms:" + it.key to it.name } +
-            ia.plugins.visible(false).filter { it.type == "video" || it.type == "shortdrama" }.map { "plugin:" + it.id to it.name }
+            ia.plugins.visible(ia.cms.adultUnlocked).filter { it.type == "video" || it.type == "shortdrama" }.map { "plugin:" + it.id to it.name }
     }
     var source by remember { mutableStateOf("hongguo") }
     var pageNo by remember { mutableIntStateOf(1) }

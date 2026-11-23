@@ -330,6 +330,7 @@ fun RootScreen(initialRoute: String? = null) {
             )
         }
         app.iduanju.update.UpdateDialog(updater)
+        app.iduanju.ui.components.SiteVerifyHostOverlay()
     }
 }
 
