@@ -85,6 +85,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
     /// 0 = off, -1 = pause after current episode, >0 = countdown minutes.
     @Published private(set) var sleepMode: Int = 0
     private var sleepTimerTask: Task<Void, Never>?
+    private var mediaPrefetchTask: Task<Void, Never>?
     private var onSleepTriggered: ((String) -> Void)?
     /// GPU sharpening level (0 = off, 1 = standard, 2 = strong), persisted across sessions.
     @Published var enhanceLevel: Int = UserDefaults.standard.integer(forKey: "stv.player.enhance") {
@@ -272,6 +273,8 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
         activation = UUID()
         sleepTimerTask?.cancel()
         sleepTimerTask = nil
+        mediaPrefetchTask?.cancel()
+        mediaPrefetchTask = nil
         sleepMode = 0
         onSleepTriggered = nil
         save(force: true)
@@ -568,7 +571,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
             LocalHLSProxy.shared.release(tok); prefetchTokens[k] = nil; prepared[k] = nil
         }
         prebuffer = nil
-        for k in prepared.keys where abs(k - i) > 1 {
+        for k in prepared.keys where abs(k - i) > 2 {
             prepared[k] = nil
             streams[k] = nil
             chosen[k] = nil
@@ -629,12 +632,7 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 refreshPiP()
                 if wantsPlayback, !interrupted { play() }
                 if pipActive, engine.pipIdentity == pipIdentity { continuePiP = false }
-                if episodes.indices.contains(i + 1) {
-                    Task { [weak self] in
-                        guard let self, self.activation == token else { return }
-                        _ = try? await self.prepare(i + 1)
-                    }
-                }
+                scheduleShortDramaPrefetch(after: i, token: token)
                 if series.source == .hongguo {
                     // Warm play URLs for the next few episodes (180 s cache) so swipes resolve instantly.
                     let next = episodes.indices.filter { $0 > i && $0 <= i + 3 }.map { episodes[$0].vid }
@@ -646,6 +644,38 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 errors[i] = error.localizedDescription
                 verifyTargets[i] = error.verifyTarget
                 cancelPiPHandover()
+            }
+        }
+    }
+
+    /// Pre-downloads and decrypts the next 1–2 short-drama episodes to local disk so episode transitions
+    /// open from `.file(...)` immediately without network stall or loading flash.
+    private func scheduleShortDramaPrefetch(after i: Int, token: UUID) {
+        mediaPrefetchTask?.cancel()
+        mediaPrefetchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !self.series.source.isLongVideo, self.sourceResolver == nil {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, self.activation == token else { return }
+                for target in [i + 1, i + 2] where self.episodes.indices.contains(target) {
+                    guard !Task.isCancelled, self.activation == token else { return }
+                    _ = try? await self.prepare(target)
+                    guard !Task.isCancelled, self.activation == token,
+                          let stream = self.chosen[target],
+                          stream.kind == .mp4Cenc || (stream.kind == .mp4Clear && !stream.url.hasPrefix("tdfile://") && !stream.url.hasPrefix("file://")) else {
+                        continue
+                    }
+                    let vid = self.episodes[target].vid
+                    if let local = try? await EpisodePlaybackLoader.playableFile(vid: vid, stream: stream) {
+                        guard !Task.isCancelled, self.activation == token else { return }
+                        if let oldTok = self.prefetchTokens.removeValue(forKey: target) {
+                            LocalHLSProxy.shared.release(oldTok)
+                        }
+                        self.prepared[target] = .file(local)
+                    }
+                }
+            } else if self.episodes.indices.contains(i + 1) {
+                _ = try? await self.prepare(i + 1)
             }
         }
     }
@@ -782,6 +812,10 @@ final class PlaybackCoordinator: NSObject, @preconcurrency AVPictureInPictureCon
                 guard let u = URL(string: s.url) else { throw ProviderError.invalid(s.url) }
                 return .remote(u, s.headers)
             case .mp4Clear, .hls, .hlsAES:
+                if s.kind == .mp4Clear, !series.source.isLongVideo,
+                   let f = EpisodePlaybackLoader.cachedFile(vid: ep.vid, stream: s) {
+                    return .file(f)
+                }
                 let budget = bypass ? 0 : BufferSettings.budget(for: series.source)
                 if budget > 0, let proxied = await self?.prebuffered(s, budget: budget, index: i) { return proxied }
                 if viaMPV, s.kind != .mp4Clear, s.key.isEmpty {

@@ -198,8 +198,12 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
         val ep = d.episodes.getOrNull(epIndex) ?: return@LaunchedEffect
         if(previousEpisode >= 0 && previousEpisode != epIndex) centerSuppressed=true
         previousEpisode=epIndex
-        error = null; status = "取流中…"
-        player.stop(); player.clearMediaItems()
+        error = null
+        val cachedHit = if (fixture) null else EpisodeCache.peek(ep.vid)
+        if (cachedHit == null) {
+            status = "取流中…"
+            player.stop(); player.clearMediaItems()
+        }
         if(fixture) {
             val local=java.io.File(ctx.cacheDir,"ui-color-bars.mp4")
             if(!local.exists())withContext(Dispatchers.IO){ctx.assets.open("player_landscape.mp4").use{input->local.outputStream().use{input.copyTo(it)}}}
@@ -208,7 +212,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             return@LaunchedEffect
         }
         try {
-            val p = EpisodeCache.get(ep) { status = it }.await()
+            val p = cachedHit ?: EpisodeCache.get(ep) { status = it }.await()
             quality = p.quality
             status = ""
             // plugin / 采集站 streams may need Referer/Origin/UA on every segment request
@@ -223,9 +227,17 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
             val resume = lib.progress(seriesId)
             if (resume != null && resume.episodeIndex == epIndex && resume.seconds > 3 && resume.fraction < 0.95f) player.seekTo((resume.seconds * 1000).toLong())
             player.prepare(); player.play()
-            // precache next episode (iOS preloads the next stream while this one plays)
-            // spaced ≥6 s from the current resolve: fresh one-shot registrations back-to-back get soft-rejected (probe 2026-11-11)
-            if (IdjApp.instance.settings.prefetchEnabled) d.episodes.getOrNull(epIndex + 1)?.let { delay(6_000); EpisodeCache.preload(it) }
+            // Precache next 2 episodes onto disk shortly after playback starts for zero-flash seamless switching.
+            if (IdjApp.instance.settings.prefetchEnabled) {
+                d.episodes.getOrNull(epIndex + 1)?.let { next1 ->
+                    delay(1_200)
+                    EpisodeCache.preload(next1)
+                }
+                d.episodes.getOrNull(epIndex + 2)?.let { next2 ->
+                    delay(1_500)
+                    EpisodeCache.preload(next2)
+                }
+            }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
             android.util.Log.w("IDJ", "Player media load failed", e)
@@ -375,6 +387,7 @@ fun PlayerScreen(seriesId: String, startEp: Int, onBack: () -> Unit, queue: Vide
                 (android.view.LayoutInflater.from(it).inflate(app.iduanju.R.layout.player_texture_view, null) as PlayerView).apply {
                     useController = false
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    setKeepContentOnPlayerReset(true)
                     layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     this.player = player
                 }

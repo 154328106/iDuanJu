@@ -273,8 +273,20 @@ struct PlayerScreen: View {
         }
         .compatOnChange(of: co.readyIndex) { index in
             guard index != nil else { return }
+            showLoadingSpinner = false
             if co.lastAdvanceWasAuto { return }
             if centerSuppressed { showChrome = true; rearmAutoHide() } else { flashChrome() }
+        }
+        .task(id: "\(co.current ?? -1)|\(co.readyIndex ?? -1)|\(co.current.flatMap { co.errors[$0] } != nil)") {
+            guard let cur = co.current, co.readyIndex != cur, co.errors[cur] == nil else {
+                showLoadingSpinner = false
+                return
+            }
+            showLoadingSpinner = false
+            try? await Task.sleep(for: .milliseconds(280))
+            if !Task.isCancelled, co.current == cur, co.readyIndex != cur, co.errors[cur] == nil {
+                showLoadingSpinner = true
+            }
         }
         
         .compatOnChange(of: landscape) { l in if !l { locked = false }; panel = nil }
@@ -448,6 +460,7 @@ struct PlayerScreen: View {
         co.releaseHeldFrame()
     }
     @State private var feedSettled = true
+    @State private var showLoadingSpinner = false
 
     /// Offset of page `index` from rest, capped at one page either way.
     private func pageDrift(_ index: Int, page: CGFloat) -> CGFloat {
@@ -491,7 +504,7 @@ struct PlayerScreen: View {
                         }
                         Button("重试") { co.activate(i) }.buttonStyle(.borderedProminent)
                     }.padding(32)
-                } else if i == co.current {
+                } else if i == co.current, showLoadingSpinner {
                     ProgressView("正在载入分集").tint(.white).allowsHitTesting(false).accessibilityIdentifier("player.loading")
                 }
             }
