@@ -409,7 +409,6 @@ struct PlayerScreen: View {
             .scrollIndicators(.hidden)
             .scrollPosition(id: Binding(get: { co.current }, set: { co.select($0) }), anchor: .center)
             .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in feedScrollY = y }
-            .compatSelectionFeedback(trigger: co.current)
             .compatOnChange(of: co.readyIndex) { releaseHeldIfSettled() }
             .onScrollPhaseChange { _, phase in feedSettled = phase == .idle; releaseHeldIfSettled() }
             .accessibilityIdentifier("player.feed")
@@ -457,7 +456,6 @@ struct PlayerScreen: View {
                     }
                 }
                 .compatOnChange(of: co.readyIndex) { releaseHeldIfSettled() }
-                .compatSelectionFeedback(trigger: co.current)
                 .accessibilityIdentifier("player.feed")
                 .accessibilityValue(feedSettled ? "idle" : "scrolling")
             }
