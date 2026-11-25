@@ -146,12 +146,22 @@ struct HomeView: View {
         .compatOnChange(of: SourceGate.shared.visibleSites) { if !HomeSource.all.contains(source) { source = .hongguo } }
     }
 
+    /// Use the currently visible home source as the initial search provider.
+    private var activeSearchSource: DramaSource {
+        switch source {
+        case .hongguo: return .hongguo
+        case .huangguo: return .huangguo
+        case .site(let site): return site
+        case .ai, .channels, .manga, .novel: return .hongguo
+        }
+    }
+
     // MARK: Header (search + filter, source bar)
 
     private var header: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                NavigationLink(value: Route.search) {
+                NavigationLink(value: Route.searchFromSource(activeSearchSource)) {
                     DSSearchBarLabel()
                         .padding(.leading, 16).frame(height: 46).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityIdentifier("home.search")
