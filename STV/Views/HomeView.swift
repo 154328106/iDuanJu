@@ -152,7 +152,10 @@ struct HomeView: View {
         case .hongguo: return .hongguo
         case .huangguo: return .huangguo
         case .site(let site): return site
-        case .ai, .channels, .manga, .novel: return .hongguo
+        case .ai:
+            if case .some(.huangguo(.ai)) = subs[.ai] { return .huangguo }
+            return .hongguo
+        case .channels, .manga, .novel: return .hongguo
         }
     }
 
